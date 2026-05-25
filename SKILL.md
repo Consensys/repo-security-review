@@ -4,7 +4,7 @@ description: >
   Full automated security review pipeline for a code repository. Use this skill
   whenever the user asks to: review a repo for security issues, run a security
   audit, find vulnerabilities in a codebase, perform a security assessment, check
-  for OWASP and OWASP API issues, scan for secrets or exposed credentials, audit dependencies
+  for OWASP Top 10 and OWASP API Top 10 issues, scan for secrets or exposed credentials, audit dependencies
   for CVEs, or analyze architecture for security flaws. Trigger even for casual
   phrasings like "can you check this repo for security issues" or "run security
   on this". This skill orchestrates 7 sequential phases: secret scanning,
