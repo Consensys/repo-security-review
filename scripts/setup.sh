@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# setup.sh — Install prerequisites for the security-review skill
+# setup.sh — Install prerequisites for the repo-security-review skill
 # Run once before first use
 
 set -e
@@ -74,7 +74,7 @@ echo ""
 echo "=== Setup complete ==="
 echo ""
 echo "Usage examples:"
-echo "  /security-review /path/to/repo"
-echo "  /security-review /path/to/repo --skip secrets,poc"
-echo "  /security-review /path/to/repo --output ~/reports/myapp.md"
-echo "  /security-review /path/to/repo --runtime --output ~/reports/myapp.md"
+echo "  /repo-security-review /path/to/repo"
+echo "  /repo-security-review /path/to/repo --skip secrets,poc"
+echo "  /repo-security-review /path/to/repo --output ~/reports/myapp.md"
+echo "  /repo-security-review /path/to/repo --runtime --output ~/reports/myapp.md"

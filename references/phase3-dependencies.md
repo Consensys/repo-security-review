@@ -9,7 +9,7 @@ pure Python project.
 
 ### Step 0: Load Tech Stack Profile
 
-Read `/tmp/security-review-{name}/tech-stack.json`.
+Read `/tmp/repo-security-review-{name}/tech-stack.json`.
 
 If that file doesn't exist (Phase 2 was skipped), run lightweight detection:
 ```bash
@@ -27,7 +27,7 @@ Use the found files to infer ecosystems.
 
 OSV-Scanner auto-detects ecosystems from lockfiles. Run it across the entire repo:
 ```bash
-osv-scanner --format json -r {repo_path} > /tmp/security-review-{name}/osv-raw.json 2>&1
+osv-scanner --format json -r {repo_path} > /tmp/repo-security-review-{name}/osv-raw.json 2>&1
 ```
 
 ### Step 2: Ecosystem-Specific Tools (only if ecosystem is confirmed present)
@@ -36,10 +36,10 @@ Use `package_ecosystems` from tech-stack.json to decide which to run:
 
 **npm / Node.js** — only if `"npm"` in `package_ecosystems`:
 ```bash
-for lockfile in $(cat /tmp/security-review-{name}/tech-stack.json | python3 -c \
+for lockfile in $(cat /tmp/repo-security-review-{name}/tech-stack.json | python3 -c \
   "import sys,json; d=json.load(sys.stdin); [print(f) for f in d.get('package_files',{}).get('npm',[])]"); do
   dir=$(dirname "{repo_path}/$lockfile")
-  cd "$dir" && npm audit --json >> /tmp/security-review-{name}/npm-audit-raw.json 2>&1
+  cd "$dir" && npm audit --json >> /tmp/repo-security-review-{name}/npm-audit-raw.json 2>&1
 done
 ```
 
@@ -47,13 +47,13 @@ done
 ```bash
 # pip-audit handles requirements.txt, Pipfile.lock, poetry.lock
 pip-audit --format json -r {requirements_file} \
-  > /tmp/security-review-{name}/pip-audit-raw.json 2>&1
+  > /tmp/repo-security-review-{name}/pip-audit-raw.json 2>&1
 ```
 
 **Java / Maven or Gradle** — only if `"maven"` in `package_ecosystems`:
 ```bash
 # grype works on compiled JARs or source
-grype dir:{repo_path} --output json > /tmp/security-review-{name}/grype-raw.json 2>&1
+grype dir:{repo_path} --output json > /tmp/repo-security-review-{name}/grype-raw.json 2>&1
 ```
 
 **Skip entirely** for ecosystems not in `package_ecosystems`. Log the reason:

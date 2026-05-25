@@ -1,5 +1,5 @@
 ---
-name: security-review
+name: repo-security-review
 description: >
   Full automated security review pipeline for a code repository. Use this skill
   whenever the user asks to: review a repo for security issues, run a security
@@ -42,7 +42,7 @@ The user provides:
 
 Parse these from `$ARGUMENTS` using the format:
 ```
-/security-review /path/to/repo [--skip phase1,phase3] [--output /path/to/report.md] [--runtime]
+/repo-security-review /path/to/repo [--skip phase1,phase3] [--output /path/to/report.md] [--runtime]
 ```
 
 ### Argument Parsing Rules
@@ -137,13 +137,13 @@ Read the agent instructions for each phase from `references/` before spawning:
 | 3 + 3b | `references/phase3-dependencies.md` |
 | 4 | `references/phase4-owasp.md` |
 | 5 (Validation + PoC) | `references/phase5-validate-and-poc.md` |
-| 6 (Report) | `references/phase7-report.md` |
+| 6 (Report) | `references/phase6-report.md` |
 
 ## Output Structure
 
 Each phase writes its findings to a working directory:
 ```
-/tmp/security-review-{repo-name}/
+/tmp/repo-security-review-{repo-name}/
 ├── tech-stack.json           ← written by Phase 2, read by Phase 3 and 4
 ├── phase1-secrets.json
 ├── phase2-architecture.json
@@ -151,7 +151,7 @@ Each phase writes its findings to a working directory:
 ├── phase3b-reachability.json
 ├── phase4-owasp.json
 ├── phase5-validated.json
-├── phase6-pocs.json
+├── phase5-pocs.json
 ├── pocs/                     ← individual PoC scripts
 │   ├── poc_O-001.py
 │   └── poc_O-002.sh
@@ -162,7 +162,7 @@ Create this directory at the start before spawning any agents.
 
 ## Tech Stack Profile (Phase 2 → downstream phases)
 
-Phase 2 must write `/tmp/security-review-{name}/tech-stack.json` in addition
+Phase 2 must write `/tmp/repo-security-review-{name}/tech-stack.json` in addition
 to its normal output. This is the key handoff document:
 
 ```json
@@ -199,9 +199,8 @@ After each phase completes, print a one-line summary:
 ✅ Phase 2 complete — 5 architectural findings | Stack: Python/Django, PostgreSQL, API-only
 ⏭️  Phase 3 skipped (--skip dependencies)
 ✅ Phase 4 complete — 8 candidates (SQLi ×2, BOLA ×3, SSRF ×1, CmdInj ×2) | Skipped: XSS (no HTML rendering), API Top 10 (not API project)
-✅ Phase 5 complete — 5 confirmed, 3 false positives filtered
-✅ Phase 6 complete — 5 PoCs generated (3 static, 2 runtime-validated)
-✅ Phase 7 complete — Report written to {output_path}
+✅ Phase 5 complete — 5 confirmed, 3 false positives filtered, 5 PoCs generated (3 static, 2 runtime-validated)
+✅ Phase 6 complete — Report written to {output_path}
 ```
 
 ## Model Selection
@@ -219,7 +218,7 @@ If a phase fails or a tool is not installed:
 
 ## Final Step
 
-1. Copy `/tmp/security-review-{name}/final-report.md` to the `--output` path
+1. Copy `/tmp/repo-security-review-{name}/final-report.md` to the `--output` path
 2. If pocs/ directory has files, also copy that directory alongside the report
 3. Print the output path clearly:
    ```

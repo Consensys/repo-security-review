@@ -256,7 +256,7 @@ If unavailable, mark `runtime_status: RUNTIME_SKIPPED` and continue.
 ```bash
 cd {repo_path}
 if [ -f "docker-compose.yml" ] || [ -f "docker-compose.yaml" ]; then
-  docker compose up -d --build 2>&1 | tee /tmp/security-review-{name}/docker-startup.log
+  docker compose up -d --build 2>&1 | tee /tmp/repo-security-review-{name}/docker-startup.log
 else
   docker build -t sec-review-target . && \
   docker run -d --name sec-review-target -p 8080:8080 sec-review-target
@@ -272,7 +272,7 @@ done
 
 ### Run the PoC script
 ```bash
-python3 /tmp/security-review-{name}/pocs/poc_{id}.py 2>&1
+python3 /tmp/repo-security-review-{name}/pocs/poc_{id}.py 2>&1
 ```
 
 Record outcome as `RUNTIME_CONFIRMED`, `RUNTIME_NOT_CONFIRMED`, or
@@ -355,9 +355,9 @@ docker compose down 2>/dev/null || \
 ```
 
 ### Individual PoC files
-Write each PoC script to `/tmp/security-review-{name}/pocs/poc_{id}.py`
+Write each PoC script to `/tmp/repo-security-review-{name}/pocs/poc_{id}.py`
 
-### phase6-pocs.json (for report builder compatibility)
+### phase5-pocs.json (for report builder compatibility)
 ```json
 {
   "phase": "poc_generation",

@@ -1,14 +1,14 @@
-# Security Review Pipeline
-# Save as: .claude/commands/security-review.md in your Claude Code project
+# Repo Security Review Pipeline
+# Save as: .claude/commands/repo-security-review.md in your Claude Code project
 #
 # Usage:
-#   /security-review --help
-#   /security-review /path/to/repo
-#   /security-review /path/to/repo --skip secrets
-#   /security-review /path/to/repo --skip architecture,dependencies
-#   /security-review /path/to/repo --output ~/reports/myapp.md
-#   /security-review /path/to/repo --runtime
-#   /security-review /path/to/repo --skip architecture --output ~/reports/myapp.md --runtime
+#   /repo-security-review --help
+#   /repo-security-review /path/to/repo
+#   /repo-security-review /path/to/repo --skip secrets
+#   /repo-security-review /path/to/repo --skip architecture,dependencies
+#   /repo-security-review /path/to/repo --output ~/reports/myapp.md
+#   /repo-security-review /path/to/repo --runtime
+#   /repo-security-review /path/to/repo --skip architecture --output ~/reports/myapp.md --runtime
 
 Run a full automated security review of a code repository.
 
@@ -23,7 +23,7 @@ Security Review — Available Phases & Skip Options
 ══════════════════════════════════════════════════
 
 Usage:
-  /security-review <repo-path> [options]
+  /repo-security-review <repo-path> [options]
 
 Options:
   --skip <phases>       Comma-separated phases to skip (see below)
@@ -75,19 +75,19 @@ Phase that always runs:
 
 Examples:
   # Full review
-  /security-review ~/repos/my-service
+  /repo-security-review ~/repos/my-service
 
   # Skip secrets and deps (quick arch + code review only)
-  /security-review ~/repos/my-service --skip secrets,dependencies
+  /repo-security-review ~/repos/my-service --skip secrets,dependencies
 
   # Architecture review only — no code-level analysis
-  /security-review ~/repos/my-service --skip dependencies,owasp
+  /repo-security-review ~/repos/my-service --skip dependencies,owasp
 
   # Full review with runtime PoC validation via Docker
-  /security-review ~/repos/my-service --runtime --output ~/reports/my-service.md
+  /repo-security-review ~/repos/my-service --runtime --output ~/reports/my-service.md
 
   # Skip arch (you already reviewed it) — deps + OWASP only
-  /security-review ~/repos/my-service --skip architecture,secrets
+  /repo-security-review ~/repos/my-service --skip architecture,secrets
 ```
 
 ---
@@ -138,7 +138,7 @@ which semgrep     && semgrep --version || echo "⚠️  semgrep not found (Phase
 ## Step 6: Create working directories
 
 ```bash
-mkdir -p /tmp/security-review-{repo-name}
+mkdir -p /tmp/repo-security-review-{repo-name}
 mkdir -p "$(dirname {output_path})"
 ```
 

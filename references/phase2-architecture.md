@@ -68,7 +68,7 @@ grep -rn "multer\|multipart\|file_upload\|FileField\|upload\|FormData" \
   --exclude-dir="node_modules" | head -10
 ```
 
-Based on findings, write `/tmp/security-review-{name}/tech-stack.json`:
+Based on findings, write `/tmp/repo-security-review-{name}/tech-stack.json`:
 ```json
 {
   "languages": ["python"],
@@ -148,7 +148,7 @@ Phase 3 and Phase 4 will not run correctly without it.
 
 ## Output Format
 
-Write to `/tmp/security-review-{name}/phase2-architecture.json`:
+Write to `/tmp/repo-security-review-{name}/phase2-architecture.json`:
 ```json
 {
   "phase": "architecture",
