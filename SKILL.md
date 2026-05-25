@@ -4,7 +4,7 @@ description: >
   Full automated security review pipeline for a code repository. Use this skill
   whenever the user asks to: review a repo for security issues, run a security
   audit, find vulnerabilities in a codebase, perform a security assessment, check
-  for OWASP issues, scan for secrets or exposed credentials, audit dependencies
+  for OWASP and OWASP API issues, scan for secrets or exposed credentials, audit dependencies
   for CVEs, or analyze architecture for security flaws. Trigger even for casual
   phrasings like "can you check this repo for security issues" or "run security
   on this". This skill orchestrates 7 sequential phases: secret scanning,
@@ -22,10 +22,10 @@ output to the next.
 ## Prerequisites
 
 Before running, ensure these CLI tools are available (install if missing):
-- `gitleaks` — secret scanning with git history
-- `osv-scanner` — dependency CVE scanning (multi-language)
-- `semgrep` — static analysis to assist OWASP scanning
-- `docker` — optional, required for runtime PoC validation only
+- `gitleaks` — secret scanning with git history.
+- `osv-scanner` — dependency CVE scanning (multi-language).
+- `semgrep` — static analysis to assist OWASP scanning.
+- `docker` — optional, required for runtime PoC validation only.
 
 Check and install:
 ```bash
