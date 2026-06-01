@@ -97,6 +97,22 @@ The skill is also triggered by natural-language requests like:
 
 ---
 
+## When to run
+
+This skill is built for **periodic, deep, whole-repo reviews** — not per-PR CI. Its value comes from full git-history secret scanning, architecture-level reasoning, and cross-file data flow analysis, all of which are wasted when scoped to a single PR diff. Running it on every commit also burns tokens analyzing files the change never touched.
+
+Good moments to trigger it:
+
+- **Release candidates / pre-launch** — strongest signal-to-cost; you can still fix what it finds before shipping
+- **Scheduled cadence** (weekly or monthly via cron or a GitHub Action) — catches dependency drift as new CVEs are published, even when code hasn't changed
+- **Major dependency upgrades or framework migrations** — surface area shifts faster than per-PR scans can track
+- **Before a pentest, or post-incident** — useful as a baseline or root-cause companion
+- **Before open-sourcing or sharing a repo externally** — last-line check for secrets, sensitive data, and obvious flaws
+
+**Complementary pattern:** pair this skill with Claude Code's built-in `/security-review` (diff-scoped) for per-PR coverage in CI. The built-in command catches regressions on the PR's actual diff cheaply and quickly; `repo-security-review` catches systemic and accumulated issues on a slower cadence. Together they cover the spectrum without duplicating cost.
+
+---
+
 ## Phase flow
 
 ```mermaid
