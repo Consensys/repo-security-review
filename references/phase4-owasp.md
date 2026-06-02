@@ -8,10 +8,10 @@ project's tech stack — don't test for SQLi in a project with no database.
 ## Step 0: Load Context
 
 Read both files before doing anything else:
-- `/tmp/repo-security-review-{name}/tech-stack.json` → gates which checks to run
-- `/tmp/repo-security-review-{name}/phase2-architecture.json` → auth model, known
+- `{repo_path}/.security-review/tech-stack.json` → gates which checks to run
+- `{repo_path}/.security-review/phase2-architecture.json` → auth model, known
   weak areas to prioritize
-- `/tmp/repo-security-review-{name}/phase3b-reachability.json` → vulnerable libs
+- `{repo_path}/.security-review/phase3b-reachability.json` → vulnerable libs
   actively used (if Phase 3 ran)
 
 If tech-stack.json doesn't exist (Phase 2 skipped), run the lightweight
@@ -76,11 +76,11 @@ and log: `ℹ️  OWASP API Top 10 skipped — project does not appear to be API
 
 ```bash
 # Use language-specific configs, not --config=auto (too noisy)
-LANG=$(cat /tmp/repo-security-review-{name}/tech-stack.json | python3 -c \
+LANG=$(cat {repo_path}/.security-review/tech-stack.json | python3 -c \
   "import sys,json; d=json.load(sys.stdin); print(d['languages'][0])")
 
 semgrep --config="p/${LANG}" --config="p/owasp-top-ten" \
-  --json --output /tmp/repo-security-review-{name}/semgrep-raw.json \
+  --json --output {repo_path}/.security-review/semgrep-raw.json \
   {repo_path} 2>/dev/null
 ```
 
@@ -202,7 +202,7 @@ Only run checks from your check plan above.
 
 ## Output Format
 
-Write to `/tmp/repo-security-review-{name}/phase4-owasp.json`:
+Write to `{repo_path}/.security-review/phase4-owasp.json`:
 ```json
 {
   "phase": "owasp_analysis",

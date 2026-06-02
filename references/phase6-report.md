@@ -2,21 +2,21 @@
 
 ## Goal
 Aggregate all phase outputs into a single, well-structured security report
-and write it to a permanent, user-specified path — not /tmp.
+and write it to the user-specified output path.
 
 ## Input Files to Read
 
 Read all that exist (some may be absent if a phase was skipped):
 ```
-/tmp/repo-security-review-{name}/tech-stack.json
-/tmp/repo-security-review-{name}/threat-model.json    ← present only if --context was used
-/tmp/repo-security-review-{name}/phase1-secrets.json
-/tmp/repo-security-review-{name}/phase2-architecture.json
-/tmp/repo-security-review-{name}/phase3-cves.json
-/tmp/repo-security-review-{name}/phase3b-reachability.json
-/tmp/repo-security-review-{name}/phase4-owasp.json
-/tmp/repo-security-review-{name}/phase5-validated.json
-/tmp/repo-security-review-{name}/phase5-pocs.json
+{repo_path}/.security-review/tech-stack.json
+{repo_path}/.security-review/threat-model.json    ← present only if --context was used
+{repo_path}/.security-review/phase1-secrets.json
+{repo_path}/.security-review/phase2-architecture.json
+{repo_path}/.security-review/phase3-cves.json
+{repo_path}/.security-review/phase3b-reachability.json
+{repo_path}/.security-review/phase4-owasp.json
+{repo_path}/.security-review/phase5-validated.json
+{repo_path}/.security-review/phase5-pocs.json
 ```
 
 **If `threat-model.json` is absent, render the report exactly as before.**
@@ -26,8 +26,8 @@ adjustments" section described below appear ONLY when that file exists.
 ## Output Paths
 
 The orchestrator passes two paths:
-- `{output_path}` — full path for `final-report.md` (e.g. `~/security-reports/myapp-2025-05-24.md`)
-- `{pocs_dir}` — sibling directory for PoC scripts (e.g. `~/security-reports/myapp-2025-05-24-pocs/`)
+- `{output_path}` — full path for `final-report.md` (e.g. `{repo_path}/.security-review/myapp-2025-05-24.md`)
+- `{pocs_dir}` — sibling directory for PoC scripts (e.g. `{repo_path}/.security-review/myapp-2025-05-24-pocs/`)
 
 ```bash
 # Create output directory
@@ -35,8 +35,8 @@ mkdir -p "$(dirname {output_path})"
 mkdir -p "{pocs_dir}"
 
 # Copy PoC scripts if they exist
-if [ -d "/tmp/repo-security-review-{name}/pocs" ]; then
-  cp -r /tmp/repo-security-review-{name}/pocs/* "{pocs_dir}/"
+if [ -d "{repo_path}/.security-review/pocs" ]; then
+  cp -r {repo_path}/.security-review/pocs/* "{pocs_dir}/"
 fi
 ```
 

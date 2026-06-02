@@ -28,7 +28,7 @@ Usage:
 Options:
   --skip <phases>       Comma-separated phases to skip (see below)
   --output <path>       Where to save the final report
-                        Default: ~/security-reports/<repo>-<date>.md
+                        Default: <repo>/.security-review/<repo>-<date>.md
   --runtime             Enable Docker-based runtime PoC validation
   --context <pairs>     Optional inline threat model used to calibrate
                         severity. Format: comma-separated key=value pairs.
@@ -110,7 +110,7 @@ Parse `$ARGUMENTS` for:
 - `--skip <phases>` → comma-separated list from: `secrets`, `architecture`,
   `dependencies`, `owasp`, `validation`
 - `--output <path>` → destination for final report markdown file
-  Default: `~/security-reports/{repo-name}-{YYYY-MM-DD}.md`
+  Default: `{repo_path}/.security-review/{repo-name}-{YYYY-MM-DD}.md`
 - `--runtime` → enable Docker-based runtime PoC validation in Phase 5
 - `--context <pairs>` → optional inline threat model as comma-separated
   `key=value` pairs. Allowed keys: `deployment_target`, `data_sensitivity`,
@@ -157,7 +157,7 @@ which semgrep     && semgrep --version || echo "⚠️  semgrep not found (Phase
 ## Step 6: Create working directories
 
 ```bash
-mkdir -p /tmp/repo-security-review-{repo-name}
+mkdir -p {repo_path}/.security-review
 mkdir -p "$(dirname {output_path})"
 ```
 

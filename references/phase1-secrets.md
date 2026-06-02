@@ -8,7 +8,7 @@ repository — including in git history, not just the current working tree.
 
 ### 1. Gitleaks (primary — scans git history)
 ```bash
-gitleaks detect --source {repo_path} --report-format json --report-path /tmp/repo-security-review-{name}/gitleaks-raw.json --no-git false
+gitleaks detect --source {repo_path} --report-format json --report-path {repo_path}/.security-review/gitleaks-raw.json --no-git false
 ```
 
 ### 2. Grep patterns (supplementary — catches what gitleaks misses)
@@ -60,7 +60,7 @@ reader decide.
 
 ## Output Format
 
-Write to `/tmp/repo-security-review-{name}/phase1-secrets.json`:
+Write to `{repo_path}/.security-review/phase1-secrets.json`:
 ```json
 {
   "phase": "secrets",

@@ -51,7 +51,7 @@ Parse these from `$ARGUMENTS` using the format:
 |----------|---------|-------------|
 | (first positional) | required | Repo path |
 | `--skip` | none | Comma-separated phase names to skip: `secrets`, `architecture`, `dependencies`, `owasp`, `validation`, `poc` |
-| `--output` | `~/security-reports/{repo}-{date}.md` | Final report output path |
+| `--output` | `{repo_path}/.security-review/{repo}-{date}.md` | Final report output path |
 | `--runtime` | false | Enable Docker-based runtime PoC validation |
 | `--context` | none | Inline `key=value,key=value` threat model used to calibrate severity. Optional — when omitted, the skill runs exactly as before (no calibration, no new report sections). See "Threat-Model Context" below. |
 
@@ -144,7 +144,7 @@ Read the agent instructions for each phase from `references/` before spawning:
 
 Each phase writes its findings to a working directory:
 ```
-/tmp/repo-security-review-{repo-name}/
+{repo_path}/.security-review/
 ├── tech-stack.json           ← written by Phase 2, read by Phase 3 and 4
 ├── threat-model.json         ← only if --context was provided
 ├── phase1-secrets.json
@@ -170,7 +170,7 @@ Create this directory at the start before spawning any agents.
 
 ## Tech Stack Profile (Phase 2 → downstream phases)
 
-Phase 2 must write `/tmp/repo-security-review-{name}/tech-stack.json` in addition
+Phase 2 must write `{repo_path}/.security-review/tech-stack.json` in addition
 to its normal output. This is the key handoff document:
 
 ```json
@@ -215,7 +215,7 @@ downstream phase, no new report sections appear. Existing users see zero
 behavior change.
 
 When `--context` **is** passed, the orchestrator parses the inline value,
-validates it, and writes `/tmp/repo-security-review-{name}/threat-model.json`.
+validates it, and writes `{repo_path}/.security-review/threat-model.json`.
 Downstream phases that find this file present apply the calibration; phases
 that don't find it behave exactly as today.
 
@@ -255,7 +255,7 @@ user-provided value can only soften severity, never tighten it further.
 
 ```text
 RAW="<value passed after --context>"
-TM_OUT=/tmp/repo-security-review-{name}/threat-model.json
+TM_OUT={repo_path}/.security-review/threat-model.json
 
 # 1. Split RAW on commas → list of pairs
 # 2. For each pair:
@@ -284,7 +284,7 @@ downstream phases skip all calibration logic.
 
 ### Output structure addition
 
-`/tmp/repo-security-review-{name}/threat-model.json` — present only when
+`{repo_path}/.security-review/threat-model.json` — present only when
 `--context` was supplied. See per-phase reference files for how each phase
 consumes it.
 
@@ -315,7 +315,7 @@ If a phase fails or a tool is not installed:
 
 ## Final Step
 
-1. Copy `/tmp/repo-security-review-{name}/final-report.md` to the `--output` path
+1. Copy `{repo_path}/.security-review/final-report.md` to the `--output` path
 2. If pocs/ directory has files, also copy that directory alongside the report
 3. Print the output path clearly:
    ```

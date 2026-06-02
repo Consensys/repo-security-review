@@ -91,7 +91,7 @@ grep -rnE "app\.listen\(|\.listen\([0-9]|PORT *= *[0-9]|port *= *[0-9]|listen *:
   --exclude-dir="node_modules" --exclude-dir="vendor" | head -10
 ```
 
-Based on findings, write `/tmp/repo-security-review-{name}/tech-stack.json`:
+Based on findings, write `{repo_path}/.security-review/tech-stack.json`:
 ```json
 {
   "languages": ["python"],
@@ -183,7 +183,7 @@ Phase 3 and Phase 4 will not run correctly without it.
 
 ## Output Format
 
-Write to `/tmp/repo-security-review-{name}/phase2-architecture.json`:
+Write to `{repo_path}/.security-review/phase2-architecture.json`:
 ```json
 {
   "phase": "architecture",
@@ -219,7 +219,7 @@ Write to `/tmp/repo-security-review-{name}/phase2-architecture.json`:
 
 ## Threat-Model Drift Detection (only if `threat-model.json` exists)
 
-Skip this section entirely if `/tmp/repo-security-review-{name}/threat-model.json`
+Skip this section entirely if `{repo_path}/.security-review/threat-model.json`
 does not exist. Existing behavior is preserved when no threat model was provided.
 
 When the file is present, read it and check the declared values against what

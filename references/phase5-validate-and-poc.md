@@ -266,10 +266,10 @@ If unavailable, mark `runtime_status: RUNTIME_SKIPPED` and continue.
 ```bash
 cd {repo_path}
 if [ -f "docker-compose.yml" ] || [ -f "docker-compose.yaml" ]; then
-  docker compose up -d --build 2>&1 | tee /tmp/repo-security-review-{name}/docker-startup.log
+  docker compose up -d --build 2>&1 | tee {repo_path}/.security-review/docker-startup.log
   RUNTIME_ENV="project"
 elif [ -f "Dockerfile" ]; then
-  PORT=$(jq -r '.runtime_hints.listen_port // 8080' /tmp/repo-security-review-{name}/tech-stack.json)
+  PORT=$(jq -r '.runtime_hints.listen_port // 8080' {repo_path}/.security-review/tech-stack.json)
   docker build -t sec-review-target . && \
   docker run -d --name sec-review-target -p ${PORT}:${PORT} sec-review-target
   RUNTIME_ENV="project"
@@ -285,7 +285,7 @@ The project may not expose `/health`. Probe in order — mark ready on the
 first response (even a 404 confirms the server is listening).
 
 ```bash
-PORT=$(jq -r '.runtime_hints.listen_port // 8080' /tmp/repo-security-review-{name}/tech-stack.json)
+PORT=$(jq -r '.runtime_hints.listen_port // 8080' {repo_path}/.security-review/tech-stack.json)
 for i in $(seq 1 12); do
   sleep 5
   for ep in /health /healthz /; do
@@ -300,7 +300,7 @@ done
 
 ### Run the PoC script
 ```bash
-python3 /tmp/repo-security-review-{name}/pocs/poc_{id}.py 2>&1
+python3 {repo_path}/.security-review/pocs/poc_{id}.py 2>&1
 ```
 
 Record outcome as `RUNTIME_CONFIRMED`, `RUNTIME_NOT_CONFIRMED`, or
@@ -312,8 +312,8 @@ cd {repo_path}
 docker compose down 2>/dev/null || \
   (docker stop sec-review-target && docker rm sec-review-target) 2>/dev/null
 # If synthesis was used, also tear down the synthesized stack
-if [ -d "/tmp/repo-security-review-{name}/synthesized" ]; then
-  (cd /tmp/repo-security-review-{name}/synthesized && docker compose down) 2>/dev/null
+if [ -d "{repo_path}/.security-review/synthesized" ]; then
+  (cd {repo_path}/.security-review/synthesized && docker compose down) 2>/dev/null
 fi
 ```
 
@@ -323,13 +323,13 @@ fi
 
 Only attempted when `--runtime` is set AND no `Dockerfile` / `docker-compose.yml`
 is present in the repo. The synthesized files are written to
-`/tmp/repo-security-review-{name}/synthesized/` and persist after the run so
+`{repo_path}/.security-review/synthesized/` and persist after the run so
 the user can re-run the validation later.
 
 ### Step 1: Load runtime hints
 
 ```bash
-TS=/tmp/repo-security-review-{name}/tech-stack.json
+TS={repo_path}/.security-review/tech-stack.json
 LANG=$(jq -r '.languages[0] // "unknown"' $TS)
 FRAMEWORK=$(jq -r '.frameworks[0] // "none"' $TS)
 ENTRY=$(jq -r '.runtime_hints.entry_point // ""' $TS)
@@ -415,7 +415,7 @@ services:
 ### Step 6: Bring it up
 
 ```bash
-SYN=/tmp/repo-security-review-{name}/synthesized
+SYN={repo_path}/.security-review/synthesized
 cp $SYN/Dockerfile {repo_path}/Dockerfile.synth
 cd $SYN
 docker compose up -d --build 2>&1 | tee $SYN/startup.log
@@ -466,7 +466,7 @@ swallow a failure.
 
 ## Part 4: Contextual Severity Calibration (only if `threat-model.json` exists)
 
-Skip this section entirely if `/tmp/repo-security-review-{name}/threat-model.json`
+Skip this section entirely if `{repo_path}/.security-review/threat-model.json`
 does not exist. When the file is absent, Phase 5 emits `severity` as it always
 has and no calibration columns appear anywhere.
 
@@ -483,7 +483,7 @@ Context softens; it never sharpens.
 ### Step 1: Load the effective threat model
 
 ```bash
-TM=/tmp/repo-security-review-{name}/threat-model.json
+TM={repo_path}/.security-review/threat-model.json
 [ -f "$TM" ] || { echo "no threat model; skipping calibration"; exit 0; }
 
 # Apply drift overrides if Phase 2 wrote any — these revert specific
@@ -652,7 +652,7 @@ other two fields are absent.
 ```
 
 ### Individual PoC files
-Write each PoC script to `/tmp/repo-security-review-{name}/pocs/poc_{id}.py`
+Write each PoC script to `{repo_path}/.security-review/pocs/poc_{id}.py`
 
 ### phase5-pocs.json (for report builder compatibility)
 ```json

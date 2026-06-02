@@ -79,7 +79,7 @@ In any Claude Code session (CLI or Desktop), invoke the skill on a local reposit
 | Flag | Default | Effect |
 |------|---------|--------|
 | `--skip <phases>` | none | Comma-separated: `secrets`, `architecture`, `dependencies`, `owasp`, `validation` |
-| `--output <path>` | `~/security-reports/<repo>-<date>.md` | Final report destination |
+| `--output <path>` | `<repo>/.security-review/<repo>-<date>.md` | Final report destination |
 | `--runtime` | off | Docker-based runtime PoC validation in Phase 5 |
 | `--context <pairs>` | none | Optional inline threat model (`key=value,key=value`) used to calibrate severity. See "Adding context" below |
 | `--help` | — | Show usage |
@@ -168,10 +168,10 @@ flowchart TD
 
 ## Output
 
-Working artifacts are written to `/tmp/repo-security-review-<repo-name>/`:
+Working artifacts are written to `<repo>/.security-review/`:
 
 ```text
-/tmp/repo-security-review-<name>/
+<repo>/.security-review/
 ├── tech-stack.json
 ├── phase1-secrets.json
 ├── phase2-architecture.json
@@ -294,7 +294,7 @@ When `--runtime` is set, Phase 5 stands the app up in Docker and executes each c
 2. **Project's `Dockerfile`** — built and run on the port detected by Phase 2.
 3. **Synthesized environment** — if neither file exists, Phase 5 generates a minimal `Dockerfile` (and a `docker-compose.yml` with a DB sidecar if the project uses one) from the tech-stack profile, and runs the PoC against that.
 
-Synthesized files are written to `/tmp/repo-security-review-<repo>/synthesized/` and **persist after the run** so you can re-run validation later (`cd synthesized/ && docker compose up`).
+Synthesized files are written to `<repo>/.security-review/synthesized/` and **persist after the run** so you can re-run validation later (`cd .security-review/synthesized/ && docker compose up`).
 
 **Limits of the synthesized path — be aware before trusting the result:**
 
@@ -313,4 +313,4 @@ If you don't need runtime confirmation, omit `--runtime`. The PoCs are still rea
 - **Phase 1 reports nothing** — check `gitleaks version`; if missing, rerun `scripts/setup.sh`.
 - **Phase 3 misses ecosystems** — Phase 2 may have under-detected the tech stack. Re-run without `--skip architecture`.
 - **`--runtime` does nothing** — confirm `docker --version` works and Docker Desktop is running.
-- **`--runtime` produces `RUNTIME_SYNTHESIS_FAILED`** — the repo had no Docker setup and synthesis tried but failed. Check `/tmp/repo-security-review-<repo>/synthesized/startup.log` for the build/startup log.
+- **`--runtime` produces `RUNTIME_SYNTHESIS_FAILED`** — the repo had no Docker setup and synthesis tried but failed. Check `<repo>/.security-review/synthesized/startup.log` for the build/startup log.
