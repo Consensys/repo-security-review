@@ -74,6 +74,8 @@ In any Claude Code session (CLI or Desktop), invoke the skill on a local reposit
 /repo-security-review /path/to/repo --output ~/reports/myapp.md
 /repo-security-review /path/to/repo --runtime
 /repo-security-review /path/to/repo --skip architecture --output ~/reports/myapp.md --runtime
+/repo-security-review /path/to/repo --model balanced
+/repo-security-review /path/to/repo --model fast --skip secrets
 ```
 
 | Flag | Default | Effect |
@@ -81,6 +83,7 @@ In any Claude Code session (CLI or Desktop), invoke the skill on a local reposit
 | `--skip <phases>` | none | Comma-separated: `secrets`, `architecture`, `dependencies`, `owasp`, `validation` |
 | `--output <path>` | `<repo>/.security-review/<repo>-<date>.md` | Final report destination |
 | `--runtime` | off | Docker-based runtime PoC validation in Phase 5 |
+| `--model <tier>` | `thorough` | `thorough` (most capable + extended thinking), `balanced` (no extended thinking, ~40% cheaper), `fast` (lightweight models, lowest cost) |
 | `--context <pairs>` | none | Optional inline threat model (`key=value,key=value`) used to calibrate severity. See "Adding context" below |
 | `--help` | — | Show usage |
 

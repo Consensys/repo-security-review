@@ -30,6 +30,13 @@ Options:
   --output <path>       Where to save the final report
                         Default: <repo>/.security-review/<repo>-<date>.md
   --runtime             Enable Docker-based runtime PoC validation
+  --model <tier>        Model quality/cost tier (default: thorough)
+                        thorough  — most capable model + extended thinking
+                                    (highest quality, highest cost)
+                        balanced  — most capable model, no extended thinking
+                                    (~40% cheaper, slightly less deep arch analysis)
+                        fast      — lightweight models throughout
+                                    (lowest cost, may miss subtle issues)
   --context <pairs>     Optional inline threat model used to calibrate
                         severity. Format: comma-separated key=value pairs.
                         Keys: deployment_target, data_sensitivity,
@@ -52,7 +59,7 @@ Phases you can skip (--skip <name>):
                     trust boundaries, auth model, data flow, infra config,
                     missing security controls. Also produces the tech-stack
                     profile used by all downstream phases.
-                    Model: Claude Opus with extended thinking.
+                    Model: most capable available (tier-dependent).
 
   dependencies      Phase 3 · Finds known CVEs in project dependencies
                     using lockfiles. Only scans ecosystems present in the
@@ -112,6 +119,8 @@ Parse `$ARGUMENTS` for:
 - `--output <path>` → destination for final report markdown file
   Default: `{repo_path}/.security-review/{repo-name}-{YYYY-MM-DD}.md`
 - `--runtime` → enable Docker-based runtime PoC validation in Phase 5
+- `--model <tier>` → `thorough` (default) | `balanced` | `fast`
+  Abort with a clear error if any other value is given.
 - `--context <pairs>` → optional inline threat model as comma-separated
   `key=value` pairs. Allowed keys: `deployment_target`, `data_sensitivity`,
   `auth_required_to_reach`. Allowed values per key are listed in SKILL.md.
@@ -138,6 +147,7 @@ ls "$REPO_PATH" 2>/dev/null || { echo "❌ Repo path not found: $REPO_PATH"; exi
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Phases running:   {list}
 Phases skipped:   {list or "none"}
+Model tier:       {thorough / balanced / fast}
 Output:           {output_path}
 Runtime PoC:      {enabled / disabled}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
