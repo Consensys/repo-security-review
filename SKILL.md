@@ -155,6 +155,12 @@ Each phase writes its findings to a working directory:
 ├── pocs/                     ← individual PoC scripts
 │   ├── poc_O-001.py
 │   └── poc_O-002.sh
+├── synthesized/              ← only if Phase 5 synthesized a Dockerfile (--runtime
+│   │                           on a repo without its own Docker setup)
+│   ├── Dockerfile
+│   ├── docker-compose.yml    ← only if has_database: true
+│   ├── synthesis-notes.md
+│   └── startup.log
 └── final-report.md           ← copied to --output path at end
 ```
 
@@ -184,9 +190,17 @@ to its normal output. This is the key handoff document:
   "package_files": {
     "pypi": ["requirements.txt"],
     "npm": ["frontend/package-lock.json"]
+  },
+  "runtime_hints": {
+    "entry_point": "app.py",
+    "listen_port": 5000
   }
 }
 ```
+
+`runtime_hints` is best-effort and consumed only by Phase 5 when `--runtime`
+is set on a repo without its own Dockerfile / docker-compose. Fields may be
+`null`; Phase 5 falls back to framework defaults or declines synthesis.
 
 If Phase 2 is skipped, Phase 3 and Phase 4 must run their own lightweight
 tech-stack detection before proceeding (see each phase's reference file).

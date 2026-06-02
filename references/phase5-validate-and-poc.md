@@ -14,7 +14,7 @@ You must be isolated from Phase 2 and Phase 4's agent context. You receive:
 - The path to `phase4-owasp.json` (you read it yourself)
 - The repo path to re-examine code independently
 - The `--runtime` flag (if set)
-- `tech-stack.json` path
+- `tech-stack.json` path (includes `runtime_hints` used for Dockerfile synthesis)
 
 Re-read the relevant source code from scratch for each finding. Do not
 assume Phase 4 was correct. Your validation must be independent.
@@ -252,20 +252,48 @@ docker --version && docker compose version || echo "Docker not available"
 
 If unavailable, mark `runtime_status: RUNTIME_SKIPPED` and continue.
 
-### Stand up the application
+### Decision tree — how to stand up the application
+
+```
+1. docker-compose.yml / docker-compose.yaml exists  → use it as-is
+2. Dockerfile exists                                → docker build + run
+3. Neither exists                                   → SYNTHESIZE (see Part 3a)
+4. Synthesis declines or fails                      → RUNTIME_SKIPPED
+```
+
+### Use the project's Docker setup (cases 1 and 2)
+
 ```bash
 cd {repo_path}
 if [ -f "docker-compose.yml" ] || [ -f "docker-compose.yaml" ]; then
   docker compose up -d --build 2>&1 | tee /tmp/repo-security-review-{name}/docker-startup.log
-else
+  RUNTIME_ENV="project"
+elif [ -f "Dockerfile" ]; then
+  PORT=$(jq -r '.runtime_hints.listen_port // 8080' /tmp/repo-security-review-{name}/tech-stack.json)
   docker build -t sec-review-target . && \
-  docker run -d --name sec-review-target -p 8080:8080 sec-review-target
+  docker run -d --name sec-review-target -p ${PORT}:${PORT} sec-review-target
+  RUNTIME_ENV="project"
+else
+  # Neither exists — go to Part 3a
+  :
 fi
+```
 
-# Wait for readiness (up to 60s)
+### Readiness probe (apply after any startup path)
+
+The project may not expose `/health`. Probe in order — mark ready on the
+first response (even a 404 confirms the server is listening).
+
+```bash
+PORT=$(jq -r '.runtime_hints.listen_port // 8080' /tmp/repo-security-review-{name}/tech-stack.json)
 for i in $(seq 1 12); do
   sleep 5
-  curl -sf http://localhost:8080/health 2>/dev/null && echo "Ready" && break
+  for ep in /health /healthz /; do
+    curl -sf -o /dev/null -w "%{http_code}" "http://localhost:${PORT}${ep}" 2>/dev/null && \
+      echo "Ready on ${ep}" && break 2
+  done
+  # Fallback: bare TCP connect
+  (echo > /dev/tcp/localhost/${PORT}) 2>/dev/null && echo "TCP ready" && break
   echo "Waiting... $i/12"
 done
 ```
@@ -282,8 +310,157 @@ Record outcome as `RUNTIME_CONFIRMED`, `RUNTIME_NOT_CONFIRMED`, or
 ```bash
 cd {repo_path}
 docker compose down 2>/dev/null || \
-  (docker stop sec-review-target && docker rm sec-review-target)
+  (docker stop sec-review-target && docker rm sec-review-target) 2>/dev/null
+# If synthesis was used, also tear down the synthesized stack
+if [ -d "/tmp/repo-security-review-{name}/synthesized" ]; then
+  (cd /tmp/repo-security-review-{name}/synthesized && docker compose down) 2>/dev/null
+fi
 ```
+
+---
+
+## Part 3a: Dockerfile Synthesis (fallback when no project Docker setup exists)
+
+Only attempted when `--runtime` is set AND no `Dockerfile` / `docker-compose.yml`
+is present in the repo. The synthesized files are written to
+`/tmp/repo-security-review-{name}/synthesized/` and persist after the run so
+the user can re-run the validation later.
+
+### Step 1: Load runtime hints
+
+```bash
+TS=/tmp/repo-security-review-{name}/tech-stack.json
+LANG=$(jq -r '.languages[0] // "unknown"' $TS)
+FRAMEWORK=$(jq -r '.frameworks[0] // "none"' $TS)
+ENTRY=$(jq -r '.runtime_hints.entry_point // ""' $TS)
+PORT=$(jq -r '.runtime_hints.listen_port // 0' $TS)
+HAS_DB=$(jq -r '.has_database // false' $TS)
+DBS=$(jq -r '.database_types[]?' $TS)
+```
+
+If `entry_point` or `listen_port` is missing, re-run the heuristics from
+[phase2-architecture.md](phase2-architecture.md) "Runtime hints" block.
+Use framework defaults if still unknown:
+Flask 5000, Django 8000, FastAPI/Uvicorn 8000, Express 3000, Rails 3000.
+
+### Step 2: Decide whether to synthesize
+
+| Condition | Action |
+|---|---|
+| `(language, framework)` matches a template below | Proceed |
+| Stack not in template table | `RUNTIME_SKIPPED` · reason `unsupported_stack_for_synthesis` |
+| `has_database: true` with single supported DB (postgres/mysql/mongodb/redis) | Synthesize compose with DB sidecar |
+| `has_database: true` with multiple DBs or exotic services (Elasticsearch, Kafka, custom) | `RUNTIME_SKIPPED` · reason `multi_service_dependency_not_synthesizable` |
+
+### Step 3: Template lookup
+
+Pick the matching template, fill in `{entry}`, `{port}`, lockfile path,
+and the install command derived from `package_files`.
+
+| Stack | Base image | Install | CMD |
+|---|---|---|---|
+| python + flask | `python:3.11-slim` | `pip install --no-cache-dir -r requirements.txt` | `python {entry}` |
+| python + fastapi | `python:3.11-slim` | same | `uvicorn {module}:app --host 0.0.0.0 --port {port}` |
+| python + django | `python:3.11-slim` | same + `python manage.py migrate --noinput` | `python manage.py runserver 0.0.0.0:{port}` |
+| node + express / generic | `node:20-slim` | `npm ci --omit=dev` (fallback `npm install`) | `npm start` or `node {entry}` |
+| node + next | `node:20-slim` | `npm ci && npm run build` | `npm start` |
+| go + (any) | `golang:1.22` | `go build -o /app .` | `/app` |
+| ruby + rails | `ruby:3.3-slim` | `bundle install` | `rails server -b 0.0.0.0 -p {port}` |
+
+For Python/FastAPI, `{module}` is `entry_point` without the `.py` extension.
+
+### Step 4: Write `synthesized/Dockerfile`
+
+Example for `(python, flask)`:
+
+```dockerfile
+FROM python:3.11-slim
+WORKDIR /app
+COPY . /app
+RUN pip install --no-cache-dir -r requirements.txt
+EXPOSE {port}
+CMD ["python", "{entry}"]
+```
+
+### Step 5: If `has_database: true`, write `synthesized/docker-compose.yml`
+
+Pick the image and standard connection env vars based on the first matching DB:
+
+| DB | Image | Env var name | Standard value |
+|---|---|---|---|
+| postgresql | `postgres:15-alpine` | `DATABASE_URL` | `postgresql://postgres:postgres@db:5432/app` |
+| mysql | `mysql:8` | `DATABASE_URL` | `mysql://root:root@db:3306/app` |
+| mongodb | `mongo:7` | `MONGO_URL` | `mongodb://db:27017/app` |
+| redis | `redis:7-alpine` | `REDIS_URL` | `redis://db:6379` |
+
+Compose skeleton:
+
+```yaml
+services:
+  app:
+    build: {repo_path}
+    ports: ["{port}:{port}"]
+    environment:
+      - {ENV_VAR_NAME}={standard_value}
+    depends_on:
+      db: { condition: service_healthy }
+  db:
+    image: {db_image}
+    healthcheck:
+      test: [{db_specific_check}]
+      interval: 5s
+      retries: 12
+```
+
+### Step 6: Bring it up
+
+```bash
+SYN=/tmp/repo-security-review-{name}/synthesized
+cp $SYN/Dockerfile {repo_path}/Dockerfile.synth
+cd $SYN
+docker compose up -d --build 2>&1 | tee $SYN/startup.log
+RUNTIME_ENV="synthesized"
+```
+
+Then apply the readiness probe from Part 3. If the probe fails within 60s,
+capture `docker compose logs --tail=20` to `$SYN/startup.log` and mark
+`RUNTIME_SYNTHESIS_FAILED`.
+
+### Step 7: Write `synthesized/synthesis-notes.md`
+
+Brief markdown noting:
+- Template chosen and why (`stack`, `entry_point`, `listen_port`)
+- DB sidecar added (if any) and the connection env vars used
+- Any heuristics that fell back to defaults
+- Re-run instructions: `cd synthesized/ && docker compose up`
+
+### Step 8: Honest reporting of synthesis limits
+
+The synthesized environment comes up empty — no migrations beyond what the
+Dockerfile runs, no seed users, no fixtures. PoCs that need pre-existing
+state (BOLA needs `usera@test.com`, broken-auth tests need a registered
+account) will fail at their setup step.
+
+If the PoC's setup step (e.g. login) returns a non-2xx, do **not** record
+`RUNTIME_NOT_CONFIRMED` — record `RUNTIME_NOT_CONFIRMED` with the note
+`"synthesized environment lacks seeded data — PoC requires test user/record
+that does not exist in the empty synthesized DB"`. This prevents false
+negatives from being treated as evidence of safety.
+
+---
+
+## Part 3b: Failure mode reference
+
+Every runtime path must terminate in one of these statuses. Never silently
+swallow a failure.
+
+| Status | Trigger | Required notes |
+|---|---|---|
+| `RUNTIME_CONFIRMED` | PoC ran, success indicator observed | — |
+| `RUNTIME_NOT_CONFIRMED` | PoC ran, success indicator not observed | If synthesized env, flag the seed-data limitation |
+| `RUNTIME_SKIPPED` | Docker unavailable / stack unsupported / multi-service deps | Reason code |
+| `RUNTIME_SYNTHESIS_FAILED` | Synthesis attempted but build / startup failed | Last 20 lines of `docker compose logs` |
+| `RUNTIME_ERROR` | Unexpected failure during PoC execution | Exception or exit code |
 
 ---
 
@@ -306,6 +483,8 @@ docker compose down 2>/dev/null || \
   "phase": "validation_and_poc",
   "runtime_validation_attempted": false,
   "runtime_skipped_reason": "Docker not available",
+  "runtime_environment": null,
+  "synthesis_notes": null,
   "summary": {
     "total_input": 0,
     "confirmed": 0,
@@ -313,7 +492,8 @@ docker compose down 2>/dev/null || \
     "false_positives": 0,
     "needs_runtime": 0,
     "pocs_generated": 0,
-    "runtime_confirmed": 0
+    "runtime_confirmed": 0,
+    "runtime_synthesis_failed": 0
   },
   "findings": [
     {

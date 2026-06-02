@@ -66,6 +66,29 @@ grep -rn "requests\.\|fetch(\|axios\.\|http\.get\|urllib\|httpx\." \
 grep -rn "multer\|multipart\|file_upload\|FileField\|upload\|FormData" \
   {repo_path} --include="*.py" --include="*.js" --include="*.ts" -l \
   --exclude-dir="node_modules" | head -10
+
+# --- Runtime hints (used by Phase 5 when synthesizing a Dockerfile) ---
+
+# Likely entry point
+# Node: read package.json scripts.start or main field
+[ -f "{repo_path}/package.json" ] && \
+  grep -E '"(start|main)"' {repo_path}/package.json
+
+# Python: files with a __main__ guard, in priority order
+for f in app.py main.py server.py run.py manage.py wsgi.py asgi.py; do
+  [ -f "{repo_path}/$f" ] && grep -l '__name__.*__main__\|app = \|application = ' "{repo_path}/$f"
+done
+
+# Go: file containing func main()
+grep -rln "^func main()" {repo_path} --include="*.go" --exclude-dir="vendor" | head -3
+
+# Procfile (Heroku-style)
+[ -f "{repo_path}/Procfile" ] && cat {repo_path}/Procfile
+
+# Likely listen port
+grep -rnE "app\.listen\(|\.listen\([0-9]|PORT *= *[0-9]|port *= *[0-9]|listen *:[0-9]|bind.*0\.0\.0\.0:" \
+  {repo_path} --include="*.py" --include="*.js" --include="*.ts" --include="*.go" \
+  --exclude-dir="node_modules" --exclude-dir="vendor" | head -10
 ```
 
 Based on findings, write `/tmp/repo-security-review-{name}/tech-stack.json`:
@@ -87,9 +110,21 @@ Based on findings, write `/tmp/repo-security-review-{name}/tech-stack.json`:
   "docker_compose_path": "docker-compose.yml",
   "package_files": {
     "pypi": ["requirements.txt"]
+  },
+  "runtime_hints": {
+    "entry_point": "app.py",
+    "listen_port": 5000
   }
 }
 ```
+
+`runtime_hints` is best-effort and used only by Phase 5 if it needs to synthesize
+a Dockerfile (when `--runtime` is set and the repo has no Dockerfile or
+docker-compose.yml). Set fields to `null` when detection is ambiguous — Phase 5
+will fall back to framework defaults or decline synthesis.
+
+Defaults Phase 5 will assume when `listen_port` is null:
+Flask 5000, Django 8000, FastAPI/Uvicorn 8000, Express 3000, Rails 3000.
 
 **Write this file before proceeding to security analysis.**
 Phase 3 and Phase 4 will not run correctly without it.

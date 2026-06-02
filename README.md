@@ -209,9 +209,31 @@ repo-security-review/
 
 ---
 
+## Runtime PoC validation (`--runtime`)
+
+When `--runtime` is set, Phase 5 stands the app up in Docker and executes each confirmed PoC against it. There are three paths, picked in order:
+
+1. **Project's `docker-compose.yml`** — used as-is.
+2. **Project's `Dockerfile`** — built and run on the port detected by Phase 2.
+3. **Synthesized environment** — if neither file exists, Phase 5 generates a minimal `Dockerfile` (and a `docker-compose.yml` with a DB sidecar if the project uses one) from the tech-stack profile, and runs the PoC against that.
+
+Synthesized files are written to `/tmp/repo-security-review-<repo>/synthesized/` and **persist after the run** so you can re-run validation later (`cd synthesized/ && docker compose up`).
+
+**Limits of the synthesized path — be aware before trusting the result:**
+
+- Covers stateless web apps on common stacks (Flask, FastAPI, Django, Express, Next.js, Go, Rails). Unsupported stacks fall back to `RUNTIME_SKIPPED`.
+- A single supported DB (Postgres / MySQL / MongoDB / Redis) is synthesized as a sidecar with default credentials. Multi-DB or exotic dependencies (Elasticsearch, Kafka, custom services) are not synthesized — `RUNTIME_SKIPPED`.
+- The synthesized DB comes up **empty** — no migrations beyond what the Dockerfile runs, no seed users. PoCs that require pre-existing accounts or records (BOLA, broken auth, IDOR) will fail at the login step and are reported as `RUNTIME_NOT_CONFIRMED` with a note explicitly flagging the seed-data limitation, so you don't mistake a setup failure for evidence of safety.
+- Runtime-confirmed findings against a synthesized environment are labeled as such in the final report — they're a strong signal, but not a substitute for running the PoC against the project's real setup.
+
+If you don't need runtime confirmation, omit `--runtime`. The PoCs are still real, runnable scripts you can execute manually against any live instance later.
+
+---
+
 ## Troubleshooting
 
 - **"Skill not found"** — verify the clone path is exactly `~/.claude/skills/repo-security-review/` and that `SKILL.md` sits at its root.
 - **Phase 1 reports nothing** — check `gitleaks version`; if missing, rerun `scripts/setup.sh`.
 - **Phase 3 misses ecosystems** — Phase 2 may have under-detected the tech stack. Re-run without `--skip architecture`.
 - **`--runtime` does nothing** — confirm `docker --version` works and Docker Desktop is running.
+- **`--runtime` produces `RUNTIME_SYNTHESIS_FAILED`** — the repo had no Docker setup and synthesis tried but failed. Check `/tmp/repo-security-review-<repo>/synthesized/startup.log` for the build/startup log.
