@@ -30,6 +30,14 @@ Options:
   --output <path>       Where to save the final report
                         Default: ~/security-reports/<repo>-<date>.md
   --runtime             Enable Docker-based runtime PoC validation
+  --context <pairs>     Optional inline threat model used to calibrate
+                        severity. Format: comma-separated key=value pairs.
+                        Keys: deployment_target, data_sensitivity,
+                        auth_required_to_reach. All keys optional; omitted
+                        keys fall back to strict defaults. Omit the flag
+                        entirely for default behavior (no calibration).
+                        Example:
+                        --context deployment_target=internal_tool,data_sensitivity=internal,auth_required_to_reach=true
   --help                Show this help
 
 Phases you can skip (--skip <name>):
@@ -88,6 +96,9 @@ Examples:
 
   # Skip arch (you already reviewed it) — deps + OWASP only
   /repo-security-review ~/repos/my-service --skip architecture,secrets
+
+  # Full review with severity calibrated to an internal tool
+  /repo-security-review ~/repos/my-service --context deployment_target=internal_tool,data_sensitivity=internal,auth_required_to_reach=true
 ```
 
 ---
@@ -101,6 +112,14 @@ Parse `$ARGUMENTS` for:
 - `--output <path>` → destination for final report markdown file
   Default: `~/security-reports/{repo-name}-{YYYY-MM-DD}.md`
 - `--runtime` → enable Docker-based runtime PoC validation in Phase 5
+- `--context <pairs>` → optional inline threat model as comma-separated
+  `key=value` pairs. Allowed keys: `deployment_target`, `data_sensitivity`,
+  `auth_required_to_reach`. Allowed values per key are listed in SKILL.md.
+  When set, the orchestrator validates the pairs and writes a normalized
+  `threat-model.json` to the working directory. When unset, the skill
+  behaves exactly as before — no calibration logic runs anywhere. Any
+  unknown key, unknown enum value, malformed pair, or duplicate key aborts
+  the run with a clear error message.
 
 Apply cascade rules silently:
 - `--skip owasp` → add `validation` to skip list

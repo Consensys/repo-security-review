@@ -9,6 +9,7 @@ and write it to a permanent, user-specified path — not /tmp.
 Read all that exist (some may be absent if a phase was skipped):
 ```
 /tmp/repo-security-review-{name}/tech-stack.json
+/tmp/repo-security-review-{name}/threat-model.json    ← present only if --context was used
 /tmp/repo-security-review-{name}/phase1-secrets.json
 /tmp/repo-security-review-{name}/phase2-architecture.json
 /tmp/repo-security-review-{name}/phase3-cves.json
@@ -17,6 +18,10 @@ Read all that exist (some may be absent if a phase was skipped):
 /tmp/repo-security-review-{name}/phase5-validated.json
 /tmp/repo-security-review-{name}/phase5-pocs.json
 ```
+
+**If `threat-model.json` is absent, render the report exactly as before.**
+The threat-model header, dual-severity columns, and "Context-driven
+adjustments" section described below appear ONLY when that file exists.
 
 ## Output Paths
 
@@ -50,10 +55,37 @@ Write the report to `{output_path}` directly — not to /tmp.
 
 ---
 
+## Assumed Threat Model
+{Include this section ONLY if threat-model.json exists. Omit entirely otherwise.}
+
+**Source**: {user-provided | default (strict)}
+
+| Dimension | Declared | Effective (after drift checks) |
+|---|---|---|
+| Deployment target | {deployment_target} | {effective value — same as declared unless drift override applied} |
+| Data sensitivity | {data_sensitivity} | {effective} |
+| Auth required to reach | {auth_required_to_reach} | {effective} |
+
+{If any drift_overrides were applied, add this note:}
+> ⚠️ Drift detected: {dimension} was declared `{declared}` but observed code
+> indicates `{observed}`. The effective threat model for this dimension has
+> been reverted to the strict default. See finding A-XXX for details.
+
+{Brief explanation:}
+The threat model above was used to calibrate severity. All findings show both
+a CVSS-style base severity (technical impact, context-free) and a contextual
+severity (after applying threat-model softeners). The full list of adjustments
+is in "Context-Driven Adjustments" below.
+
+---
+
 ## Executive Summary
 
 {2-3 sentence summary of overall security posture. Be direct — name the
-most critical issues and the overall risk level.}
+most critical issues and the overall risk level. If calibration was applied,
+mention how many findings were downgraded vs the base severity.}
+
+{Use the table below when threat-model.json is absent (no calibration):}
 
 | Severity | Secrets | Architecture | CVEs | Code-Level | Total |
 |----------|---------|--------------|------|------------|-------|
@@ -61,6 +93,16 @@ most critical issues and the overall risk level.}
 | 🟠 High | N | N | N | N | **N** |
 | 🟡 Medium | N | N | N | N | **N** |
 | 🟢 Low | N | N | N | N | **N** |
+
+{Use this table instead when threat-model.json exists. Two columns per
+section: B = cvss_base_severity, C = contextual_severity.}
+
+| Severity | Secrets | Architecture | CVEs | Code-Level (B / C) | Total (B / C) |
+|----------|---------|--------------|------|--------------------|---------------|
+| 🔴 Critical | N | N | N | N / N | **N / N** |
+| 🟠 High | N | N | N | N / N | **N / N** |
+| 🟡 Medium | N | N | N | N / N | **N / N** |
+| 🟢 Low | N | N | N | N / N | **N / N** |
 
 **Immediate Actions Required**:
 {bullet list of P0 findings — only Critical/High severity}
@@ -171,6 +213,27 @@ Showing work — these were investigated and ruled out:
 
 ---
 
+## Section 5b: Context-Driven Adjustments
+{Include this section ONLY if threat-model.json exists. Omit entirely otherwise.}
+
+Severity calibration applied to the findings above, based on the assumed
+threat model. Every adjustment is shown so the calibration is auditable.
+
+| ID | Type | Base | Contextual | Softeners Applied |
+|----|------|------|-----------|-------------------|
+| O-001 | SQL Injection | 🔴 Critical | 🟡 Medium | `deployment_target: internal_tool` (−1), `auth_required_to_reach: true` (−1) |
+| O-005 | SSRF | 🔴 Critical | 🟠 High | `deployment_target: internal_tool` (−1) |
+
+**Rules used:**
+- `contextual_severity` is never higher than `cvss_base_severity` — context softens, never sharpens.
+- Floor is LOW; nothing drops below.
+- Anyone consuming this report for CVSS-based tracking should read the **Base** column.
+
+{If drift_overrides were applied in Phase 2, append:}
+**Drift overrides active for this run:** {list dimensions, e.g. `data_sensitivity (declared none → reverted to pii)`}. The declared values for these dimensions were NOT used in calibration because Phase 2 detected contradicting code.
+
+---
+
 ## Section 6: Skipped Phases
 
 {If any phases were skipped via --skip flag:}
@@ -219,6 +282,9 @@ Showing work — these were investigated and ruled out:
 - Redact ALL secret values — show only first 4 and last 3 chars
 - Clearly mark which sections were skipped and why
 - PoC code in fenced code blocks with language tags
+- When calibration is active, finding headers show both severities, e.g.
+  `🟡 O-001 · SQL Injection · Base: 🔴 Critical · Contextual: 🟡 Medium`.
+  When calibration is not active, show a single severity as today.
 
 ## Delivery
 

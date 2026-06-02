@@ -214,3 +214,105 @@ Write to `/tmp/repo-security-review-{name}/phase2-architecture.json`:
 - `poc_needed` is always `false` for architectural findings
 - Reference specific files and line numbers as evidence
 - Be concrete about impact — avoid vague "could lead to security issues"
+
+---
+
+## Threat-Model Drift Detection (only if `threat-model.json` exists)
+
+Skip this section entirely if `/tmp/repo-security-review-{name}/threat-model.json`
+does not exist. Existing behavior is preserved when no threat model was provided.
+
+When the file is present, read it and check the declared values against what
+the code actually shows. The goal is to prevent a user from silently softening
+findings by declaring a falsely permissive context.
+
+### Check 1: `data_sensitivity` drift
+
+If `data_sensitivity` is `none` or `internal`, look for code patterns
+indicating more sensitive data is handled:
+
+```bash
+# PII / regulated indicators
+grep -rniE "ssn|social.security|tax.id|date.of.birth|passport|driver.license|\
+patient|medical|diagnosis|credit.card|cvv|card.number|iban|routing.number|\
+biometric|fingerprint" {repo_path} \
+  --include="*.py" --include="*.js" --include="*.ts" --include="*.go" \
+  --include="*.java" --include="*.rb" --include="*.sql" \
+  --exclude-dir="node_modules" --exclude-dir=".git" \
+  --exclude-dir="vendor" --exclude-dir="tests" --exclude-dir="test" | head -20
+
+# Schema indicators
+grep -rniE "email.*varchar|email.*string|address.*varchar|phone.*varchar" \
+  {repo_path} --include="*.sql" --include="*.py" --include="*.js" \
+  --include="*.ts" | head -10
+```
+
+If concrete PII-handling code is found while `data_sensitivity` is declared
+`none`, emit a drift finding (see "Drift finding shape" below).
+
+### Check 2: `auth_required_to_reach` drift
+
+If `auth_required_to_reach` is `true`, scan for publicly reachable routes
+with no authentication middleware/decorator:
+
+```bash
+# Look for route definitions without nearby auth decorators
+# (Phase 4 will do deeper analysis; this is a coarse drift check only)
+grep -rniE "@app\.route|@router\.|app\.get\(|app\.post\(|@RequestMapping|\
+def get\(self|def post\(self" {repo_path} \
+  --include="*.py" --include="*.js" --include="*.ts" --include="*.java" \
+  --exclude-dir="node_modules" --exclude-dir=".git" | head -30
+```
+
+For each route, check whether the surrounding 10 lines contain auth markers
+(`@login_required`, `@requires_auth`, `verifyToken`, middleware references,
+etc.). If multiple unauthenticated public routes exist while
+`auth_required_to_reach` is `true`, emit a drift finding.
+
+### Check 3: `deployment_target` — no automatic drift check
+
+There is no reliable code signal for whether something is a CLI, internal
+service, or public service. Take this field at face value.
+
+### Drift finding shape
+
+Drift findings are normal Phase 2 findings with category `threat_model_drift`:
+
+```json
+{
+  "id": "A-XXX",
+  "category": "threat_model_drift",
+  "severity": "MEDIUM",
+  "title": "Declared threat model contradicts observed code",
+  "description": "Threat model declares data_sensitivity=none, but code reads PII columns (users.email, users.ssn).",
+  "evidence": ["models/user.py:L12-L18", "schema.sql:L45"],
+  "impact": "Findings calibrated against the declared sensitivity will under-report exposure risk.",
+  "remediation": "Update the threat-model file to reflect actual data handling, OR remove the PII-handling code.",
+  "poc_needed": false,
+  "drift_dimension": "data_sensitivity",
+  "declared": "none",
+  "observed": "pii"
+}
+```
+
+### Side effect on the threat model
+
+When drift is detected for a dimension, write a `drift_overrides` block into
+`threat-model.json` so downstream phases revert that dimension to the strict
+default for this run:
+
+```json
+{
+  "source": "user",
+  "deployment_target": "internal_tool",
+  "data_sensitivity": "none",
+  "auth_required_to_reach": true,
+  "drift_overrides": {
+    "data_sensitivity": "pii"
+  }
+}
+```
+
+Phase 5 reads `drift_overrides` and uses those values (not the declared ones)
+for the affected dimensions when computing `contextual_severity`. This ensures
+users cannot silence findings by passing a falsely permissive context.

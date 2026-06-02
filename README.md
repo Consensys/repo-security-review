@@ -81,6 +81,7 @@ In any Claude Code session (CLI or Desktop), invoke the skill on a local reposit
 | `--skip <phases>` | none | Comma-separated: `secrets`, `architecture`, `dependencies`, `owasp`, `validation` |
 | `--output <path>` | `~/security-reports/<repo>-<date>.md` | Final report destination |
 | `--runtime` | off | Docker-based runtime PoC validation in Phase 5 |
+| `--context <pairs>` | none | Optional inline threat model (`key=value,key=value`) used to calibrate severity. See "Adding context" below |
 | `--help` | — | Show usage |
 
 **Cascade rules** (applied silently):
@@ -206,6 +207,82 @@ repo-security-review/
 │   └── setup.sh                          # Installs gitleaks, osv-scanner, semgrep
 └── assets/                   # (reserved for future templates/diagrams)
 ```
+
+---
+
+## Adding context (`--context`)
+
+By default the skill assumes the worst case — a public, anonymous-facing service handling PII — and grades severity accordingly. That's the right baseline when nothing is known about deployment, but it produces noise on internal tools (e.g. flagging "no rate limit on /login" for a CLI that only runs on a developer's laptop) and under-calibrates true public services.
+
+The `--context` flag lets you provide a small inline threat model. The skill uses it to compute a **contextual severity** alongside the base CVSS-style severity, so every finding shows both: the technical impact (context-free) and the calibrated impact (after context).
+
+**Opt-in only.** If you don't pass `--context`, **nothing changes** — the skill runs exactly as before. No new file is written, no calibration runs, no new report sections appear.
+
+### Inline syntax
+
+Comma-separated `key=value` pairs. All three keys are optional; missing keys fall back to strict defaults. Order doesn't matter.
+
+```text
+--context deployment_target=internal_tool,data_sensitivity=internal,auth_required_to_reach=true
+```
+
+You can pass any subset:
+
+```text
+--context deployment_target=local_cli
+--context data_sensitivity=none,auth_required_to_reach=true
+```
+
+### Allowed keys and values
+
+| Key | Allowed values |
+|---|---|
+| `deployment_target` | `local_cli` \| `internal_tool` \| `public_service` |
+| `data_sensitivity` | `none` \| `internal` \| `pii` |
+| `auth_required_to_reach` | `true` \| `false` |
+
+Any unknown key, unknown value, malformed pair, or duplicate key aborts the run with a clear error — there is no silent fallback for invalid input.
+
+### Strict defaults (when a key is omitted)
+
+| Field | Default | Rationale |
+|---|---|---|
+| `deployment_target` | `public_service` | Hardest reachable case |
+| `data_sensitivity` | `pii` | Assume sensitive data |
+| `auth_required_to_reach` | `false` | Pessimistic |
+
+**Invariant:** defaults are the most pessimistic value for each axis. A value you provide can only soften severity, never tighten it. `contextual_severity` is never higher than `cvss_base_severity`.
+
+### How severity is calibrated
+
+Each axis applies an independent softener to the base severity. Floor: nothing drops below LOW.
+
+| Axis | Effect |
+|---|---|
+| `deployment_target: local_cli` | −2 tiers, all findings |
+| `deployment_target: internal_tool` | −1 tier, all findings |
+| `deployment_target: public_service` | no change |
+| `data_sensitivity: none` | −1 tier, only for data-exposure findings (SQLi, IDOR, info disclosure) |
+| `data_sensitivity: internal` / `pii` | no change |
+| `auth_required_to_reach: true` | −1 tier, only for pre-auth findings (unauthenticated SSRF, anonymous SQLi) |
+| `auth_required_to_reach: false` | no change |
+
+### Drift detection — you can't downgrade findings by lying
+
+Phase 2 cross-checks two of the three axes against actual code:
+
+- If you declare `data_sensitivity: none` but Phase 2 finds PII columns (`users.ssn`, `patients.email`, etc.), it emits a "threat model drift" finding **and** reverts that dimension to the strict default for this run.
+- If you declare `auth_required_to_reach: true` but Phase 2 finds public routes with no auth middleware, same thing.
+- `deployment_target` has no reliable code signal — it's taken at face value.
+
+This means the worst case from a wrong context file is "a finding shows up as MEDIUM with a visible note explaining it was downgraded" — never "a finding disappears."
+
+### Report changes when calibration is active
+
+- New header section "Assumed Threat Model" showing what was used.
+- Severity matrix shows both `Base` and `Contextual` columns.
+- New "Section 5b: Context-Driven Adjustments" listing every finding whose severity changed and why.
+- For CVSS-based downstream tooling, read the `Base` column and ignore the contextual one.
 
 ---
 

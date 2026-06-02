@@ -53,6 +53,7 @@ Parse these from `$ARGUMENTS` using the format:
 | `--skip` | none | Comma-separated phase names to skip: `secrets`, `architecture`, `dependencies`, `owasp`, `validation`, `poc` |
 | `--output` | `~/security-reports/{repo}-{date}.md` | Final report output path |
 | `--runtime` | false | Enable Docker-based runtime PoC validation |
+| `--context` | none | Inline `key=value,key=value` threat model used to calibrate severity. Optional — when omitted, the skill runs exactly as before (no calibration, no new report sections). See "Threat-Model Context" below. |
 
 If no repo path is provided, ask the user before proceeding.
 
@@ -145,6 +146,7 @@ Each phase writes its findings to a working directory:
 ```
 /tmp/repo-security-review-{repo-name}/
 ├── tech-stack.json           ← written by Phase 2, read by Phase 3 and 4
+├── threat-model.json         ← only if --context was provided
 ├── phase1-secrets.json
 ├── phase2-architecture.json
 ├── phase3-cves.json
@@ -204,6 +206,87 @@ is set on a repo without its own Dockerfile / docker-compose. Fields may be
 
 If Phase 2 is skipped, Phase 3 and Phase 4 must run their own lightweight
 tech-stack detection before proceeding (see each phase's reference file).
+
+## Threat-Model Context (optional, opt-in)
+
+Calibration is **fully opt-in**. When `--context` is **not** passed, the skill
+runs unchanged — no `threat-model.json` is written, no new logic runs in any
+downstream phase, no new report sections appear. Existing users see zero
+behavior change.
+
+When `--context` **is** passed, the orchestrator parses the inline value,
+validates it, and writes `/tmp/repo-security-review-{name}/threat-model.json`.
+Downstream phases that find this file present apply the calibration; phases
+that don't find it behave exactly as today.
+
+### Inline syntax
+
+Comma-separated `key=value` pairs. All three keys are optional and order does
+not matter. Whitespace around `=` and `,` is trimmed.
+
+```
+--context deployment_target=internal_tool,data_sensitivity=internal,auth_required_to_reach=true
+```
+
+There is no file-path form. The schema is small and fixed (three keys, all
+enum-valued or boolean), so inline is the only input format.
+
+### Allowed keys and values
+
+| Key | Allowed values |
+|---|---|
+| `deployment_target` | `local_cli` \| `internal_tool` \| `public_service` |
+| `data_sensitivity` | `none` \| `internal` \| `pii` |
+| `auth_required_to_reach` | `true` \| `false` |
+
+### Strict defaults — applied to any missing key
+
+| Field | Default | Rationale |
+|---|---|---|
+| `deployment_target` | `public_service` | Hardest reachable case |
+| `data_sensitivity` | `pii` | Assume sensitive data |
+| `auth_required_to_reach` | `false` | Pessimistic |
+
+**Invariant: defaults are the most pessimistic value for each axis.** A
+user-provided value can only soften severity, never tighten it further.
+`contextual_severity` is never higher than `cvss_base_severity`.
+
+### Orchestrator steps when `--context` is set
+
+```text
+RAW="<value passed after --context>"
+TM_OUT=/tmp/repo-security-review-{name}/threat-model.json
+
+# 1. Split RAW on commas → list of pairs
+# 2. For each pair:
+#    - split on '=' (exactly once); trim whitespace
+#    - reject if not exactly two non-empty parts → "❌ invalid pair: <pair>"
+#    - reject if key not in {deployment_target, data_sensitivity, auth_required_to_reach}
+#    - reject if value not in the allowed list for that key
+#    - reject duplicate keys
+# 3. Fill missing keys with strict defaults above.
+# 4. Coerce auth_required_to_reach value to boolean.
+# 5. Write JSON to $TM_OUT:
+#    {
+#      "source": "user",
+#      "deployment_target": "...",
+#      "data_sensitivity": "...",
+#      "auth_required_to_reach": true|false
+#    }
+```
+
+All validation errors must abort the run with a clear message that names the
+offending key, value, and the allowed alternatives. Do not silently fall back
+to defaults on validation errors.
+
+If `--context` is absent: do nothing. `threat-model.json` is not created and
+downstream phases skip all calibration logic.
+
+### Output structure addition
+
+`/tmp/repo-security-review-{name}/threat-model.json` — present only when
+`--context` was supplied. See per-phase reference files for how each phase
+consumes it.
 
 ## Progress Updates
 

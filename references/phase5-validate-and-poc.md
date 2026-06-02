@@ -464,6 +464,123 @@ swallow a failure.
 
 ---
 
+## Part 4: Contextual Severity Calibration (only if `threat-model.json` exists)
+
+Skip this section entirely if `/tmp/repo-security-review-{name}/threat-model.json`
+does not exist. When the file is absent, Phase 5 emits `severity` as it always
+has and no calibration columns appear anywhere.
+
+When the file is present, every confirmed finding gets **two** severity values:
+
+- `cvss_base_severity` — the technical severity assuming worst-case exposure.
+  This is what Phase 4 already produces. Copy it through unchanged.
+- `contextual_severity` — the same finding's severity after applying the
+  threat-model softeners below.
+
+**Invariant: `contextual_severity` is never higher than `cvss_base_severity`.**
+Context softens; it never sharpens.
+
+### Step 1: Load the effective threat model
+
+```bash
+TM=/tmp/repo-security-review-{name}/threat-model.json
+[ -f "$TM" ] || { echo "no threat model; skipping calibration"; exit 0; }
+
+# Apply drift overrides if Phase 2 wrote any — these revert specific
+# dimensions to the strict default for this run.
+DEPLOY=$(jq -r '.drift_overrides.deployment_target // .deployment_target' $TM)
+DATA=$(jq -r '.drift_overrides.data_sensitivity // .data_sensitivity' $TM)
+AUTH=$(jq -r '.drift_overrides.auth_required_to_reach // .auth_required_to_reach' $TM)
+```
+
+### Step 2: Apply axis softeners
+
+Each axis subtracts severity tiers independently. Tiers, low to high:
+`LOW` → `MEDIUM` → `HIGH` → `CRITICAL`.
+
+Floor: nothing drops below `LOW`. Ceiling: never above `cvss_base_severity`.
+
+#### Axis 1: `deployment_target`
+
+| Value | Effect | Applies to |
+|---|---|---|
+| `public_service` | no change | all findings |
+| `internal_tool` | −1 tier | all findings |
+| `local_cli` | −2 tiers | all findings |
+
+#### Axis 2: `data_sensitivity` (only for data-exposure findings)
+
+Data-exposure findings include: SQL/NoSQL injection, IDOR/BOLA, information
+disclosure, sensitive data in logs, mass assignment, broken object-property
+authorization. Does NOT apply to: command injection, SSRF (unless leaking
+metadata), authentication bypass for actions other than data read.
+
+| Value | Effect on data-exposure findings |
+|---|---|
+| `pii` | no change |
+| `internal` | no change |
+| `none` | −1 tier |
+
+#### Axis 3: `auth_required_to_reach` (only for pre-auth findings)
+
+Pre-auth findings are those exploitable without first authenticating to the
+service. Phase 4 should flag this; if unclear, check the data flow notes from
+Step 1 of validation.
+
+| Value | Effect on pre-auth findings |
+|---|---|
+| `false` | no change |
+| `true` | −1 tier |
+
+#### Composition
+
+Softeners stack. Example: a CRITICAL pre-auth SQLi against PII columns, on a
+`local_cli` (−2) with `auth_required_to_reach: true` (−1, pre-auth) and
+`data_sensitivity: none` (would be −1, but this is a data-exposure finding,
+so it applies) = CRITICAL − 4 tiers → LOW (clamped at floor).
+
+### Step 3: Record the adjustment per finding
+
+For each finding, capture WHY the severity changed so the report is auditable:
+
+```json
+{
+  "original_id": "O-001",
+  "cvss_base_severity": "CRITICAL",
+  "contextual_severity": "MEDIUM",
+  "severity_adjustment": {
+    "applied": true,
+    "softeners": [
+      {"axis": "deployment_target", "value": "internal_tool", "delta_tiers": -1},
+      {"axis": "auth_required_to_reach", "value": true, "delta_tiers": -1, "reason": "pre-auth finding gated by login"}
+    ],
+    "drift_overrides_applied": []
+  }
+}
+```
+
+When no threat model exists, omit `cvss_base_severity`, `contextual_severity`,
+and `severity_adjustment` entirely — emit only the unchanged `severity` field
+as today.
+
+### Step 4: Update summary counters
+
+When calibration is active, the summary gains:
+
+```json
+"summary": {
+  "...existing counters...",
+  "calibrated": true,
+  "downgraded_count": 0,
+  "drift_overrides_active": ["data_sensitivity"]
+}
+```
+
+When calibration is not active (no threat model), `calibrated: false` and the
+other two fields are absent.
+
+---
+
 ## PoC Quality Requirements
 
 1. Real values from the codebase — actual paths, parameter names, HTTP methods
