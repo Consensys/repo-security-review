@@ -119,6 +119,7 @@ enum-valued or boolean), so inline is the only input format.
 | `deployment_target` | `local_cli` \| `internal_tool` \| `public_service` |
 | `data_sensitivity` | `none` \| `internal` \| `pii` |
 | `auth_required_to_reach` | `true` \| `false` |
+| `include_readme` | `true` \| `false` |
 
 #### Strict defaults — applied to any missing key
 
@@ -127,6 +128,7 @@ enum-valued or boolean), so inline is the only input format.
 | `deployment_target` | `public_service` | Hardest reachable case |
 | `data_sensitivity` | `pii` | Assume sensitive data |
 | `auth_required_to_reach` | `false` | Pessimistic |
+| `include_readme` | `false` | README not used for project context by default |
 
 **Invariant: defaults are the most pessimistic value for each axis.** A
 user-provided value can only soften severity, never tighten it further.
@@ -142,18 +144,22 @@ TM_OUT={repo_path}/.security-review/threat-model.json
 # 2. For each pair:
 #    - split on '=' (exactly once); trim whitespace
 #    - reject if not exactly two non-empty parts → "❌ invalid pair: <pair>"
-#    - reject if key not in {deployment_target, data_sensitivity, auth_required_to_reach}
+#    - reject if key not in {deployment_target, data_sensitivity, auth_required_to_reach, include_readme}
 #    - reject if value not in the allowed list for that key
 #    - reject duplicate keys
 # 3. Fill missing keys with strict defaults above.
-# 4. Coerce auth_required_to_reach value to boolean.
+# 4. Coerce auth_required_to_reach and include_readme values to boolean.
 # 5. Write JSON to $TM_OUT:
 #    {
 #      "source": "user",
 #      "deployment_target": "...",
 #      "data_sensitivity": "...",
-#      "auth_required_to_reach": true|false
+#      "auth_required_to_reach": true|false,
+#      "include_readme": true|false
 #    }
+# 6. When include_readme is true: pass the repo's README.md path to Phase 2
+#    (and Phase 4) so agents can read it for project context. When false,
+#    agents must not read README.md for context.
 ```
 
 All validation errors must abort the run with a clear message that names the
