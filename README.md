@@ -122,9 +122,8 @@ Good moments to trigger it:
 ```mermaid
 flowchart TD
     Start([/repo-security-review &lt;repo&gt;/]) --> P1
-    Start --> P2
 
-    subgraph FINDER["FINDER LAYER (independent subagents)"]
+    subgraph FINDER["FINDER LAYER (sequential subagents)"]
         P1[Phase 1 · Secret Scanning<br/>gitleaks + grep]
         P2[Phase 2 · Architectural Analysis<br/>Opus + extended thinking]
         TS[(tech-stack.json)]
@@ -132,10 +131,12 @@ flowchart TD
         P3b[Phase 3b · Reachability Validation]
         P4[Phase 4 · OWASP Code Scan<br/>semgrep + LLM]
 
+        P1 --> P2
         P2 --> TS
         TS --> P3
-        TS --> P4
         P3 --> P3b
+        P3b --> P4
+        TS -. also read by .-> P4
     end
 
     P4 -. file path only .-> P5
@@ -162,7 +163,8 @@ flowchart TD
 
 **Key invariants of the flow:**
 
-- Phase 2's `tech-stack.json` gates Phases 3 and 4 — irrelevant checks (e.g. SQLi when there is no DB, API Top 10 when the project is not an API) are skipped automatically.
+- All phases run **strictly sequentially**: P1 → P2 → P3 → P3b → P4 → P5 → P6. No phase starts before the previous one finishes.
+- Phase 2's `tech-stack.json` gates Phases 3 and 4 — irrelevant checks (e.g. SQLi when there is no DB, API Top 10 when the project is not an API) are skipped automatically. Phase 4 also consumes Phase 3b's reachability data and must run after Phase 3b completes.
 - The arrow from Phase 4 to Phase 5 is **file-path only**. Phase 5 reads `phase4-owasp.json` as untrusted input and re-validates each finding from scratch — this is the trust boundary that filters false positives.
 - PoC generation is gated *inside* Phase 5: a finding that fails validation never gets a PoC.
 - Phase 6 always runs (even if upstream phases were skipped) and notes what was skipped and why.

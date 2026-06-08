@@ -326,7 +326,7 @@ After each phase completes, print a one-line summary:
 ⏭️  Phase 3 skipped (--skip dependencies)
 ✅ Phase 4 complete — 8 candidates (SQLi ×2, BOLA ×3, SSRF ×1, CmdInj ×2) | Skipped: XSS (no HTML rendering), API Top 10 (not API project)
 ✅ Phase 5 complete — 5 confirmed, 3 false positives filtered, 5 PoCs generated (3 static, 2 runtime-validated)
-✅ Phase 6 complete — Report written to {output_path}
+✅ Phase 6 complete — Report written to {repo_path}/.security-review/final-report.md
 ```
 
 ## Error Handling
