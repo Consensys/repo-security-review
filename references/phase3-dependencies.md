@@ -11,7 +11,11 @@ pure Python project.
 
 Read `{repo_path}/.security-review/tech-stack.json`.
 
-If that file doesn't exist (Phase 2 was skipped), run lightweight detection:
+If that file doesn't exist (Phase 2 was skipped), run lightweight detection
+and **write a minimal substitute** before continuing. Step 2's bash scripts
+open `tech-stack.json` directly and will throw `FileNotFoundError` if it
+is absent.
+
 ```bash
 find {repo_path} -maxdepth 4 \( \
   -name "package-lock.json" -o -name "yarn.lock" -o -name "pnpm-lock.yaml" \
@@ -21,7 +25,33 @@ find {repo_path} -maxdepth 4 \( \
   -o -name "Gemfile.lock" \
 \) -not -path "*/node_modules/*" -not -path "*/.git/*"
 ```
-Use the found files to infer ecosystems.
+
+Map each found file to an ecosystem:
+
+| Found file | `package_ecosystems` entry | `package_files` group |
+|-----------|--------------------------|----------------------|
+| `package-lock.json` / `yarn.lock` / `pnpm-lock.yaml` | `npm` | `npm` |
+| `requirements*.txt` / `Pipfile.lock` / `poetry.lock` | `pypi` | `pypi` |
+| `pom.xml` / `build.gradle` | `maven` | `maven` |
+| `go.sum` | `go` | `go` |
+| `Cargo.lock` | `cargo` | `cargo` |
+| `Gemfile.lock` | `rubygems` | `rubygems` |
+
+Write the result to `{repo_path}/.security-review/tech-stack.json` (store
+paths relative to `{repo_path}`). All other tech-stack fields may be
+omitted — Phase 3 only reads `package_ecosystems` and `package_files`.
+
+Example for a repo with `requirements.txt` at root and `package-lock.json`
+under `frontend/`:
+```json
+{
+  "package_ecosystems": ["pypi", "npm"],
+  "package_files": {
+    "pypi": ["requirements.txt"],
+    "npm": ["frontend/package-lock.json"]
+  }
+}
+```
 
 ### Step 1: Run OSV-Scanner (always — handles all ecosystems)
 

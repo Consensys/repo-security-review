@@ -87,8 +87,15 @@ LANG=$(python3 -c \
   "import json; d=json.load(open('{repo_path}/.security-review/tech-stack.json')); \
    langs=d.get('languages',[]); print(langs[0] if langs else '')" 2>/dev/null)
 
+# Map tech-stack language names to Semgrep registry pack names.
+# Go's registry pack is p/golang, not p/go — all others match their language name.
+case "$LANG" in
+  go) SEMGREP_LANG="golang" ;;
+  *)  SEMGREP_LANG="$LANG" ;;
+esac
+
 if [ -n "$LANG" ]; then
-  semgrep --config="p/${LANG}" --config="p/owasp-top-ten" \
+  semgrep --config="p/${SEMGREP_LANG}" --config="p/owasp-top-ten" \
     --json --output {repo_path}/.security-review/semgrep-raw.json \
     {repo_path} 2>/dev/null
 else
