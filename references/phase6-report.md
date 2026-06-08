@@ -141,23 +141,35 @@ section: B = cvss_base_severity, C = contextual_severity.}
 ### Ecosystems Scanned
 {list from phase3-cves.json ecosystems_scanned and ecosystems_skipped}
 
-### Reachable CVEs (Prioritize These)
+Group CVE findings by priority (P0 first), then by effective severity within each group.
 
-#### 🔴 C-001 · {cve_id} · {package}@{version} · CVSS {score}
+For each finding include the enrichment badges inline in the heading:
+- `🚨 KEV` — if `in_kev: true`
+- `⚡ EPSS {score*100:.1f}%` — always show if epss_score is not null
+- Omit badge if the corresponding fetch failed (null value) and add a note at section end
+
+#### 🔴 C-001 · {cve_id} · {package}@{version} · CVSS {score} · 🚨 KEV · ⚡ EPSS 97.5%
+- **Priority**: P0
 - **Fixed In**: `{fixed_version}`
 - **Reachability**: ✅ Confirmed reachable
   - Import: `{import_site}`
   - Call site: `{call_site}`
   - Entry point: `{entry_point}`
+- **Exploitation Signal**: In CISA KEV (added {kev_date_added}) — confirmed active exploitation in the wild. EPSS {epss_percentile*100:.1f}th percentile.
 - **Description**: {description}
 - **Remediation**: `{package_manager} upgrade {package} to {fixed_version}`
 
-### Unreachable CVEs (Lower Priority — Still Remediate)
-
-#### 🟡 C-005 · {cve_id} · {package}@{version} · CVSS {score}
+#### 🟡 C-005 · {cve_id} · {package}@{version} · CVSS {score} · ⚡ EPSS 0.3%
+- **Priority**: P3
 - **Fixed In**: `{fixed_version}`
 - **Reachability**: ℹ️ Not reachable — {reason}
+- **Exploitation Signal**: Not in KEV. EPSS {epss_percentile*100:.1f}th percentile — rarely exploited in the wild.
 - **Remediation**: `{package_manager} upgrade {package} to {fixed_version}`
+
+{If epss_fetched or kev_fetched is false in phase3-cves.json enrichment block, add:}
+> ⚠️ Enrichment note: {EPSS / KEV / both} data could not be fetched during this run
+> ({epss_fetch_error / kev_fetch_error}). Findings above reflect CVSS + reachability
+> only. Re-run when network access is available for full prioritization signal.
 
 ---
 
@@ -262,6 +274,8 @@ threat model. Every adjustment is shown so the calibration is auditable.
 | Secret Scanning | gitleaks {version} + grep patterns | ✅ Ran / ⏭️ Skipped |
 | Architecture | Claude Opus (extended thinking) | ✅ Ran / ⏭️ Skipped |
 | CVE Scanning | osv-scanner {version} | ✅ Ran / ⏭️ Skipped |
+| EPSS Enrichment | FIRST.org EPSS API | ✅ Fetched / ⚠️ Unavailable |
+| KEV Enrichment | CISA Known Exploited Vulnerabilities | ✅ Fetched / ⚠️ Unavailable |
 | Reachability | Static call-graph analysis | ✅ Ran / ⏭️ Skipped |
 | OWASP Analysis | semgrep + Claude Sonnet | ✅ Ran / ⏭️ Skipped |
 | Validation | Static data flow tracing | ✅ Ran / ⏭️ Skipped |

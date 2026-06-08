@@ -67,6 +67,32 @@ grype dir:{repo_path} --output json > {repo_path}/.security-review/grype-raw.jso
 - Deduplicate by CVE ID
 - Keep highest CVSS score if same CVE from multiple sources
 
+### Step 4: EPSS + KEV Enrichment
+
+Enrich every CVE with two external signals before writing output.
+
+**EPSS scores** — batch fetch from FIRST.org (one HTTP call for all CVEs):
+```bash
+CVE_LIST=$(jq -r '[.findings[].cve_id] | join(",")' \
+  {repo_path}/.security-review/phase3-cves-raw.json)
+curl -sf "https://api.first.org/data/v1/epss?cve=${CVE_LIST}" \
+  -o {repo_path}/.security-review/epss-raw.json \
+  || echo '{"data":[]}' > {repo_path}/.security-review/epss-raw.json
+```
+
+Response shape per CVE: `{ "cve": "CVE-...", "epss": "0.975", "percentile": "0.999" }`
+
+If the API is unreachable, set `epss_score: null` and `epss_percentile: null` on all findings and note the failure — do not abort the phase.
+
+**CISA KEV catalog** — download the full list (one HTTP call):
+```bash
+curl -sf "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json" \
+  -o {repo_path}/.security-review/kev-catalog.json \
+  || echo '{"vulnerabilities":[]}' > {repo_path}/.security-review/kev-catalog.json
+```
+
+Cross-reference each CVE against the `vulnerabilities[].cveID` field. If the catalog is unreachable, set `in_kev: null` on all findings and note the failure.
+
 ### Output: phase3-cves.json
 ```json
 {
@@ -75,9 +101,16 @@ grype dir:{repo_path} --output json > {repo_path}/.security-review/grype-raw.jso
   "ecosystems_skipped": [
     {"ecosystem": "npm", "reason": "not present in tech-stack.json"}
   ],
+  "enrichment": {
+    "epss_fetched": true,
+    "kev_fetched": true,
+    "epss_fetch_error": null,
+    "kev_fetch_error": null
+  },
   "summary": {
     "total_dependencies_scanned": 0,
     "total_cves_found": 0,
+    "in_kev": 0,
     "critical": 0,
     "high": 0,
     "medium": 0,
@@ -95,6 +128,10 @@ grype dir:{repo_path} --output json > {repo_path}/.security-review/grype-raw.jso
       "description": "Remote code execution via malformed input in X",
       "affected_function": "packageName.vulnerableFunction()",
       "ecosystem": "pypi",
+      "epss_score": 0.97548,
+      "epss_percentile": 0.99977,
+      "in_kev": true,
+      "kev_date_added": "2021-12-10",
       "reachable": null
     }
   ]
@@ -168,6 +205,8 @@ grep -rn '"{module_path}"' {repo_path} --include="*.go" --exclude-dir=".git"
         "entry_point": "routes/upload.py:L18 (POST /api/upload)"
       },
       "effective_severity": "CRITICAL",
+      "priority": "P0",
+      "priority_rationale": "In KEV + reachable",
       "notes": "Used in file upload handler with user-controlled input"
     }
   ]
@@ -175,6 +214,24 @@ grep -rn '"{module_path}"' {repo_path} --include="*.go" --exclude-dir=".git"
 ```
 
 ### Severity Adjustment Rules
-- Reachable → keep original CVSS severity
-- Unreachable → downgrade one level (CRITICAL→HIGH, HIGH→MEDIUM, etc.)
-- Indeterminate → keep original severity with a warning note
+
+Apply in order — the first matching rule wins.
+
+| Condition | Effective Severity | Priority |
+|---|---|---|
+| `in_kev: true` AND reachable | Keep CVSS severity (floor: HIGH) | **P0** |
+| `in_kev: true` AND unreachable/indeterminate | Keep CVSS severity (floor: HIGH) | **P1** — KEV overrides reachability confidence |
+| `epss_score >= 0.7` AND reachable | Keep CVSS severity | **P1** |
+| `epss_score >= 0.7` AND unreachable | Keep CVSS severity (no downgrade) | **P1** — high exploitation likelihood overrides reachability |
+| reachable AND `epss_score < 0.7` | Keep CVSS severity | **P1/P2** (CRITICAL/HIGH → P1, MEDIUM/LOW → P2) |
+| unreachable AND `epss_score >= 0.1` | Downgrade one level | **P2** |
+| unreachable AND `epss_score < 0.1` | Downgrade two levels | **P3** |
+| indeterminate (any EPSS) | Keep CVSS severity with warning | **P2** |
+| `epss_score: null` or `in_kev: null` (fetch failed) | Apply reachability rules only, note missing enrichment | per reachability |
+
+**KEV floor rule**: a CVE in KEV is never reported below HIGH effective severity, regardless of CVSS base score or reachability. Active exploitation in the wild makes it a real threat independent of local code paths.
+
+**EPSS interpretation**:
+- `>= 0.7` (top ~3% of all CVEs) — actively targeted; treat as reachable even if static analysis says otherwise
+- `0.1–0.7` — moderate exploitation interest; reachability drives the call
+- `< 0.1` — rarely exploited; unreachable paths can be deprioritised aggressively
