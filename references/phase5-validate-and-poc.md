@@ -398,7 +398,9 @@ Compose skeleton:
 ```yaml
 services:
   app:
-    build: {repo_path}
+    build:
+      context: {repo_path}
+      dockerfile: {repo_path}/.security-review/synthesized/Dockerfile
     ports: ["{port}:{port}"]
     environment:
       - {ENV_VAR_NAME}={standard_value}
@@ -412,11 +414,13 @@ services:
       retries: 12
 ```
 
+`context: {repo_path}` makes `COPY . /app` in the Dockerfile pick up the full repo
+source. `dockerfile:` points to the synthesized file without touching the repo root.
+
 ### Step 6: Bring it up
 
 ```bash
 SYN={repo_path}/.security-review/synthesized
-cp $SYN/Dockerfile {repo_path}/Dockerfile.synth
 cd $SYN
 docker compose up -d --build 2>&1 | tee $SYN/startup.log
 RUNTIME_ENV="synthesized"

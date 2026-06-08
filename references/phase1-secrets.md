@@ -15,7 +15,9 @@ gitleaks detect --source {repo_path} --report-format json --report-path {repo_pa
 Run these against the working tree:
 ```bash
 # Generic high-entropy strings in assignment context
-grep -rn --include="*.env*" --include="*.config*" --include="*.json" --include="*.yaml" --include="*.yml" --include="*.toml" "" {repo_path}
+grep -rEn "(key|token|secret|password|credential|auth)\s*[:=]\s*['\"]?[A-Za-z0-9+/]{32,}['\"]?" {repo_path} \
+  --include="*.env*" --include="*.config*" --include="*.json" --include="*.yaml" --include="*.yml" --include="*.toml" \
+  --exclude-dir=".git" --exclude-dir="node_modules" --exclude-dir="vendor"
 
 # Common secret patterns
 grep -rEn "(password|passwd|pwd|secret|api_key|apikey|access_token|auth_token|private_key|client_secret)\s*[:=]\s*['\"][^'\"]{8,}" {repo_path} \

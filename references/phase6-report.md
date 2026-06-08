@@ -23,24 +23,15 @@ Read all that exist (some may be absent if a phase was skipped):
 The threat-model header, dual-severity columns, and "Context-driven
 adjustments" section described below appear ONLY when that file exists.
 
-## Output Paths
+## Output Path
 
-The orchestrator passes two paths:
-- `{output_path}` — full path for `final-report.md` (e.g. `{repo_path}/.security-review/myapp-2025-05-24.md`)
-- `{pocs_dir}` — sibling directory for PoC scripts (e.g. `{repo_path}/.security-review/myapp-2025-05-24-pocs/`)
+Write the report to the fixed working-directory path:
 
-```bash
-# Create output directory
-mkdir -p "$(dirname {output_path})"
-mkdir -p "{pocs_dir}"
-
-# Copy PoC scripts if they exist
-if [ -d "{repo_path}/.security-review/pocs" ]; then
-  cp -r {repo_path}/.security-review/pocs/* "{pocs_dir}/"
-fi
+```
+{repo_path}/.security-review/final-report.md
 ```
 
-Write the report to `{output_path}` directly — not to /tmp.
+The orchestrator owns the final copy step — Phase 6 must not write to `--output` directly and must not call `present_files`. Copying to `--output` and surfacing the file to the user happens after this phase returns.
 
 ---
 
@@ -302,11 +293,9 @@ threat model. Every adjustment is shown so the calibration is auditable.
 
 ## Delivery
 
-After writing the report:
+After writing the report, confirm the file was written:
 ```bash
-echo ""
-echo "📄 Security report saved to: {output_path}"
-if [ -d "{pocs_dir}" ] && [ "$(ls -A {pocs_dir})" ]; then
-  echo "📁 PoC scripts saved to:    {pocs_dir}"
-fi
+echo "✅ Phase 6 complete — report written to {repo_path}/.security-review/final-report.md"
 ```
+
+Do not copy to `--output`, do not call `present_files`. The orchestrator performs those steps.

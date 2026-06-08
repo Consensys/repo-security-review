@@ -62,19 +62,23 @@ grype dir:{repo_path} --output json > {repo_path}/.security-review/grype-raw.jso
 ℹ️  Skipping pip-audit — no pypi ecosystem detected
 ```
 
-### Step 3: Parse and Deduplicate
+### Step 3: Parse, Deduplicate, and Write Initial Output
+
 - Merge results from all tools
 - Deduplicate by CVE ID
 - Keep highest CVSS score if same CVE from multiple sources
+- Write `phase3-cves.json` now with enrichment fields set to `null` as placeholders —
+  Step 4 reads CVE IDs from this file and updates it in place
 
 ### Step 4: EPSS + KEV Enrichment
 
-Enrich every CVE with two external signals before writing output.
+Read CVE IDs from the file written in Step 3, fetch both external signals, then
+update each finding in `phase3-cves.json` with the results.
 
 **EPSS scores** — batch fetch from FIRST.org (one HTTP call for all CVEs):
 ```bash
 CVE_LIST=$(jq -r '[.findings[].cve_id] | join(",")' \
-  {repo_path}/.security-review/phase3-cves-raw.json)
+  {repo_path}/.security-review/phase3-cves.json)
 curl -sf "https://api.first.org/data/v1/epss?cve=${CVE_LIST}" \
   -o {repo_path}/.security-review/epss-raw.json \
   || echo '{"data":[]}' > {repo_path}/.security-review/epss-raw.json
@@ -82,7 +86,8 @@ curl -sf "https://api.first.org/data/v1/epss?cve=${CVE_LIST}" \
 
 Response shape per CVE: `{ "cve": "CVE-...", "epss": "0.975", "percentile": "0.999" }`
 
-If the API is unreachable, set `epss_score: null` and `epss_percentile: null` on all findings and note the failure — do not abort the phase.
+If the API is unreachable, leave `epss_score: null` and `epss_percentile: null` on all
+findings and set `enrichment.epss_fetched: false` — do not abort the phase.
 
 **CISA KEV catalog** — download the full list (one HTTP call):
 ```bash
@@ -91,7 +96,11 @@ curl -sf "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnera
   || echo '{"vulnerabilities":[]}' > {repo_path}/.security-review/kev-catalog.json
 ```
 
-Cross-reference each CVE against the `vulnerabilities[].cveID` field. If the catalog is unreachable, set `in_kev: null` on all findings and note the failure.
+Cross-reference each CVE against the `vulnerabilities[].cveID` field. If the catalog is
+unreachable, leave `in_kev: null` on all findings and set `enrichment.kev_fetched: false`.
+
+After both fetches, update `phase3-cves.json` in place: write the enriched values into
+each finding and set the `enrichment` block fields to reflect fetch success/failure.
 
 ### Output: phase3-cves.json
 ```json

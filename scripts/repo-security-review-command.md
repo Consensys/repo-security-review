@@ -128,16 +128,19 @@ Parse `$ARGUMENTS` for:
   `key=value` pairs. Allowed keys: `deployment_target`, `data_sensitivity`,
   `auth_required_to_reach`, `include_readme`. Allowed values per key are
   listed in SKILL.md. `include_readme` controls whether README.md is read
-  for project context by Phase 2 and Phase 4 agents; defaults to `false`.
+  for project context by Phase 2 and Phase 4 agents; defaults to `true`.
   When set, the orchestrator validates the pairs and writes a normalized
   `threat-model.json` to the working directory. When unset, the skill
   behaves exactly as before — no calibration logic runs anywhere. Any
   unknown key, unknown enum value, malformed pair, or duplicate key aborts
   the run with a clear error message.
 
+Abort with a clear error if any skip value is not in the allowed list above:
+`❌ Unknown --skip value: "{value}". Allowed: secrets, architecture, dependencies, owasp, validation`
+
 Apply cascade rules silently:
 - `--skip owasp` → add `validation` to skip list
-- `--skip validation` → PoC is already skipped (it's inside Phase 5)
+- `--skip validation` → PoC is skipped automatically (it runs inside Phase 5, not as a separate phase)
 
 ## Step 3: Validate repo path
 
@@ -185,12 +188,20 @@ After each phase, print a one-line progress summary.
 
 ## Step 8: Deliver
 
-After the report phase completes:
+Derive the PoC directory path from `--output` (strip `.md`, append `-pocs`):
+```bash
+POCS_DIR="${output_path%.md}-pocs"
+```
+
+Copy `{repo_path}/.security-review/final-report.md` to `{output_path}`.
+If `{repo_path}/.security-review/pocs/` is non-empty, copy its contents to `$POCS_DIR`.
+
+Print completion banner:
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ✅ Security review complete
 📄 Report:  {output_path}
-📁 PoCs:    {pocs_dir}  (if any were generated)
+📁 PoCs:    $POCS_DIR  (if any were generated)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 

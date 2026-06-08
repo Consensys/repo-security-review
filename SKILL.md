@@ -50,7 +50,7 @@ Parse these from `$ARGUMENTS` using the format:
 | Argument | Default | Description |
 |----------|---------|-------------|
 | (first positional) | required | Repo path |
-| `--skip` | none | Comma-separated phase names to skip: `secrets`, `architecture`, `dependencies`, `owasp`, `validation`, `poc` |
+| `--skip` | none | Comma-separated phase names to skip: `secrets`, `architecture`, `dependencies`, `owasp`, `validation` |
 | `--output` | `{repo_path}/.security-review/{repo}-{date}.md` | Final report output path |
 | `--runtime` | false | Enable Docker-based runtime PoC validation |
 | `--model` | `thorough` | Model tier controlling quality vs cost. `thorough` (default), `balanced`, `fast`. See [`--model`](#--model-model-tier) below. |
@@ -338,11 +338,27 @@ If a phase fails or a tool is not installed:
 
 ## Final Step
 
-1. Copy `{repo_path}/.security-review/final-report.md` to the `--output` path
-2. If pocs/ directory has files, also copy that directory alongside the report
-3. Print the output path clearly:
+1. Derive the PoC output directory from `--output`:
+   ```bash
+   POCS_DIR="${output_path%.md}-pocs"
    ```
-   📄 Report saved to: /path/to/report.md
-   📁 PoC scripts saved to: /path/to/pocs/
+   Example: `--output ~/reports/myapp-2024-01-01.md` → `~/reports/myapp-2024-01-01-pocs/`
+
+2. Copy `{repo_path}/.security-review/final-report.md` to `{output_path}`
+
+3. If `{repo_path}/.security-review/pocs/` has files, copy it to `$POCS_DIR`:
+   ```bash
+   if [ -d "{repo_path}/.security-review/pocs" ] && \
+      [ -n "$(ls -A {repo_path}/.security-review/pocs)" ]; then
+     mkdir -p "$POCS_DIR"
+     cp {repo_path}/.security-review/pocs/* "$POCS_DIR/"
+   fi
    ```
-4. Call `present_files` with the report path so the user can open it directly
+
+4. Print the output paths:
+   ```
+   📄 Report saved to: {output_path}
+   📁 PoC scripts saved to: $POCS_DIR  ← only if PoCs were generated
+   ```
+
+5. Call `present_files` with the report path so the user can open it directly
