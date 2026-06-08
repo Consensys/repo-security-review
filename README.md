@@ -219,7 +219,7 @@ repo-security-review/
 
 By default the skill assumes the worst case — a public, anonymous-facing service handling PII — and grades severity accordingly. That's the right baseline when nothing is known about deployment, but it produces noise on internal tools (e.g. flagging "no rate limit on /login" for a CLI that only runs on a developer's laptop) and under-calibrates true public services.
 
-The `--context` flag lets you provide a small inline threat model. The skill uses it to compute a **contextual severity** alongside the base CVSS-style severity, so every finding shows both: the technical impact (context-free) and the calibrated impact (after context).
+The `--context` flag lets you provide a small inline threat model. The skill uses it to compute a **contextual severity** alongside the base CVSS-style severity for Architecture, CVE, and code-level findings — each shows both: the technical impact (context-free) and the calibrated impact (after context). Secrets are not calibrated; rotation is always required regardless of deployment context.
 
 **Opt-in only.** If you don't pass `--context`, **nothing changes** — the skill runs exactly as before. No new file is written, no calibration runs, no new report sections appear.
 

@@ -35,6 +35,37 @@ The orchestrator owns the final copy step — Phase 6 must not write to `--outpu
 
 ---
 
+## Calibration Step (only when threat-model.json exists)
+
+When `threat-model.json` is present, compute `contextual_severity` for
+Architecture and CVE findings before building the report. Secrets are
+explicitly exempted — rotation is always required regardless of context;
+context never softens a secret finding.
+
+**Severity tier order**: CRITICAL → HIGH → MEDIUM → LOW.
+Floor: LOW (nothing drops below). Ceiling: base severity (context never sharpens).
+
+**Architecture findings** (source: `phase2-architecture.json`):
+Treat each finding's `severity` as the base. Apply the effective threat-model
+softeners to derive `contextual_severity`:
+
+| Softener | Applies to |
+|----------|-----------|
+| `deployment_target: local_cli` (−2 tiers) | all findings |
+| `deployment_target: internal_tool` (−1 tier) | all findings |
+| `data_sensitivity: none` (−1 tier) | data-exposure findings only (info disclosure, unencrypted storage) |
+| `auth_required_to_reach: true` (−1 tier) | pre-auth findings only (unauthenticated endpoints) |
+
+**CVE findings** (source: `phase3b-reachability.json`):
+Treat each finding's `effective_severity` as the base. Apply the same
+softeners to derive `contextual_severity`. **Exception**: CVEs in CISA KEV
+keep their effective severity floor (≥ HIGH) in both base and contextual
+columns — active exploitation in the wild is never softened below HIGH.
+
+Record both values for the executive summary table and Section 5b.
+
+---
+
 ## Report Structure
 
 ```markdown
@@ -63,10 +94,12 @@ The orchestrator owns the final copy step — Phase 6 must not write to `--outpu
 > been reverted to the strict default. See finding A-XXX for details.
 
 {Brief explanation:}
-The threat model above was used to calibrate severity. All findings show both
-a CVSS-style base severity (technical impact, context-free) and a contextual
-severity (after applying threat-model softeners). The full list of adjustments
-is in "Context-Driven Adjustments" below.
+The threat model above was used to calibrate severity. Architecture,
+dependency CVE, and code-level findings each show both a CVSS-style base
+severity (technical impact, context-free) and a contextual severity (after
+applying threat-model softeners). Secrets are not calibrated — exposed
+credentials require rotation regardless of deployment context. The full list
+of adjustments is in "Context-Driven Adjustments" below.
 
 ---
 
@@ -85,15 +118,18 @@ mention how many findings were downgraded vs the base severity.}
 | 🟡 Medium | N | N | N | N | **N** |
 | 🟢 Low | N | N | N | N | **N** |
 
-{Use this table instead when threat-model.json exists. Two columns per
-section: B = cvss_base_severity, C = contextual_severity.}
+{Use this table instead when threat-model.json exists. Secrets are a single
+column (no calibration — rotation always required). All other finding types
+show B = base severity, C = contextual severity. Total-B sums all base
+columns; Total-C sums all contextual columns (Secrets contributes the same
+value to both).}
 
-| Severity | Secrets | Architecture | CVEs | Code-Level (B / C) | Total (B / C) |
-|----------|---------|--------------|------|--------------------|---------------|
-| 🔴 Critical | N | N | N | N / N | **N / N** |
-| 🟠 High | N | N | N | N / N | **N / N** |
-| 🟡 Medium | N | N | N | N / N | **N / N** |
-| 🟢 Low | N | N | N | N / N | **N / N** |
+| Severity | Secrets | Architecture (B / C) | CVEs (B / C) | Code-Level (B / C) | Total (B / C) |
+|----------|---------|---------------------|--------------|-------------------|---------------|
+| 🔴 Critical | N | N / N | N / N | N / N | **N / N** |
+| 🟠 High | N | N / N | N / N | N / N | **N / N** |
+| 🟡 Medium | N | N / N | N / N | N / N | **N / N** |
+| 🟢 Low | N | N / N | N / N | N / N | **N / N** |
 
 **Immediate Actions Required**:
 {bullet list of P0 findings — only Critical/High severity}
@@ -115,7 +151,9 @@ section: B = cvss_base_severity, C = contextual_severity.}
 
 ## Section 2: Architectural Findings
 {Omit entire section if Phase 2 was skipped — add note}
-{Group findings by severity, Critical first}
+{Group findings by severity (Critical first). When calibration is active,
+use the dual-severity header format: `🟡 A-001 · {title} · Base: 🔴 Critical · Contextual: 🟡 Medium`.
+When calibration is not active, show a single severity emoji.}
 
 ### 🔴 A-001 · {title}
 - **Category**: {category}
@@ -133,6 +171,10 @@ section: B = cvss_base_severity, C = contextual_severity.}
 {list from phase3-cves.json ecosystems_scanned and ecosystems_skipped}
 
 Group CVE findings by priority (P0 first), then by effective severity within each group.
+
+{When calibration is active, use the dual-severity header format:
+`🟠 C-001 · {cve_id} · Base: 🔴 Critical · Contextual: 🟠 High · ...badges`.
+When calibration is not active, show a single severity emoji.}
 
 For each finding include the enrichment badges inline in the heading:
 - `🚨 KEV` — if `in_kev: true`
@@ -219,11 +261,15 @@ Showing work — these were investigated and ruled out:
 ## Section 5b: Context-Driven Adjustments
 {Include this section ONLY if threat-model.json exists. Omit entirely otherwise.}
 
-Severity calibration applied to the findings above, based on the assumed
-threat model. Every adjustment is shown so the calibration is auditable.
+Severity calibration applied to Architecture, CVE, and code-level findings,
+based on the assumed threat model. Secrets are excluded — rotation is
+always required regardless of context. Every adjustment is shown so the
+calibration is auditable. Only include rows where contextual differs from base.
 
 | ID | Type | Base | Contextual | Softeners Applied |
 |----|------|------|-----------|-------------------|
+| A-002 | Missing auth on admin endpoint | 🟠 High | 🟡 Medium | `deployment_target: internal_tool` (−1) |
+| C-001 | CVE-2023-XXXXX | 🔴 Critical | 🟠 High | `deployment_target: internal_tool` (−1) |
 | O-001 | SQL Injection | 🔴 Critical | 🟡 Medium | `deployment_target: internal_tool` (−1), `auth_required_to_reach: true` (−1) |
 | O-005 | SSRF | 🔴 Critical | 🟠 High | `deployment_target: internal_tool` (−1) |
 
@@ -287,9 +333,12 @@ threat model. Every adjustment is shown so the calibration is auditable.
 - Redact ALL secret values — show only first 4 and last 3 chars
 - Clearly mark which sections were skipped and why
 - PoC code in fenced code blocks with language tags
-- When calibration is active, finding headers show both severities, e.g.
+- When calibration is active, finding headers (Architecture, CVE, and
+  code-level) show both severities, e.g.
+  `🟡 A-001 · {title} · Base: 🔴 Critical · Contextual: 🟡 Medium` or
   `🟡 O-001 · SQL Injection · Base: 🔴 Critical · Contextual: 🟡 Medium`.
-  When calibration is not active, show a single severity as today.
+  Secrets always show a single severity (no calibration).
+  When calibration is not active, all finding types show a single severity.
 
 ## Delivery
 

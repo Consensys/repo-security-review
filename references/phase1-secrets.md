@@ -8,7 +8,7 @@ repository — including in git history, not just the current working tree.
 
 ### 1. Gitleaks (primary — scans git history)
 ```bash
-gitleaks detect --source {repo_path} --report-format json --report-path {repo_path}/.security-review/gitleaks-raw.json --no-git false
+gitleaks detect --source {repo_path} --report-format json --report-path {repo_path}/.security-review/gitleaks-raw.json
 ```
 
 ### 2. Grep patterns (supplementary — catches what gitleaks misses)
