@@ -128,7 +128,7 @@ enum-valued or boolean), so inline is the only input format.
 | `deployment_target` | `public_service` | Hardest reachable case |
 | `data_sensitivity` | `pii` | Assume sensitive data |
 | `auth_required_to_reach` | `false` | Pessimistic |
-| `include_readme` | `false` | README not used for project context by default |
+| `include_readme` | `true` | README is read for project context by default |
 
 **Invariant: defaults are the most pessimistic value for each axis.** A
 user-provided value can only soften severity, never tighten it further.

@@ -223,7 +223,7 @@ The `--context` flag lets you provide a small inline threat model. The skill use
 
 ### Inline syntax
 
-Comma-separated `key=value` pairs. All three keys are optional; missing keys fall back to strict defaults. Order doesn't matter.
+Comma-separated `key=value` pairs. All keys are optional; missing keys fall back to strict defaults. Order doesn't matter.
 
 ```text
 --context deployment_target=internal_tool,data_sensitivity=internal,auth_required_to_reach=true
@@ -234,6 +234,7 @@ You can pass any subset:
 ```text
 --context deployment_target=local_cli
 --context data_sensitivity=none,auth_required_to_reach=true
+--context include_readme=false
 ```
 
 ### Allowed keys and values
@@ -243,6 +244,7 @@ You can pass any subset:
 | `deployment_target` | `local_cli` \| `internal_tool` \| `public_service` |
 | `data_sensitivity` | `none` \| `internal` \| `pii` |
 | `auth_required_to_reach` | `true` \| `false` |
+| `include_readme` | `true` \| `false` |
 
 Any unknown key, unknown value, malformed pair, or duplicate key aborts the run with a clear error — there is no silent fallback for invalid input.
 
@@ -253,6 +255,7 @@ Any unknown key, unknown value, malformed pair, or duplicate key aborts the run 
 | `deployment_target` | `public_service` | Hardest reachable case |
 | `data_sensitivity` | `pii` | Assume sensitive data |
 | `auth_required_to_reach` | `false` | Pessimistic |
+| `include_readme` | `true` | README is read for project context by default |
 
 **Invariant:** defaults are the most pessimistic value for each axis. A value you provide can only soften severity, never tighten it. `contextual_severity` is never higher than `cvss_base_severity`.
 

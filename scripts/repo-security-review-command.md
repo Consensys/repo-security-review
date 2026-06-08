@@ -43,7 +43,7 @@ Options:
                         auth_required_to_reach, include_readme.
                         All keys optional; omitted keys fall back to strict
                         defaults. include_readme controls whether README.md
-                        is read for project context (default: false). Omit
+                        is read for project context (default: true). Omit
                         the flag entirely for default behavior (no
                         calibration).
                         Example:
