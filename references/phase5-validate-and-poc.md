@@ -255,26 +255,41 @@ If unavailable, mark `runtime_status: RUNTIME_SKIPPED` and continue.
 ### Decision tree — how to stand up the application
 
 ```
-1. docker-compose.yml / docker-compose.yaml exists  → use it as-is
-2. Dockerfile exists                                → docker build + run
-3. Neither exists                                   → SYNTHESIZE (see Part 3a)
-4. Synthesis declines or fails                      → RUNTIME_SKIPPED
+1. docker_compose_path in tech-stack.json points to an existing file  → use it
+2. docker-compose.yml or docker-compose.yaml exists at repo root       → use it
+3. Dockerfile exists at repo root                                      → docker build + run
+4. None of the above                                                   → SYNTHESIZE (see Part 3a)
+5. Synthesis declines or fails                                         → RUNTIME_SKIPPED
 ```
 
-### Use the project's Docker setup (cases 1 and 2)
+### Use the project's Docker setup (cases 1–3)
 
 ```bash
-cd {repo_path}
-if [ -f "docker-compose.yml" ] || [ -f "docker-compose.yaml" ]; then
-  docker compose up -d --build 2>&1 | tee {repo_path}/.security-review/docker-startup.log
+TS={repo_path}/.security-review/tech-stack.json
+
+# Resolve compose file: prefer path recorded by Phase 2, fall back to root defaults
+COMPOSE_PATH=$(jq -r '.docker_compose_path // empty' $TS)
+if [ -n "$COMPOSE_PATH" ] && [ -f "{repo_path}/$COMPOSE_PATH" ]; then
+  COMPOSE_FILE="{repo_path}/$COMPOSE_PATH"
+elif [ -f "{repo_path}/docker-compose.yml" ]; then
+  COMPOSE_FILE="{repo_path}/docker-compose.yml"
+elif [ -f "{repo_path}/docker-compose.yaml" ]; then
+  COMPOSE_FILE="{repo_path}/docker-compose.yaml"
+else
+  COMPOSE_FILE=""
+fi
+
+if [ -n "$COMPOSE_FILE" ]; then
+  docker compose -f "$COMPOSE_FILE" up -d --build 2>&1 \
+    | tee {repo_path}/.security-review/docker-startup.log
   RUNTIME_ENV="project"
-elif [ -f "Dockerfile" ]; then
-  PORT=$(jq -r '.runtime_hints.listen_port // 8080' {repo_path}/.security-review/tech-stack.json)
-  docker build -t sec-review-target . && \
+elif [ -f "{repo_path}/Dockerfile" ]; then
+  PORT=$(jq -r '.runtime_hints.listen_port // 8080' $TS)
+  docker build -t sec-review-target {repo_path} && \
   docker run -d --name sec-review-target -p ${PORT}:${PORT} sec-review-target
   RUNTIME_ENV="project"
 else
-  # Neither exists — go to Part 3a
+  # No Docker setup found — go to Part 3a
   :
 fi
 ```
@@ -308,9 +323,12 @@ Record outcome as `RUNTIME_CONFIRMED`, `RUNTIME_NOT_CONFIRMED`, or
 
 ### Tear down
 ```bash
-cd {repo_path}
-docker compose down 2>/dev/null || \
+# Use the same $COMPOSE_FILE resolved during startup
+if [ -n "$COMPOSE_FILE" ]; then
+  docker compose -f "$COMPOSE_FILE" down 2>/dev/null
+else
   (docker stop sec-review-target && docker rm sec-review-target) 2>/dev/null
+fi
 # If synthesis was used, also tear down the synthesized stack
 if [ -d "{repo_path}/.security-review/synthesized" ]; then
   (cd {repo_path}/.security-review/synthesized && docker compose down) 2>/dev/null
@@ -490,9 +508,14 @@ Context softens; it never sharpens.
 
 ### Step 1: Load the effective threat model
 
+Check whether `{repo_path}/.security-review/threat-model.json` exists.
+If it does **not** exist, skip Steps 2–4 of Part 4 entirely and proceed
+directly to writing output. Do not exit Phase 5.
+
+If it exists, read the effective values (drift overrides take precedence):
+
 ```bash
 TM={repo_path}/.security-review/threat-model.json
-[ -f "$TM" ] || { echo "no threat model; skipping calibration"; exit 0; }
 
 # Apply drift overrides if Phase 2 wrote any — these revert specific
 # dimensions to the strict default for this run.

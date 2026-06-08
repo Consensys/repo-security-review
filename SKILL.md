@@ -11,6 +11,7 @@ description: >
   architectural analysis, dependency CVE scanning with reachability validation,
   code-level OWASP analysis, finding validation, PoC generation (with optional
   runtime validation via Docker), and final report generation.
+maturity: experimental
 ---
 
 # Security Review Skill
@@ -102,14 +103,14 @@ that don't find it behave exactly as today.
 
 #### Inline syntax
 
-Comma-separated `key=value` pairs. All three keys are optional and order does
+Comma-separated `key=value` pairs. All four keys are optional and order does
 not matter. Whitespace around `=` and `,` is trimmed.
 
 ```
 --context deployment_target=internal_tool,data_sensitivity=internal,auth_required_to_reach=true
 ```
 
-There is no file-path form. The schema is small and fixed (three keys, all
+There is no file-path form. The schema is small and fixed (four keys, all
 enum-valued or boolean), so inline is the only input format.
 
 #### Allowed keys and values

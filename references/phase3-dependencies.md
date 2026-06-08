@@ -27,7 +27,7 @@ Use the found files to infer ecosystems.
 
 OSV-Scanner auto-detects ecosystems from lockfiles. Run it across the entire repo:
 ```bash
-osv-scanner --format json -r {repo_path} > {repo_path}/.security-review/osv-raw.json 2>&1
+osv-scanner --format json -r {repo_path} > {repo_path}/.security-review/osv-raw.json 2>/dev/null
 ```
 
 ### Step 2: Ecosystem-Specific Tools (only if ecosystem is confirmed present)
@@ -38,10 +38,10 @@ Use `package_ecosystems` from tech-stack.json to decide which to run:
 ```bash
 i=0
 for lockfile in $(python3 -c \
-  "import sys,json; d=json.load(open('{repo_path}/.security-review/tech-stack.json')); [print(f) for f in d.get('package_files',{}).get('npm',[])]"); do
+  "import json; d=json.load(open('{repo_path}/.security-review/tech-stack.json')); [print(f) for f in d.get('package_files',{}).get('npm',[])]"); do
   dir=$(dirname "{repo_path}/$lockfile")
   cd "$dir" && npm audit --json \
-    > {repo_path}/.security-review/npm-audit-raw-${i}.json 2>&1
+    > {repo_path}/.security-review/npm-audit-raw-${i}.json 2>/dev/null
   i=$((i+1))
 done
 ```
@@ -51,15 +51,40 @@ Each lockfile produces its own `npm-audit-raw-{n}.json`. Step 3 reads all
 
 **Python / pip** — only if `"pypi"` in `package_ecosystems`:
 ```bash
-# pip-audit handles requirements.txt, Pipfile.lock, poetry.lock
-pip-audit --format json -r {requirements_file} \
-  > {repo_path}/.security-review/pip-audit-raw.json 2>&1
+# Resolve pypi package files from tech-stack.json
+PYPI_FILES=$(python3 -c \
+  "import json; d=json.load(open('{repo_path}/.security-review/tech-stack.json')); \
+   [print(f) for f in d.get('package_files',{}).get('pypi',[])]" 2>/dev/null)
+
+i=0
+for pypi_file in $PYPI_FILES; do
+  filepath="{repo_path}/$pypi_file"
+  filename=$(basename "$pypi_file")
+  case "$filename" in
+    poetry.lock)
+      # pip-audit cannot parse poetry.lock directly; export to requirements first
+      (cd "$(dirname "$filepath")" && \
+        poetry export -f requirements.txt --without-hashes 2>/dev/null | \
+        pip-audit --format json -r /dev/stdin) \
+        > {repo_path}/.security-review/pip-audit-raw-${i}.json 2>/dev/null
+      ;;
+    *)
+      # requirements*.txt and Pipfile.lock: pip-audit accepts these with -r
+      pip-audit --format json -r "$filepath" \
+        > {repo_path}/.security-review/pip-audit-raw-${i}.json 2>/dev/null
+      ;;
+  esac
+  i=$((i+1))
+done
 ```
+
+Each file produces its own `pip-audit-raw-{n}.json`. Step 3 reads all
+`pip-audit-raw-*.json` files individually — never concatenate them.
 
 **Java / Maven or Gradle** — only if `"maven"` in `package_ecosystems`:
 ```bash
 # grype works on compiled JARs or source
-grype dir:{repo_path} --output json > {repo_path}/.security-review/grype-raw.json 2>&1
+grype dir:{repo_path} --output json > {repo_path}/.security-review/grype-raw.json 2>/dev/null
 ```
 
 **Skip entirely** for ecosystems not in `package_ecosystems`. Log the reason:
@@ -70,9 +95,15 @@ grype dir:{repo_path} --output json > {repo_path}/.security-review/grype-raw.jso
 
 ### Step 3: Parse, Deduplicate, and Write Initial Output
 
-- Merge results from all tools
-- Deduplicate by CVE ID
-- Keep highest CVSS score if same CVE from multiple sources
+Read whichever of these files exist (each only present if the corresponding tool ran):
+- `osv-raw.json` — primary source, all ecosystems
+- `npm-audit-raw-*.json` — one file per npm lockfile
+- `pip-audit-raw-*.json` — one file per Python package file
+- `grype-raw.json` — Java/Maven/Gradle
+
+Then:
+- Merge findings across all files
+- Deduplicate by CVE ID — keep highest CVSS score when the same CVE appears in multiple sources
 - Write `phase3-cves.json` now with enrichment fields set to `null` as placeholders —
   Step 4 reads CVE IDs from this file and updates it in place
 
@@ -85,9 +116,14 @@ update each finding in `phase3-cves.json` with the results.
 ```bash
 CVE_LIST=$(jq -r '[.findings[].cve_id] | join(",")' \
   {repo_path}/.security-review/phase3-cves.json)
-curl -sf "https://api.first.org/data/v1/epss?cve=${CVE_LIST}" \
-  -o {repo_path}/.security-review/epss-raw.json \
-  || echo '{"data":[]}' > {repo_path}/.security-review/epss-raw.json
+
+if [ -z "$CVE_LIST" ]; then
+  echo '{"data":[]}' > {repo_path}/.security-review/epss-raw.json
+else
+  curl -sf "https://api.first.org/data/v1/epss?cve=${CVE_LIST}" \
+    -o {repo_path}/.security-review/epss-raw.json \
+    || echo '{"data":[]}' > {repo_path}/.security-review/epss-raw.json
+fi
 ```
 
 Response shape per CVE: `{ "cve": "CVE-...", "epss": "0.975", "percentile": "0.999" }`

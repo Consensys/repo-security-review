@@ -28,7 +28,8 @@ find {repo_path} -maxdepth 4 \( \
 \) -not -path "*/node_modules/*" -not -path "*/.git/*"
 
 # Check for Docker
-find {repo_path} -maxdepth 3 -name "Dockerfile*" -o -name "docker-compose*.yml"
+find {repo_path} -maxdepth 5 \( -name "Dockerfile*" -o -name "docker-compose*.yml" \) \
+  -not -path "*/node_modules/*" -not -path "*/.git/*"
 
 # Check for HTML templates / frontend rendering
 find {repo_path} -maxdepth 5 \( \

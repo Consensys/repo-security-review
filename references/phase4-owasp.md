@@ -83,12 +83,20 @@ and log: `ℹ️  OWASP API Top 10 skipped — project does not appear to be API
 
 ```bash
 # Use language-specific configs, not --config=auto (too noisy)
-LANG=$(cat {repo_path}/.security-review/tech-stack.json | python3 -c \
-  "import sys,json; d=json.load(sys.stdin); print(d['languages'][0])")
+LANG=$(python3 -c \
+  "import json; d=json.load(open('{repo_path}/.security-review/tech-stack.json')); \
+   langs=d.get('languages',[]); print(langs[0] if langs else '')" 2>/dev/null)
 
-semgrep --config="p/${LANG}" --config="p/owasp-top-ten" \
-  --json --output {repo_path}/.security-review/semgrep-raw.json \
-  {repo_path} 2>/dev/null
+if [ -n "$LANG" ]; then
+  semgrep --config="p/${LANG}" --config="p/owasp-top-ten" \
+    --json --output {repo_path}/.security-review/semgrep-raw.json \
+    {repo_path} 2>/dev/null
+else
+  # Language unknown — fall back to OWASP rules only
+  semgrep --config="p/owasp-top-ten" \
+    --json --output {repo_path}/.security-review/semgrep-raw.json \
+    {repo_path} 2>/dev/null
+fi
 ```
 
 Parse semgrep output as seed findings, then validate each one manually.
