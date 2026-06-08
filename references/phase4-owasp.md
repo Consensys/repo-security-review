@@ -7,15 +7,22 @@ project's tech stack — don't test for SQLi in a project with no database.
 
 ## Step 0: Load Context
 
-Read both files before doing anything else:
-- `{repo_path}/.security-review/tech-stack.json` → gates which checks to run
-- `{repo_path}/.security-review/phase2-architecture.json` → auth model, known
-  weak areas to prioritize
-- `{repo_path}/.security-review/phase3b-reachability.json` → vulnerable libs
-  actively used (if Phase 3 ran)
+**tech-stack.json** (required — gates all checks):
+- Read `{repo_path}/.security-review/tech-stack.json`
+- If absent (Phase 2 was skipped), run the lightweight detection from
+  `phase2-architecture.md` Step 0 to reconstruct it before continuing.
 
-If tech-stack.json doesn't exist (Phase 2 skipped), run the lightweight
-detection from phase2-architecture.md Step 0 to reconstruct it.
+**phase2-architecture.json** (optional — improves prioritization):
+- Read if present: used for auth model context and known weak areas.
+- If absent (Phase 2 was skipped), continue without it. Note in output:
+  `"architecture_context": "unavailable — Phase 2 was skipped"`.
+  All OWASP checks still run; the analysis loses Phase 2's signal on
+  auth model and trust boundaries but is otherwise unaffected.
+
+**phase3b-reachability.json** (optional — narrows dep-related checks):
+- Read if present: used to cross-reference vulnerable libs that are
+  actively reachable.
+- If absent (Phase 3 was skipped), continue without it.
 
 ## Step 1: Determine Which Checks to Run
 

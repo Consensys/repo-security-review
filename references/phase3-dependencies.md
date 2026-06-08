@@ -36,12 +36,18 @@ Use `package_ecosystems` from tech-stack.json to decide which to run:
 
 **npm / Node.js** — only if `"npm"` in `package_ecosystems`:
 ```bash
-for lockfile in $(cat {repo_path}/.security-review/tech-stack.json | python3 -c \
-  "import sys,json; d=json.load(sys.stdin); [print(f) for f in d.get('package_files',{}).get('npm',[])]"); do
+i=0
+for lockfile in $(python3 -c \
+  "import sys,json; d=json.load(open('{repo_path}/.security-review/tech-stack.json')); [print(f) for f in d.get('package_files',{}).get('npm',[])]"); do
   dir=$(dirname "{repo_path}/$lockfile")
-  cd "$dir" && npm audit --json >> {repo_path}/.security-review/npm-audit-raw.json 2>&1
+  cd "$dir" && npm audit --json \
+    > {repo_path}/.security-review/npm-audit-raw-${i}.json 2>&1
+  i=$((i+1))
 done
 ```
+
+Each lockfile produces its own `npm-audit-raw-{n}.json`. Step 3 reads all
+`npm-audit-raw-*.json` files individually — never concatenate them.
 
 **Python / pip** — only if `"pypi"` in `package_ecosystems`:
 ```bash

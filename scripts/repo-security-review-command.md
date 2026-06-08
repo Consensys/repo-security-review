@@ -12,9 +12,13 @@
 
 Run a full automated security review of a code repository.
 
-## Step 1: Check for --help
+## Step 1: Check for --help or missing arguments
 
-If `$ARGUMENTS` is `--help` or `-h` or empty, print the following and stop:
+If `$ARGUMENTS` is empty, ask the user for a repo path before proceeding:
+> "Please provide the path to the repository you'd like to review."
+Then wait for input and continue to Step 2 with the provided value.
+
+If `$ARGUMENTS` is `--help` or `-h`, print the following and stop:
 
 ---
 

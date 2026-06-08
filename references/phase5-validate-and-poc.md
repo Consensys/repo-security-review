@@ -289,7 +289,7 @@ PORT=$(jq -r '.runtime_hints.listen_port // 8080' {repo_path}/.security-review/t
 for i in $(seq 1 12); do
   sleep 5
   for ep in /health /healthz /; do
-    curl -sf -o /dev/null -w "%{http_code}" "http://localhost:${PORT}${ep}" 2>/dev/null && \
+    curl -s -o /dev/null -w "%{http_code}" "http://localhost:${PORT}${ep}" 2>/dev/null && \
       echo "Ready on ${ep}" && break 2
   done
   # Fallback: bare TCP connect
@@ -300,7 +300,7 @@ done
 
 ### Run the PoC script
 ```bash
-python3 {repo_path}/.security-review/pocs/poc_{id}.py 2>&1
+python3 {repo_path}/.security-review/pocs/poc_{id}_{type}.py 2>&1
 ```
 
 Record outcome as `RUNTIME_CONFIRMED`, `RUNTIME_NOT_CONFIRMED`, or
@@ -445,11 +445,15 @@ Dockerfile runs, no seed users, no fixtures. PoCs that need pre-existing
 state (BOLA needs `usera@test.com`, broken-auth tests need a registered
 account) will fail at their setup step.
 
-If the PoC's setup step (e.g. login) returns a non-2xx, do **not** record
-`RUNTIME_NOT_CONFIRMED` — record `RUNTIME_NOT_CONFIRMED` with the note
-`"synthesized environment lacks seeded data — PoC requires test user/record
-that does not exist in the empty synthesized DB"`. This prevents false
-negatives from being treated as evidence of safety.
+If the PoC's setup step (e.g. login) returns a non-2xx, record
+`RUNTIME_SKIPPED` with reason `missing_seed_data` and the note:
+`"synthesized environment has no seeded data — PoC requires a test
+user/record that does not exist in the empty DB"`.
+
+Do **not** record `RUNTIME_NOT_CONFIRMED` for this case. That status means
+the PoC ran and did not trigger the vulnerability — a meaningful safety
+signal. A setup failure means the PoC never executed at all, which is not
+evidence of safety and must not be presented as such.
 
 ---
 
@@ -461,8 +465,8 @@ swallow a failure.
 | Status | Trigger | Required notes |
 |---|---|---|
 | `RUNTIME_CONFIRMED` | PoC ran, success indicator observed | — |
-| `RUNTIME_NOT_CONFIRMED` | PoC ran, success indicator not observed | If synthesized env, flag the seed-data limitation |
-| `RUNTIME_SKIPPED` | Docker unavailable / stack unsupported / multi-service deps | Reason code |
+| `RUNTIME_NOT_CONFIRMED` | PoC ran fully, success indicator not observed | This is a safety signal — only use when the PoC actually executed |
+| `RUNTIME_SKIPPED` | Docker unavailable / stack unsupported / multi-service deps / PoC setup step failed (`missing_seed_data`) | Reason code required; `missing_seed_data` must note that the vulnerability was not tested, not ruled out |
 | `RUNTIME_SYNTHESIS_FAILED` | Synthesis attempted but build / startup failed | Last 20 lines of `docker compose logs` |
 | `RUNTIME_ERROR` | Unexpected failure during PoC execution | Exception or exit code |
 
@@ -656,7 +660,9 @@ other two fields are absent.
 ```
 
 ### Individual PoC files
-Write each PoC script to `{repo_path}/.security-review/pocs/poc_{id}.py`
+Write each PoC script to `{repo_path}/.security-review/pocs/poc_{id}_{type}.py`
+where `{type}` is a short lowercase slug matching the vulnerability type:
+`sqli`, `xss`, `bola`, `cmdinj`, `ssrf`, or a similar concise label.
 
 ### phase5-pocs.json (for report builder compatibility)
 ```json
