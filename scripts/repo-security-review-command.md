@@ -124,7 +124,8 @@ Parse `$ARGUMENTS` for:
 - `--skip <phases>` → comma-separated list from: `secrets`, `architecture`,
   `dependencies`, `owasp`, `validation`
 - `--output <path>` → destination for final report markdown file
-  Default: `{repo_path}/.security-review/{repo-name}-{YYYY-MM-DD}.md`
+  Default: none — when omitted the report stays at
+  `{repo_path}/.security-review/final-report.md` and no copy is made
 - `--runtime` → enable Docker-based runtime PoC validation in Phase 5
 - `--model <tier>` → `thorough` (default) | `balanced` | `fast`
   Abort with a clear error if any other value is given.
@@ -160,7 +161,7 @@ ls "$REPO_PATH" 2>/dev/null || { echo "❌ Repo path not found: $REPO_PATH"; exi
 Phases running:   {list}
 Phases skipped:   {list or "none"}
 Model tier:       {thorough / balanced / fast}
-Output:           {output_path}
+Output:           {output_path if set, else ".security-review/final-report.md"}
 Runtime PoC:      {enabled / disabled}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
@@ -180,7 +181,8 @@ which semgrep     && semgrep --version || echo "⚠️  semgrep not found (Phase
 
 ```bash
 mkdir -p {repo_path}/.security-review
-mkdir -p "$(dirname {output_path})"
+# Only create the output parent dir if --output was explicitly provided
+[ -n "{output_path}" ] && mkdir -p "$(dirname {output_path})"
 ```
 
 ## Step 7: Execute phases
@@ -192,7 +194,9 @@ After each phase, print a one-line progress summary.
 
 ## Step 8: Deliver
 
-Derive the PoC directory path from `--output` (strip `.md`, append `-pocs`):
+**If `--output` was explicitly provided:**
+
+Derive the PoC directory path (strip `.md`, append `-pocs`):
 ```bash
 POCS_DIR="${output_path%.md}-pocs"
 ```
@@ -209,4 +213,17 @@ Print completion banner:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-Call `present_files` with the report path.
+Call `present_files` with `{output_path}`.
+
+**If `--output` was NOT provided:**
+
+No copy is made. Print completion banner:
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ Security review complete
+📄 Report:  {repo_path}/.security-review/final-report.md
+📁 PoCs:    {repo_path}/.security-review/pocs/  (if any were generated)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+Call `present_files` with `{repo_path}/.security-review/final-report.md`.

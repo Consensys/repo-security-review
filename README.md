@@ -81,7 +81,7 @@ In any Claude Code session (CLI or Desktop), invoke the skill on a local reposit
 | Flag | Default | Effect |
 |------|---------|--------|
 | `--skip <phases>` | none | Comma-separated: `secrets`, `architecture`, `dependencies`, `owasp`, `validation` |
-| `--output <path>` | `<repo>/.security-review/<repo>-<date>.md` | Final report destination |
+| `--output <path>` | none — report stays at `<repo>/.security-review/final-report.md` | Copy report (and PoCs) to this path after the run |
 | `--runtime` | off | Docker-based runtime PoC validation in Phase 5 |
 | `--model <tier>` | `thorough` | `thorough` (most capable + extended thinking), `balanced` (no extended thinking, ~40% cheaper), `fast` (lightweight models, lowest cost) |
 | `--context <pairs>` | none | Optional inline threat model (`key=value,key=value`) used to calibrate severity. See "Adding context" below |
@@ -191,7 +191,7 @@ Working artifacts are written to `<repo>/.security-review/`:
 └── final-report.md
 ```
 
-At the end of the run, `final-report.md` is copied to the `--output` path (and the `pocs/` directory alongside it, if any PoCs were generated).
+When `--output` is provided, `final-report.md` is copied to that path (and `pocs/` alongside it as `{output%.md}-pocs/`). When `--output` is omitted, no copy is made — the report stays at `final-report.md` and PoCs stay in `pocs/`.
 
 ---
 

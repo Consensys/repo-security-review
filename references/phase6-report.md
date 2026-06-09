@@ -8,6 +8,7 @@ and write it to the user-specified output path.
 
 Read all that exist (some may be absent if a phase was skipped):
 ```
+{repo_path}/.security-review/run-metadata.json    ← model IDs and tier; always present
 {repo_path}/.security-review/tech-stack.json
 {repo_path}/.security-review/threat-model.json    ← present only if --context was used
 {repo_path}/.security-review/phase1-secrets.json
@@ -73,7 +74,14 @@ Record both values for the executive summary table and Section 5b.
 **Repository**: {repo_name}
 **Review Date**: {date}
 **Tech Stack**: {languages} / {frameworks} / {database_types}
-**Reviewed By**: Automated Pipeline (Claude Code + repo-security-review skill)
+**Reviewed By**: Claude Code · repo-security-review skill · `{model_tier}` tier
+**Models Used**: {render from run-metadata.json using these rules:
+  - If all phases used the same model: "`{model}` — all phases"
+  - If Phase 2 differed from the rest:
+    "`{phase2_model}`{if phase2_extended_thinking: " (extended thinking)"} — Architecture · `{other_model}` — all other phases"
+  - Example (thorough): "`claude-opus-4-8` (extended thinking) — Architecture · `claude-sonnet-4-6` — all other phases"
+  - Example (fast):     "`claude-sonnet-4-6` — Architecture · `claude-haiku-4-5` — all other phases"
+}
 
 ---
 

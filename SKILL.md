@@ -52,7 +52,7 @@ Parse these from `$ARGUMENTS` using the format:
 |----------|---------|-------------|
 | (first positional) | required | Repo path |
 | `--skip` | none | Comma-separated phase names to skip: `secrets`, `architecture`, `dependencies`, `owasp`, `validation` |
-| `--output` | `{repo_path}/.security-review/{repo}-{date}.md` | Final report output path |
+| `--output` | none — report stays at `{repo_path}/.security-review/final-report.md` | Copy report to this path after the run |
 | `--runtime` | false | Enable Docker-based runtime PoC validation |
 | `--model` | `thorough` | Model tier controlling quality vs cost. `thorough` (default), `balanced`, `fast`. See [`--model`](#--model-model-tier) below. |
 | `--context` | none | Inline `key=value,key=value` threat model used to calibrate severity. Optional — omit for default behavior. See [`--context`](#--context-threat-model-calibration) below. |
@@ -85,6 +85,23 @@ stays valid across version bumps and works if adapted to a different provider.
 - "Most capable fast model" = mid-tier model balancing speed and quality.
 - "Smallest/fastest model" = lowest-cost model the runtime offers.
 - If the runtime only offers one model, use it for all tiers without error.
+
+**Before spawning Phase 1**, resolve the actual model IDs for each phase and
+write `{repo_path}/.security-review/run-metadata.json`:
+```json
+{
+  "model_tier": "thorough | balanced | fast",
+  "phase1_model":  "<actual model ID selected>",
+  "phase2_model":  "<actual model ID selected>",
+  "phase2_extended_thinking": true,
+  "phase3_model":  "<actual model ID selected>",
+  "phase4_model":  "<actual model ID selected>",
+  "phase5_model":  "<actual model ID selected>",
+  "phase6_model":  "<actual model ID selected>"
+}
+```
+Record the model IDs you actually use — not role descriptions. Phase 6 reads
+this file to include model attribution in the final report.
 
 **Validation:** if `--model` is set to anything other than `thorough`, `balanced`, or `fast`, abort with:
 `❌ Invalid --model value: "{value}". Allowed: thorough, balanced, fast`
@@ -255,6 +272,7 @@ Read the agent instructions for each phase from `references/` before spawning:
 Each phase writes its findings to a working directory:
 ```
 {repo_path}/.security-review/
+├── run-metadata.json         ← written by orchestrator before Phase 1; model IDs + tier
 ├── tech-stack.json           ← written by Phase 2, read by Phase 3 and 4
 ├── threat-model.json         ← only if --context was provided
 ├── phase1-secrets.json
@@ -339,7 +357,9 @@ If a phase fails or a tool is not installed:
 
 ## Final Step
 
-1. Derive the PoC output directory from `--output`:
+**If `--output` was explicitly provided:**
+
+1. Derive the PoC output directory:
    ```bash
    POCS_DIR="${output_path%.md}-pocs"
    ```
@@ -356,10 +376,20 @@ If a phase fails or a tool is not installed:
    fi
    ```
 
-4. Print the output paths:
+4. Print:
    ```
    📄 Report saved to: {output_path}
    📁 PoC scripts saved to: $POCS_DIR  ← only if PoCs were generated
    ```
 
-5. Call `present_files` with the report path so the user can open it directly
+5. Call `present_files` with `{output_path}`
+
+**If `--output` was NOT provided:**
+
+1. Print:
+   ```
+   📄 Report: {repo_path}/.security-review/final-report.md
+   📁 PoC scripts: {repo_path}/.security-review/pocs/  ← only if PoCs were generated
+   ```
+
+2. Call `present_files` with `{repo_path}/.security-review/final-report.md`
