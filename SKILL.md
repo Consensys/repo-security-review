@@ -103,6 +103,13 @@ write `{repo_path}/.security-review/run-metadata.json`:
 Record the model IDs you actually use — not role descriptions. Phase 6 reads
 this file to include model attribution in the final report.
 
+**When spawning each phase subagent**, use the resolved model ID from
+`run-metadata.json` in the agent description — never infer the model name from
+the tier. Examples:
+- Phase 2 (thorough): `"Phase 2: Architectural analysis ({phase2_model} + extended thinking)"`
+- Phase 2 (balanced): `"Phase 2: Architectural analysis ({phase2_model})"`
+- Other phases: `"Phase N: {phase name} ({phaseN_model})"`
+
 **Validation:** if `--model` is set to anything other than `thorough`, `balanced`, or `fast`, abort with:
 `❌ Invalid --model value: "{value}". Allowed: thorough, balanced, fast`
 
