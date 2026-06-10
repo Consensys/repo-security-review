@@ -79,7 +79,7 @@ Record both values for the executive summary table and Section 5b.
   - If all phases used the same model: "`{model}` — all phases"
   - If Phase 2 differed from the rest:
     "`{phase2_model}`{if phase2_extended_thinking: " (extended thinking)"} — Architecture · `{other_model}` — all other phases"
-  - Example (thorough): "`claude-opus-4-8` (extended thinking) — Architecture · `claude-sonnet-4-6` — all other phases"
+  - Example (thorough): "`claude-fable-5` (extended thinking) — Architecture · `claude-sonnet-4-6` — all other phases"
   - Example (fast):     "`claude-sonnet-4-6` — Architecture · `claude-haiku-4-5` — all other phases"
 }
 
@@ -317,7 +317,7 @@ calibration is auditable. Only include rows where contextual differs from base.
 | Phase | Tool / Method | Status |
 |-------|--------------|--------|
 | Secret Scanning | gitleaks {version} + grep patterns | ✅ Ran / ⏭️ Skipped |
-| Architecture | Claude Opus (extended thinking) | ✅ Ran / ⏭️ Skipped |
+| Architecture | Claude Fable (extended thinking) | ✅ Ran / ⏭️ Skipped |
 | CVE Scanning | osv-scanner {version} | ✅ Ran / ⏭️ Skipped |
 | EPSS Enrichment | FIRST.org EPSS API | ✅ Fetched / ⚠️ Unavailable |
 | KEV Enrichment | CISA Known Exploited Vulnerabilities | ✅ Fetched / ⚠️ Unavailable |

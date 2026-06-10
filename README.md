@@ -125,7 +125,7 @@ flowchart TD
 
     subgraph FINDER["FINDER LAYER (sequential subagents)"]
         P1[Phase 1 · Secret Scanning<br/>gitleaks + grep]
-        P2[Phase 2 · Architectural Analysis<br/>Opus + extended thinking]
+        P2[Phase 2 · Architectural Analysis<br/>Fable + extended thinking]
         TS[(tech-stack.json)]
         P3[Phase 3 · Dependency CVEs<br/>osv-scanner]
         P3b[Phase 3b · Reachability Validation]
