@@ -75,16 +75,17 @@ stays valid across version bumps and works if adapted to a different provider.
 
 | Tier | Phase 2 (Architecture) | All other phases | When to use |
 |------|------------------------|------------------|-------------|
-| `thorough` *(default)* | Most capable model available + extended thinking enabled | Most capable fast model available | Pre-launch, pentest prep, unknown codebases |
-| `balanced` | Most capable model available, extended thinking **disabled** | Most capable fast model available | Routine audits, known codebases, ~40% cost reduction vs thorough |
-| `fast` | Most capable fast model available, extended thinking **disabled** | Smallest/fastest model available | Quick scans, CI cadence, cost-sensitive runs — may miss subtle architectural issues |
+| `thorough` *(default)* | **`claude-fable-5`** + adaptive thinking enabled | **`claude-sonnet-4-6`** | Pre-launch, pentest prep, unknown codebases |
+| `balanced` | **`claude-fable-5`**, thinking **disabled** (omit `thinking` param) | **`claude-sonnet-4-6`** | Routine audits, known codebases, ~40% cost reduction vs thorough |
+| `fast` | **`claude-sonnet-4-6`**, thinking **disabled** | **`claude-haiku-4-5`** | Quick scans, CI cadence, cost-sensitive runs — may miss subtle architectural issues |
+
+> **When to update this table:** bump model IDs here when a new flagship tier is released (e.g. when a model above Fable 5 ships). The IDs above are concrete — use them exactly as written. Do **not** substitute an older model based on training-data intuition.
 
 **Applying the tier when spawning subagents:**
-- Pass the tier value to each phase agent so it selects its model accordingly.
-- "Most capable model" = largest/most intelligent model the runtime offers.
-- "Most capable fast model" = mid-tier model balancing speed and quality.
-- "Smallest/fastest model" = lowest-cost model the runtime offers.
-- If the runtime only offers one model, use it for all tiers without error.
+- Use the model IDs in the table above directly — do not resolve "most capable" from memory.
+- On `thorough`: Phase 2 uses `thinking: {type: "adaptive"}`. All other phases omit the `thinking` param.
+- On `balanced`/`fast`: omit the `thinking` param entirely for all phases (do NOT pass `thinking: {type: "disabled"}` — this returns a 400 on Fable 5).
+- If a listed model is unavailable in the runtime, fall back to the nearest available model and log a warning.
 
 **Before spawning Phase 1**, resolve the actual model IDs for each phase and
 write `{repo_path}/.security-review/run-metadata.json`:
