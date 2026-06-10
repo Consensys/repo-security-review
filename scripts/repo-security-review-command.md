@@ -31,8 +31,8 @@ Usage:
 
 Options:
   --skip <phases>       Comma-separated phases to skip (see below)
-  --output <path>       Where to save the final report
-                        Default: <repo>/.security-review/<repo>-<date>.md
+  --output <dir>        Directory to save the report and PoC scripts into.
+                        Default: (none — everything stays in <repo>/.security-review/)
   --runtime             Enable Docker-based runtime PoC validation
   --model <tier>        Model quality/cost tier (default: thorough)
                         thorough  — most capable model + extended thinking
@@ -106,7 +106,7 @@ Examples:
   /repo-security-review ~/repos/my-service --skip dependencies,owasp
 
   # Full review with runtime PoC validation via Docker
-  /repo-security-review ~/repos/my-service --runtime --output ~/reports/my-service.md
+  /repo-security-review ~/repos/my-service --runtime --output ~/reports/my-service
 
   # Skip arch (you already reviewed it) — deps + OWASP only
   /repo-security-review ~/repos/my-service --skip architecture,secrets
@@ -123,11 +123,9 @@ Parse `$ARGUMENTS` for:
 - First positional arg → repo path (required)
 - `--skip <phases>` → comma-separated list from: `secrets`, `architecture`,
   `dependencies`, `owasp`, `validation`
-- `--output <path>` → destination for final report markdown file
-  Default: none — when omitted the report stays at
-  `{repo_path}/.security-review/final-report.md` and no copy is made.
-  Must end in `.md`. If it does not, abort with:
-  `❌ --output path must end in .md (got: "{value}")`
+- `--output <dir>` → output directory; both `final-report.md` and `pocs/` are
+  copied here at the end. Created if it doesn't exist.
+  Default: none — when omitted everything stays at `{repo_path}/.security-review/`
 - `--runtime` → enable Docker-based runtime PoC validation in Phase 5
 - `--model <tier>` → `thorough` (default) | `balanced` | `fast`
   Abort with a clear error if any other value is given.
@@ -183,8 +181,7 @@ which semgrep     && semgrep --version || echo "⚠️  semgrep not found (Phase
 
 ```bash
 mkdir -p {repo_path}/.security-review
-# Only create the output parent dir if --output was explicitly provided
-[ -n "{output_path}" ] && mkdir -p "$(dirname {output_path})"
+[ -n "{output_dir}" ] && mkdir -p "{output_dir}"
 ```
 
 ## Step 7: Execute phases
@@ -198,24 +195,26 @@ After each phase, print a one-line progress summary.
 
 **If `--output` was explicitly provided:**
 
-Derive the PoC directory path (strip `.md`, append `-pocs`):
+Copy report and PoC scripts into the output directory:
 ```bash
-POCS_DIR="${output_path%.md}-pocs"
+cp {repo_path}/.security-review/final-report.md "{output_dir}/final-report.md"
+if [ -d "{repo_path}/.security-review/pocs" ] && \
+   [ -n "$(ls -A {repo_path}/.security-review/pocs)" ]; then
+  mkdir -p "{output_dir}/pocs"
+  cp {repo_path}/.security-review/pocs/* "{output_dir}/pocs/"
+fi
 ```
-
-Copy `{repo_path}/.security-review/final-report.md` to `{output_path}`.
-If `{repo_path}/.security-review/pocs/` is non-empty, copy its contents to `$POCS_DIR`.
 
 Print completion banner:
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ✅ Security review complete
-📄 Report:  {output_path}
-📁 PoCs:    $POCS_DIR  (if any were generated)
+📄 Report:  {output_dir}/final-report.md
+📁 PoCs:    {output_dir}/pocs/  (if any were generated)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-Call `present_files` with `{output_path}`.
+Call `present_files` with `{output_dir}/final-report.md`.
 
 **If `--output` was NOT provided:**
 

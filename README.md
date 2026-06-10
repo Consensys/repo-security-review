@@ -71,9 +71,9 @@ In any Claude Code session (CLI or Desktop), invoke the skill on a local reposit
 
 ```text
 /repo-security-review /path/to/repo --skip secrets,dependencies
-/repo-security-review /path/to/repo --output ~/reports/myapp.md
+/repo-security-review /path/to/repo --output ~/reports/myapp
 /repo-security-review /path/to/repo --runtime
-/repo-security-review /path/to/repo --skip architecture --output ~/reports/myapp.md --runtime
+/repo-security-review /path/to/repo --skip architecture --output ~/reports/myapp --runtime
 /repo-security-review /path/to/repo --model balanced
 /repo-security-review /path/to/repo --model fast --skip secrets
 ```
@@ -81,7 +81,7 @@ In any Claude Code session (CLI or Desktop), invoke the skill on a local reposit
 | Flag | Default | Effect |
 |------|---------|--------|
 | `--skip <phases>` | none | Comma-separated: `secrets`, `architecture`, `dependencies`, `owasp`, `validation` |
-| `--output <path>` | none — report stays at `<repo>/.security-review/final-report.md` | Copy report (and PoCs) to this path after the run |
+| `--output <dir>` | none — everything stays at `<repo>/.security-review/` | Directory to copy the report and PoC scripts into after the run. Created if it doesn't exist. |
 | `--runtime` | off | Docker-based runtime PoC validation in Phase 5 |
 | `--model <tier>` | `thorough` | `thorough` (most capable + extended thinking), `balanced` (no extended thinking, ~40% cheaper), `fast` (lightweight models, lowest cost) |
 | `--context <pairs>` | none | Optional inline threat model (`key=value,key=value`) used to calibrate severity. See "Adding context" below |
@@ -191,7 +191,7 @@ Working artifacts are written to `<repo>/.security-review/`:
 └── final-report.md
 ```
 
-When `--output` is provided, `final-report.md` is copied to that path (and `pocs/` alongside it as `{output%.md}-pocs/`). When `--output` is omitted, no copy is made — the report stays at `final-report.md` and PoCs stay in `pocs/`.
+When `--output <dir>` is provided, `final-report.md` and `pocs/` are copied into that directory (e.g. `--output ~/reports/myapp` → `~/reports/myapp/final-report.md` + `~/reports/myapp/pocs/`). When `--output` is omitted, no copy is made — everything stays under `.security-review/`.
 
 ---
 

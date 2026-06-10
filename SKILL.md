@@ -52,7 +52,7 @@ Parse these from `$ARGUMENTS` using the format:
 |----------|---------|-------------|
 | (first positional) | required | Repo path |
 | `--skip` | none | Comma-separated phase names to skip: `secrets`, `architecture`, `dependencies`, `owasp`, `validation` |
-| `--output` | none — report stays at `{repo_path}/.security-review/final-report.md` | Copy report to this path after the run. Must end in `.md` — abort with an error otherwise. |
+| `--output` | none — all artifacts stay at `{repo_path}/.security-review/` | Directory to copy the final report and PoC scripts into after the run. Created if it doesn't exist. |
 | `--runtime` | false | Enable Docker-based runtime PoC validation |
 | `--model` | `thorough` | Model tier controlling quality vs cost. `thorough` (default), `balanced`, `fast`. See [`--model`](#--model-model-tier) below. |
 | `--context` | none | Inline `key=value,key=value` threat model used to calibrate severity. Optional — omit for default behavior. See [`--context`](#--context-threat-model-calibration) below. |
@@ -367,37 +367,34 @@ If a phase fails or a tool is not installed:
 
 **If `--output` was explicitly provided:**
 
-1. Derive the PoC output directory:
+1. Copy report and PoC scripts into the output directory:
    ```bash
-   POCS_DIR="${output_path%.md}-pocs"
-   ```
-   Example: `--output ~/reports/myapp-2024-01-01.md` → `~/reports/myapp-2024-01-01-pocs/`
-
-2. Copy `{repo_path}/.security-review/final-report.md` to `{output_path}`
-
-3. If `{repo_path}/.security-review/pocs/` has files, copy it to `$POCS_DIR`:
-   ```bash
+   mkdir -p "{output_dir}"
+   cp {repo_path}/.security-review/final-report.md "{output_dir}/final-report.md"
    if [ -d "{repo_path}/.security-review/pocs" ] && \
       [ -n "$(ls -A {repo_path}/.security-review/pocs)" ]; then
-     mkdir -p "$POCS_DIR"
-     cp {repo_path}/.security-review/pocs/* "$POCS_DIR/"
+     mkdir -p "{output_dir}/pocs"
+     cp {repo_path}/.security-review/pocs/* "{output_dir}/pocs/"
    fi
    ```
+   Example: `--output ~/reports/myapp-2024-01-01` →
+   - `~/reports/myapp-2024-01-01/final-report.md`
+   - `~/reports/myapp-2024-01-01/pocs/` ← only if PoCs were generated
 
-4. Print:
+2. Print:
    ```
-   📄 Report saved to: {output_path}
-   📁 PoC scripts saved to: $POCS_DIR  ← only if PoCs were generated
+   📄 Report:  {output_dir}/final-report.md
+   📁 PoCs:    {output_dir}/pocs/  ← only if PoCs were generated
    ```
 
-5. Call `present_files` with `{output_path}`
+3. Call `present_files` with `{output_dir}/final-report.md`
 
 **If `--output` was NOT provided:**
 
 1. Print:
    ```
-   📄 Report: {repo_path}/.security-review/final-report.md
-   📁 PoC scripts: {repo_path}/.security-review/pocs/  ← only if PoCs were generated
+   📄 Report:  {repo_path}/.security-review/final-report.md
+   📁 PoCs:    {repo_path}/.security-review/pocs/  ← only if PoCs were generated
    ```
 
 2. Call `present_files` with `{repo_path}/.security-review/final-report.md`
