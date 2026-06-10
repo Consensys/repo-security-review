@@ -125,7 +125,9 @@ Parse `$ARGUMENTS` for:
   `dependencies`, `owasp`, `validation`
 - `--output <path>` → destination for final report markdown file
   Default: none — when omitted the report stays at
-  `{repo_path}/.security-review/final-report.md` and no copy is made
+  `{repo_path}/.security-review/final-report.md` and no copy is made.
+  Must end in `.md`. If it does not, abort with:
+  `❌ --output path must end in .md (got: "{value}")`
 - `--runtime` → enable Docker-based runtime PoC validation in Phase 5
 - `--model <tier>` → `thorough` (default) | `balanced` | `fast`
   Abort with a clear error if any other value is given.

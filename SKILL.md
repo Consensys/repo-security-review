@@ -52,7 +52,7 @@ Parse these from `$ARGUMENTS` using the format:
 |----------|---------|-------------|
 | (first positional) | required | Repo path |
 | `--skip` | none | Comma-separated phase names to skip: `secrets`, `architecture`, `dependencies`, `owasp`, `validation` |
-| `--output` | none — report stays at `{repo_path}/.security-review/final-report.md` | Copy report to this path after the run |
+| `--output` | none — report stays at `{repo_path}/.security-review/final-report.md` | Copy report to this path after the run. Must end in `.md` — abort with an error otherwise. |
 | `--runtime` | false | Enable Docker-based runtime PoC validation |
 | `--model` | `thorough` | Model tier controlling quality vs cost. `thorough` (default), `balanced`, `fast`. See [`--model`](#--model-model-tier) below. |
 | `--context` | none | Inline `key=value,key=value` threat model used to calibrate severity. Optional — omit for default behavior. See [`--context`](#--context-threat-model-calibration) below. |
