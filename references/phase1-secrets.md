@@ -53,12 +53,13 @@ grep -rn "BEGIN.*PRIVATE KEY\|BEGIN RSA\|BEGIN EC\|BEGIN OPENSSH" {repo_path} --
 ## Confidence Assessment
 
 For each finding, assess:
-- **HIGH**: Clear secret format (AWS key pattern, PEM block, etc.)
-- **MEDIUM**: Looks like a secret but could be a placeholder/example
-- **LOW**: High-entropy string, possibly a secret
+- **HIGH**: Clear secret format (AWS key pattern, PEM block, etc.) — included in findings
+- **MEDIUM**: Looks like a secret but could be a placeholder/example — counted, not included
+- **LOW**: High-entropy string, possibly a secret — counted, not included
 
-Flag LOW confidence findings but don't suppress them — let the report
-reader decide.
+**Only HIGH confidence findings go into the `findings` array.** MEDIUM and LOW
+are recorded in the summary counts only. This avoids flooding the report with
+false positives that require rotation for something that may be a test value.
 
 ## Output Format
 
@@ -67,16 +68,17 @@ Write to `{repo_path}/.security-review/phase1-secrets.json`:
 {
   "phase": "secrets",
   "summary": {
-    "total": 0,
+    "total_found": 0,
     "high_confidence": 0,
     "medium_confidence": 0,
-    "low_confidence": 0
+    "low_confidence": 0,
+    "filtered_out": 0
   },
   "findings": [
     {
       "id": "S-001",
       "type": "aws_access_key | github_token | private_key | password | generic_secret | ...",
-      "confidence": "HIGH | MEDIUM | LOW",
+      "confidence": "HIGH",
       "file": "relative/path/to/file.ext",
       "line": 42,
       "in_git_history": false,
@@ -85,7 +87,8 @@ Write to `{repo_path}/.security-review/phase1-secrets.json`:
       "redacted_value": "AKIA***************XYZ",
       "remediation": "Rotate the key immediately. Use environment variables or a secrets manager instead."
     }
-  ]
+  ],
+  "note": "N MEDIUM and N LOW confidence matches were found but excluded from findings to reduce false positives."
 }
 ```
 
