@@ -23,10 +23,16 @@ output to the next.
 ## Prerequisites
 
 Before running, ensure these CLI tools are available (install if missing):
-- `gitleaks` — secret scanning with git history.
-- `osv-scanner` — dependency CVE scanning (multi-language).
-- `semgrep` — static analysis to assist OWASP scanning.
-- `docker` — optional, required for runtime PoC validation only.
+- `gitleaks` — secret scanning with git history. Recommended.
+- `osv-scanner` — primary CVE scanner; covers all ecosystems from lockfiles. Recommended.
+- `semgrep` — static analysis to seed OWASP scanning. Recommended.
+- `jq` — EPSS enrichment (Phase 3) and runtime Docker paths (Phase 5). Recommended.
+- `pip-audit` — supplementary Python CVE pass (different DB from osv-scanner). Optional (Python repos only).
+- `grype` — supplementary Java/Maven CVE pass. Optional (Java repos only).
+- `poetry` — exports `poetry.lock` so pip-audit can read it. Optional (Poetry projects only).
+- `docker` — runtime PoC validation. Optional (`--runtime` flag only).
+
+`npm audit` is not listed — it is bundled with npm and available automatically in any Node.js project.
 
 Check and install:
 ```bash

@@ -68,7 +68,54 @@ install_pip_audit() {
   fi
 }
 
-# Required tools — failures are recorded but do not abort the script
+install_jq() {
+  echo "Installing jq..."
+  if command -v brew &>/dev/null; then
+    brew install jq
+  elif command -v apt-get &>/dev/null; then
+    sudo apt-get install -y jq
+  elif command -v yum &>/dev/null; then
+    sudo yum install -y jq
+  else
+    LATEST=$(curl -s https://api.github.com/repos/jqlang/jq/releases/latest \
+      | grep '"tag_name"' | cut -d'"' -f4)
+    OS_RAW=$(uname -s | tr '[:upper:]' '[:lower:]' | sed 's/darwin/macos/')
+    ARCH=$(uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
+    DEST="$HOME/.local/bin"
+    mkdir -p "$DEST"
+    curl -sSL \
+      "https://github.com/jqlang/jq/releases/download/${LATEST}/jq-${OS_RAW}-${ARCH}" \
+      -o "$DEST/jq" && chmod +x "$DEST/jq"
+    echo "  ℹ️  jq installed to $DEST — ensure $DEST is in your PATH"
+  fi
+}
+
+install_grype() {
+  echo "Installing grype (Java/Maven CVE scanning)..."
+  if command -v brew &>/dev/null; then
+    brew install grype
+  elif command -v go &>/dev/null; then
+    go install github.com/anchore/grype/cmd/grype@latest
+  else
+    curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
+      | sh -s -- -b "$HOME/.local/bin"
+    echo "  ℹ️  grype installed to $HOME/.local/bin — ensure it is in your PATH"
+  fi
+}
+
+install_poetry() {
+  echo "Installing poetry (Python poetry.lock support)..."
+  if command -v brew &>/dev/null; then
+    brew install poetry
+  elif command -v pip3 &>/dev/null; then
+    pip3 install poetry --break-system-packages 2>/dev/null || pip3 install poetry
+  else
+    curl -sSL https://install.python-poetry.org | python3 -
+    echo "  ℹ️  poetry installed — ensure ~/.local/bin is in your PATH"
+  fi
+}
+
+# Core tools — failures are recorded but do not abort the script
 if command -v gitleaks &>/dev/null; then
   echo "✅ gitleaks: $(gitleaks version)"
 else
@@ -91,6 +138,31 @@ if command -v pip-audit &>/dev/null; then
   echo "✅ pip-audit installed"
 else
   try_install pip-audit install_pip_audit
+fi
+
+if command -v jq &>/dev/null; then
+  echo "✅ jq: $(jq --version)"
+else
+  try_install jq install_jq
+fi
+
+echo ""
+echo "=== Optional: Language-specific tools ==="
+
+# grype — Java/Maven CVE scanning (Phase 3); only needed for Java repos
+if command -v grype &>/dev/null; then
+  echo "✅ grype: $(grype version 2>/dev/null | head -1)"
+else
+  echo "ℹ️  grype not found — Java/Maven CVE scanning (Phase 3) will be skipped for Java repos"
+  try_install grype install_grype
+fi
+
+# poetry — Python poetry.lock export (Phase 3); only needed for repos using poetry
+if command -v poetry &>/dev/null; then
+  echo "✅ poetry: $(poetry --version)"
+else
+  echo "ℹ️  poetry not found — poetry.lock CVE scanning will be skipped (requirements.txt still works)"
+  try_install poetry install_poetry
 fi
 
 # Optional: Docker (for runtime validation)
@@ -120,6 +192,9 @@ if [ ${#FAILED[@]} -gt 0 ]; then
       osv-scanner) echo "   • osv-scanner: https://google.github.io/osv-scanner/installation/" ;;
       semgrep)     echo "   • semgrep:     https://semgrep.dev/docs/getting-started/" ;;
       pip-audit)   echo "   • pip-audit:   pip3 install pip-audit" ;;
+      jq)          echo "   • jq:          https://jqlang.github.io/jq/download/ or: apt install jq" ;;
+      grype)       echo "   • grype:       https://github.com/anchore/grype#installation" ;;
+      poetry)      echo "   • poetry:      https://python-poetry.org/docs/#installation" ;;
     esac
   done
   echo "   Phases that depend on missing tools will run in degraded mode."

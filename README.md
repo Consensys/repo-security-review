@@ -25,10 +25,16 @@ External CLI tools used by the phases:
 
 | Tool | Used by | Required? |
 |------|---------|-----------|
-| `gitleaks` | Phase 1 | Recommended |
-| `osv-scanner` | Phase 3 | Recommended |
-| `semgrep` | Phase 4 | Recommended |
-| `docker` | Phase 5 (`--runtime` only) | Optional |
+| `gitleaks` | Phase 1 — secret scanning | Recommended |
+| `osv-scanner` | Phase 3 — dependency CVEs (all ecosystems) | Recommended |
+| `semgrep` | Phase 4 — OWASP static analysis | Recommended |
+| `jq` | Phase 3 — EPSS enrichment · Phase 5 — runtime paths | Recommended |
+| `pip-audit` | Phase 3 — Python CVEs (supplementary) | Optional (Python repos only) |
+| `grype` | Phase 3 — Java/Maven CVEs (supplementary) | Optional (Java repos only) |
+| `poetry` | Phase 3 — exports `poetry.lock` for pip-audit | Optional (Poetry projects only) |
+| `docker` | Phase 5 — runtime PoC validation | Optional (`--runtime` flag only) |
+
+**Scanning strategy:** `osv-scanner` is the primary CVE scanner and covers all ecosystems (npm, Python, Go, Ruby, Cargo, Maven) from lockfiles. `pip-audit` and `grype` are supplementary — they run a second pass using different vulnerability databases (PyPA advisory and Anchore respectively) and occasionally surface CVEs that osv-scanner misses. `npm audit` is not listed separately because it is bundled with npm — any Node.js project already has it.
 
 If a tool is missing, the corresponding phase runs in a degraded mode and the report notes the limitation — the pipeline never aborts because of a missing tool.
 
