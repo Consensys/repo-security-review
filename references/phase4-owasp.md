@@ -24,6 +24,23 @@ project's tech stack — don't test for SQLi in a project with no database.
   actively reachable.
 - If absent (Phase 3 was skipped), continue without it.
 
+**Model tier + codebase size** — used by the multi-pass decision below:
+```bash
+MODEL_TIER=$(jq -r '.model_tier // "thorough"' \
+  {repo_path}/.security-review/run-metadata.json 2>/dev/null || echo "thorough")
+
+SOURCE_FILES=$(find {repo_path} \( \
+  -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.tsx" \
+  -o -name "*.go" -o -name "*.java" -o -name "*.rb" -o -name "*.php" \
+  -o -name "*.cs" -o -name "*.rs" \
+\) -not -path "*/.git/*" -not -path "*/node_modules/*" \
+   -not -path "*/vendor/*"  -not -path "*/dist/*" -not -path "*/build/*" \
+| wc -l | tr -d ' ')
+
+PHASE2_HIGH_CRITICAL=$(jq '[.findings[] | select(.severity == "CRITICAL" or .severity == "HIGH")] | length' \
+  {repo_path}/.security-review/phase2-architecture.json 2>/dev/null || echo 0)
+```
+
 ## Step 1: Determine Which Checks to Run
 
 Use tech-stack.json to build your check list BEFORE scanning. Log what you're
@@ -78,6 +95,82 @@ and log: `ℹ️  OWASP API Top 10 skipped — project does not appear to be API
   ⏭️  Skipped: A08-Deser (has_deserialization=false)
   ⏭️  Skipped: A10-SSRF (has_external_http_calls=false)
 ```
+
+### Multi-Pass Decision
+
+Count the items in your `checks_run` list → `APPLICABLE_CHECKS`.
+
+Multi-pass is **only available on `thorough` tier**. Evaluate in order:
+
+1. If `MODEL_TIER != "thorough"` → **single-pass, stop here.** Log:
+   ```
+   ▶️  Single-pass — multi-pass requires --model thorough (current: {model_tier})
+   ```
+
+2. If `MODEL_TIER == "thorough"`, enable multi-pass if **any** of these is true:
+
+   | Criterion | Threshold | Rationale |
+   |-----------|-----------|-----------|
+   | `APPLICABLE_CHECKS` | `>= 10` | API Top 10 or multiple injection vectors — wide attack surface |
+   | `SOURCE_FILES` | `> 200` | Codebase too large for one reliable pass |
+   | `PHASE2_HIGH_CRITICAL` | `>= 2` | Structural security debt signals more code-level issues |
+
+   Log the outcome:
+   ```
+   # Criteria met:
+   🔁 Multi-pass enabled — {reason(s)} (e.g. "847 source files, 12 applicable checks")
+      Will run until dry, max 3 rounds.
+
+   # Criteria not met (thorough tier but small/simple repo):
+   ▶️  Single-pass — {source_files} files · {applicable_checks} checks · {phase2_high_critical} Phase 2 HIGH/CRITICAL findings
+   ```
+
+## Multi-Pass Execution
+
+**If single-pass:** skip this section and proceed directly to Step 2. Run it once.
+
+**If multi-pass:** Steps 2 and 3 run as a loop. Track the following state across rounds:
+
+| Variable | Initial value | Description |
+|----------|--------------|-------------|
+| `ROUND` | 1 | Current round number |
+| `DRY_ROUNDS` | 0 | Consecutive rounds with zero new findings |
+| `COVERED_FILES` | empty set | All files examined across all rounds |
+| `ALL_FINDING_KEYS` | empty set | Dedup keys: `(file, line_start, vulnerability_type)` |
+| `NEW_THIS_ROUND` | 0 | New findings added in the current round |
+
+**Each round:**
+
+1. Run Steps 2 and 3.
+   - **Round 1**: analyze the full codebase normally.
+   - **Round 2+**: focus on files not yet in `COVERED_FILES` and on check
+     categories that produced findings last round (examine adjacent files and
+     unexplored patterns for those categories). Do not re-examine files already
+     in `COVERED_FILES` unless a prior finding points directly into them.
+
+2. Count findings whose `(file, line_start, vulnerability_type)` key is not
+   already in `ALL_FINDING_KEYS` → set `NEW_THIS_ROUND`.
+
+3. Update `COVERED_FILES` and `ALL_FINDING_KEYS` with this round's results.
+
+4. Log the round outcome:
+   ```
+   🔁 Round {N} complete — {NEW_THIS_ROUND} new findings ({total_so_far} total across all rounds)
+   ```
+
+5. If `NEW_THIS_ROUND == 0`: increment `DRY_ROUNDS`. Otherwise reset `DRY_ROUNDS` to 0.
+
+6. **Stop** if `DRY_ROUNDS >= 2` OR `ROUND >= 3`. Log:
+   ```
+   ✅ Multi-pass complete — {N} round(s), {total} findings
+   ```
+   Then proceed to Output Format.
+
+7. Otherwise increment `ROUND` and repeat from step 1.
+
+Merge all rounds into a single `findings` array. Deduplicate by
+`(file, line_start, vulnerability_type)` — keep the entry with the higher severity
+if the same location appears in multiple rounds.
 
 ## Step 2: Run Semgrep (scoped to relevant rules)
 
@@ -228,6 +321,11 @@ Write to `{repo_path}/.security-review/phase4-owasp.json`:
 ```json
 {
   "phase": "owasp_analysis",
+  "multi_pass": {
+    "enabled": true,
+    "rounds_completed": 2,
+    "trigger_reasons": ["source_files=847", "applicable_checks=12"]
+  },
   "checks_run": ["A01", "A02", "A03-SQLi", "A07", "A09", "API1", "API2"],
   "checks_skipped": [
     {"check": "A03-XSS", "reason": "is_api_only=true, no HTML rendering detected"},
