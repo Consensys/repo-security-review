@@ -56,14 +56,23 @@ Parse these from `$ARGUMENTS` using the format:
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| (first positional) | required | Repo path |
+| (first positional) | required (single-repo mode) | Repo path. Omit when `--repos` is used. |
+| `--repos` | none | Comma-separated list of repo paths for multi-repo mode. Activates Phase 0 and Phase 7. When set, the first positional arg is not required. |
 | `--skip` | none | Comma-separated phase names to skip: `secrets`, `architecture`, `dependencies`, `owasp`, `validation` |
-| `--output` | none — all artifacts stay at `{repo_path}/.security-review/` | Directory to copy the final report and PoC scripts into after the run. Created if it doesn't exist. |
+| `--output` | none — all artifacts stay at `{repo_path}/.security-review/` (single-repo) or `./system-security-review/` (multi-repo) | Directory to copy the final report and PoC scripts into after the run. Created if it doesn't exist. **Strongly recommended in multi-repo mode.** |
 | `--runtime` | false | Enable Docker-based runtime PoC validation |
 | `--model` | `thorough` | Model tier controlling quality vs cost. `thorough` (default), `balanced`, `fast`. See [`--model`](#--model-model-tier) below. |
 | `--context` | none | Inline `key=value,key=value` threat model used to calibrate severity. Optional — omit for default behavior. See [`--context`](#--context-threat-model-calibration) below. |
 
-If no repo path is provided, ask the user before proceeding.
+If no repo path is provided and `--repos` is not set, ask the user before proceeding.
+
+**Multi-repo mode** is activated by the presence of `--repos`. In this mode:
+- The comma-separated paths are the list of services to analyze.
+- `--output` defaults to `./system-security-review/` if not provided.
+- Phase 0 (Service Topology Mapping) runs once before per-repo phases.
+- Phases 1–6 run independently for each repo in order.
+- Phase 7 (Cross-Repo Synthesis) runs once after all per-repo phases complete.
+- The output directory contains both per-service subdirectories and the system-level report.
 
 **Skip phase aliases**:
 - `secrets` → Phase 1
@@ -93,18 +102,25 @@ stays valid across version bumps and works if adapted to a different provider.
 - On `balanced`/`fast`: omit the `thinking` param entirely for all phases (do NOT pass `thinking: {type: "disabled"}` — this returns a 400 on Fable 5).
 - If a listed model is unavailable in the runtime, fall back to the nearest available model and log a warning.
 
-**Before spawning Phase 1**, resolve the actual model IDs for each phase and
-write `{repo_path}/.security-review/run-metadata.json`:
+**Before spawning Phase 1** (or Phase 0 in multi-repo mode), resolve the actual
+model IDs for each phase and write `run-metadata.json`.
+
+*Single-repo:* write to `{repo_path}/.security-review/run-metadata.json`.
+*Multi-repo:* write one shared copy to `{output_dir}/run-metadata.json`; each
+per-repo `.security-review/` directory can symlink or copy it.
+
 ```json
 {
   "model_tier": "thorough | balanced | fast",
+  "phase0_model":  "<actual model ID — only present in multi-repo mode>",
   "phase1_model":  "<actual model ID selected>",
   "phase2_model":  "<actual model ID selected>",
   "phase2_extended_thinking": true,
   "phase3_model":  "<actual model ID selected>",
   "phase4_model":  "<actual model ID selected>",
   "phase5_model":  "<actual model ID selected>",
-  "phase6_model":  "<actual model ID selected>"
+  "phase6_model":  "<actual model ID selected>",
+  "phase7_model":  "<actual model ID — only present in multi-repo mode>"
 }
 ```
 Record the model IDs you actually use — not role descriptions. Phase 6 reads
@@ -213,6 +229,8 @@ Run phases **sequentially** — each phase's output informs the next.
 Each phase runs as an **isolated subagent** with strict context boundaries.
 Skip any phase present in the `--skip` list.
 
+### Single-repo mode
+
 ```
 Phase 1  → Secret Scanning              [skippable: --skip secrets]
 Phase 2  → Architectural Analysis       [skippable: --skip architecture]
@@ -228,8 +246,37 @@ Phase 5  → Validation + PoC             [skippable: --skip validation]
               writes a PoC only for findings that pass the validation gate.
               PoC generation is gated inside this phase — unvalidated findings
               never get a PoC. Optional runtime validation via Docker if --runtime.
-Phase 6  → Report Builder               [always runs, was previously Phase 7]
+Phase 6  → Report Builder               [always runs]
 ```
+
+### Multi-repo mode (`--repos` flag)
+
+```
+Phase 0  → Service Topology Mapping     [runs once; multi-repo only]
+           └─ Reads docker-compose, k8s manifests, OpenAPI specs, .proto files
+           └─ Produces: service-topology.json in {output_dir}
+           └─ Passed as context to each repo's Phase 2
+
+For each repo in --repos (run all phases for repo N before starting repo N+1):
+  Phase 1  → Secret Scanning            [skippable: --skip secrets]
+  Phase 2  → Architectural Analysis     [skippable: --skip architecture]
+             └─ Receives service-topology.json for system-level context
+  Phase 3  → Dependency CVE Scanning    [skippable: --skip dependencies]
+  Phase 3b → Reachability Validation
+  Phase 4  → Code-Level OWASP Analysis  [skippable: --skip owasp]
+  Phase 5  → Validation + PoC           [skippable: --skip validation]
+  Phase 6  → Per-service Report Builder [always runs]
+
+Phase 7  → Cross-Repo Synthesis         [runs once; multi-repo only]
+           └─ Reads all per-repo phase outputs + service-topology.json
+           └─ Produces: system-findings.json + system-report.md
+           └─ Finds: shared credentials, trust boundary gaps, auth mismatches,
+              cross-service data flows, inconsistent security posture
+```
+
+**Run all phases for each repo to completion before moving to the next repo.**
+Do not interleave phases across repos — each repo's Phase 2 output must be
+available before that repo's Phase 3 starts.
 
 ## Subagent Context Isolation (Critical)
 
@@ -272,18 +319,22 @@ a finding passes, so unvalidated findings can never get one.
 
 Read the agent instructions for each phase from `references/` before spawning:
 
-| Phase | Reference File |
-|-------|---------------|
-| 1 | `references/phase1-secrets.md` |
-| 2 | `references/phase2-architecture.md` |
-| 3 + 3b | `references/phase3-dependencies.md` |
-| 4 | `references/phase4-owasp.md` |
-| 5 (Validation + PoC) | `references/phase5-validate-and-poc.md` |
-| 6 (Report) | `references/phase6-report.md` |
+| Phase | Reference File | Mode |
+|-------|---------------|------|
+| 0 (Topology) | `references/phase0-topology.md` | multi-repo only |
+| 1 | `references/phase1-secrets.md` | always |
+| 2 | `references/phase2-architecture.md` | always |
+| 3 + 3b | `references/phase3-dependencies.md` | always |
+| 4 | `references/phase4-owasp.md` | always |
+| 5 (Validation + PoC) | `references/phase5-validate-and-poc.md` | always |
+| 6 (Report) | `references/phase6-report.md` | always |
+| 7 (Synthesis) | `references/phase7-synthesis.md` | multi-repo only |
 
 ## Output Structure
 
-Each phase writes its findings to a working directory:
+### Single-repo mode
+
+Each phase writes its findings to a working directory inside the repo:
 ```
 {repo_path}/.security-review/
 ├── run-metadata.json         ← written by orchestrator before Phase 1; model IDs + tier
@@ -308,7 +359,29 @@ Each phase writes its findings to a working directory:
 └── final-report.md           ← copied to --output path at end
 ```
 
-Create this directory at the start before spawning any agents.
+### Multi-repo mode
+
+Phase 0 and Phase 7 write to `{output_dir}`. Per-repo phases still write to
+their own `{repo_path}/.security-review/` directories; the final reports and
+PoCs are copied into per-service subdirectories under `{output_dir}`:
+
+```
+{output_dir}/                         ← set by --output (defaults to ./system-security-review/)
+├── service-topology.json             ← Phase 0 output
+├── system-findings.json              ← Phase 7 cross-repo findings
+├── system-report.md                  ← Phase 7 synthesis report
+├── {service-name-1}/                 ← directory name = repo directory name
+│   ├── final-report.md
+│   └── pocs/
+├── {service-name-2}/
+│   ├── final-report.md
+│   └── pocs/
+└── {service-name-3}/
+    ├── final-report.md
+    └── pocs/
+```
+
+Create `{output_dir}` and the working directory for each repo before spawning agents.
 
 ## Tech Stack Profile (Phase 2 → downstream phases)
 
@@ -371,6 +444,8 @@ If a phase fails or a tool is not installed:
 
 ## Final Step
 
+### Single-repo mode
+
 **If `--output` was explicitly provided:**
 
 1. Copy report and PoC scripts into the output directory:
@@ -404,3 +479,33 @@ If a phase fails or a tool is not installed:
    ```
 
 2. Call `present_files` with `{repo_path}/.security-review/final-report.md`
+
+### Multi-repo mode
+
+After Phase 7 completes, copy each repo's report into its service subdirectory:
+
+```bash
+for each repo in --repos:
+  SVC_NAME=$(basename {repo_path})
+  mkdir -p "{output_dir}/{SVC_NAME}/pocs"
+  cp {repo_path}/.security-review/final-report.md "{output_dir}/{SVC_NAME}/final-report.md"
+  if [ -d "{repo_path}/.security-review/pocs" ] && \
+     [ -n "$(ls -A {repo_path}/.security-review/pocs)" ]; then
+    cp {repo_path}/.security-review/pocs/* "{output_dir}/{SVC_NAME}/pocs/"
+  fi
+done
+```
+
+Print completion banner:
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ Multi-repo security review complete
+📋 System report:  {output_dir}/system-report.md
+📄 Per-service reports:
+   {output_dir}/{svc1}/final-report.md
+   {output_dir}/{svc2}/final-report.md
+   ...
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+Call `present_files` with `{output_dir}/system-report.md`.

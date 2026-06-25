@@ -8,14 +8,16 @@ See [SKILL.md](SKILL.md) for the full specification.
 
 ## What it does
 
-Seven sequential phases:
+Seven sequential phases (single-repo), plus Phase 0 and Phase 7 for multi-repo runs:
 
+0. **Service topology mapping** *(multi-repo only)* — reads docker-compose, k8s manifests, OpenAPI specs, and .proto files across all repos; produces a shared `service-topology.json` passed to each service's Phase 2
 1. **Secret scanning** — `gitleaks` across full git history
 2. **Architectural analysis** — trust boundaries, auth model, infra config; produces a tech-stack profile that gates downstream phases
 3. **Dependency CVE scanning** (+ 3b reachability) — `osv-scanner` against ecosystems detected in Phase 2
 4. **Code-level OWASP analysis** — Top 10 + API Top 10, pruned by tech stack (no DB → skip SQLi, etc.)
 5. **Finding validation + PoC generation** — independent re-validation of Phase 4 candidates; PoCs written only for findings that pass the gate (optional Docker runtime validation)
 6. **Report builder** — aggregates everything into a single markdown report with severity matrix, remediation table, false-positives log, and PoC scripts
+7. **Cross-repo synthesis** *(multi-repo only)* — identifies vulnerabilities that are only visible at the system level: shared credentials, service-to-service blind trust, auth contract mismatches, cross-service data flows bypassing defenses
 
 ---
 
@@ -82,12 +84,16 @@ In any Claude Code session (CLI or Desktop), invoke the skill on a local reposit
 /repo-security-review /path/to/repo --skip architecture --output ~/reports/myapp --runtime
 /repo-security-review /path/to/repo --model balanced
 /repo-security-review /path/to/repo --model fast --skip secrets
+
+# Multi-repo — analyze three microservices and get a system-level report
+/repo-security-review --repos ~/svcs/auth,~/svcs/gateway,~/svcs/users --output ~/reports/my-system
 ```
 
 | Flag | Default | Effect |
 |------|---------|--------|
+| `--repos <paths>` | none | Comma-separated repo paths. Activates multi-repo mode (Phase 0 + Phase 7). |
 | `--skip <phases>` | none | Comma-separated: `secrets`, `architecture`, `dependencies`, `owasp`, `validation` |
-| `--output <dir>` | none — everything stays at `<repo>/.security-review/` | Directory to copy the report and PoC scripts into after the run. Created if it doesn't exist. |
+| `--output <dir>` | none (single-repo) / `./system-security-review/` (multi-repo) | Directory to copy the report and PoC scripts into after the run. Created if it doesn't exist. |
 | `--runtime` | off | Docker-based runtime PoC validation in Phase 5 |
 | `--model <tier>` | `thorough` | `thorough` (most capable + extended thinking), `balanced` (no extended thinking, ~40% cheaper), `fast` (lightweight models, lowest cost) |
 | `--context <pairs>` | none | Optional inline threat model (`key=value,key=value`) used to calibrate severity. See "Adding context" below |
@@ -179,6 +185,8 @@ flowchart TD
 
 ## Output
 
+### Single-repo
+
 Working artifacts are written to `<repo>/.security-review/`:
 
 ```text
@@ -199,6 +207,28 @@ Working artifacts are written to `<repo>/.security-review/`:
 
 When `--output <dir>` is provided, `final-report.md` and `pocs/` are copied into that directory (e.g. `--output ~/reports/myapp` → `~/reports/myapp/final-report.md` + `~/reports/myapp/pocs/`). When `--output` is omitted, no copy is made — everything stays under `.security-review/`.
 
+### Multi-repo
+
+Phase 0 and Phase 7 artifacts land in `--output` (defaults to `./system-security-review/`). Each service's report and PoCs are copied into a named subdirectory:
+
+```text
+~/reports/my-system/
+├── service-topology.json   ← Phase 0: service graph
+├── system-findings.json    ← Phase 7: cross-repo security findings
+├── system-report.md        ← Phase 7: synthesis report (start here)
+├── auth/
+│   ├── final-report.md
+│   └── pocs/
+├── gateway/
+│   ├── final-report.md
+│   └── pocs/
+└── users/
+    ├── final-report.md
+    └── pocs/
+```
+
+`system-report.md` is the entry point — it summarizes cross-service findings and links to each per-service report.
+
 ---
 
 ## Repository layout
@@ -207,12 +237,14 @@ When `--output <dir>` is provided, `final-report.md` and `pocs/` are copied into
 repo-security-review/
 ├── SKILL.md                  # Skill specification (read by Claude Code)
 ├── references/               # Per-phase agent instructions
+│   ├── phase0-topology.md    # Multi-repo only: service topology mapping
 │   ├── phase1-secrets.md
 │   ├── phase2-architecture.md
 │   ├── phase3-dependencies.md
 │   ├── phase4-owasp.md
 │   ├── phase5-validate-and-poc.md
-│   └── phase6-report.md
+│   ├── phase6-report.md
+│   └── phase7-synthesis.md   # Multi-repo only: cross-repo synthesis
 ├── scripts/
 │   ├── repo-security-review-command.md   # Slash-command definition
 │   └── setup.sh                          # Installs gitleaks, osv-scanner, semgrep

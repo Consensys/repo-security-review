@@ -6,9 +6,10 @@
 #   /repo-security-review /path/to/repo
 #   /repo-security-review /path/to/repo --skip secrets
 #   /repo-security-review /path/to/repo --skip architecture,dependencies
-#   /repo-security-review /path/to/repo --output ~/reports/myapp.md
+#   /repo-security-review /path/to/repo --output ~/reports/myapp
 #   /repo-security-review /path/to/repo --runtime
-#   /repo-security-review /path/to/repo --skip architecture --output ~/reports/myapp.md --runtime
+#   /repo-security-review /path/to/repo --skip architecture --output ~/reports/myapp --runtime
+#   /repo-security-review --repos /path/svc1,/path/svc2,/path/svc3 --output ~/reports/my-system
 
 Run a full automated security review of a code repository.
 
@@ -31,8 +32,14 @@ Usage:
 
 Options:
   --skip <phases>       Comma-separated phases to skip (see below)
+  --repos <paths>       Comma-separated repo paths for multi-repo mode.
+                        Activates Phase 0 (topology) and Phase 7 (synthesis).
+                        Produces a system-level report alongside per-service
+                        reports. Example:
+                        --repos ~/svc/auth,~/svc/gateway,~/svc/users
   --output <dir>        Directory to save the report and PoC scripts into.
-                        Default: (none — everything stays in <repo>/.security-review/)
+                        Default: (single-repo: none — everything stays in
+                        <repo>/.security-review/) (multi-repo: ./system-security-review/)
   --runtime             Enable Docker-based runtime PoC validation
   --model <tier>        Model quality/cost tier (default: thorough)
                         thorough  — most capable model + extended thinking
@@ -96,7 +103,7 @@ Phase that always runs:
                     priority table, false positives log, and PoC scripts.
 
 Examples:
-  # Full review
+  # Full review (single repo)
   /repo-security-review ~/repos/my-service
 
   # Skip secrets and deps (quick arch + code review only)
@@ -113,6 +120,12 @@ Examples:
 
   # Full review with severity calibrated to an internal tool
   /repo-security-review ~/repos/my-service --context deployment_target=internal_tool,data_sensitivity=internal,auth_required_to_reach=true
+
+  # Multi-repo: review three microservices and get a system-level report
+  /repo-security-review --repos ~/svcs/auth,~/svcs/gateway,~/svcs/users --output ~/reports/my-system
+
+  # Multi-repo: fast tier, skip secrets, get system synthesis
+  /repo-security-review --repos ~/svcs/auth,~/svcs/gateway --model fast --skip secrets --output ~/reports/my-system
 ```
 
 ---
@@ -120,12 +133,16 @@ Examples:
 ## Step 2: Parse Arguments (if not --help)
 
 Parse `$ARGUMENTS` for:
-- First positional arg → repo path (required)
+- `--repos <paths>` → comma-separated list of repo paths (multi-repo mode).
+  When present, the first positional arg is not required.
+  When absent, the first positional arg is the single repo path (required).
+- First positional arg → single repo path (required unless `--repos` is set)
 - `--skip <phases>` → comma-separated list from: `secrets`, `architecture`,
   `dependencies`, `owasp`, `validation`
 - `--output <dir>` → output directory; both `final-report.md` and `pocs/` are
   copied here at the end. Created if it doesn't exist.
-  Default: none — when omitted everything stays at `{repo_path}/.security-review/`
+  Default (single-repo): none — when omitted everything stays at `{repo_path}/.security-review/`
+  Default (multi-repo): `./system-security-review/`
 - `--runtime` → enable Docker-based runtime PoC validation in Phase 5
 - `--model <tier>` → `thorough` (default) | `balanced` | `fast`
   Abort with a clear error if any other value is given.
@@ -147,23 +164,49 @@ Apply cascade rules silently:
 - `--skip owasp` → add `validation` to skip list
 - `--skip validation` → PoC is skipped automatically (it runs inside Phase 5, not as a separate phase)
 
-## Step 3: Validate repo path
+**Multi-repo validation:** if `--repos` is set with only one path, warn:
+`⚠️  Only one repo path provided to --repos. Use the positional arg for single-repo mode.`
+Then continue — it is not an error.
 
+## Step 3: Validate repo path(s)
+
+**Single-repo mode:**
 ```bash
 ls "$REPO_PATH" 2>/dev/null || { echo "❌ Repo path not found: $REPO_PATH"; exit 1; }
 ```
 
+**Multi-repo mode:** validate each path in the `--repos` list:
+```bash
+for each path in REPOS:
+  ls "$path" 2>/dev/null || { echo "❌ Repo path not found: $path"; exit 1; }
+done
+```
+
 ## Step 4: Print run plan
 
+**Single-repo mode:**
 ```
 🔍 Security Review: {repo-name}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Phases running:   {list}
 Phases skipped:   {list or "none"}
 Model tier:       {thorough / balanced / fast}
-Output:           {output_path if set, else ".security-review/final-report.md"}
+Output:           {output_path if set, else "<repo>/.security-review/final-report.md"}
 Runtime PoC:      {enabled / disabled}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+**Multi-repo mode:**
+```
+🔍 Multi-Repo Security Review ({N} services)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Services:         {svc1}, {svc2}, {svc3}
+Phases running:   Phase 0 → [1–6 per service] → Phase 7
+Phases skipped:   {list or "none" — applies to each service's per-repo phases}
+Model tier:       {thorough / balanced / fast}
+Output:           {output_dir}
+Runtime PoC:      {enabled / disabled}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
 ## Step 5: Check prerequisites
@@ -179,19 +222,39 @@ which semgrep     && semgrep --version || echo "⚠️  semgrep not found (Phase
 
 ## Step 6: Create working directories
 
+**Single-repo mode:**
 ```bash
 mkdir -p {repo_path}/.security-review
 [ -n "{output_dir}" ] && mkdir -p "{output_dir}"
 ```
 
+**Multi-repo mode:**
+```bash
+mkdir -p "{output_dir}"
+for each repo in REPOS:
+  mkdir -p "{repo_path}/.security-review"
+done
+```
+
 ## Step 7: Execute phases
 
-Read SKILL.md and execute each non-skipped phase as an isolated subagent,
-passing only file paths (never in-memory content) between phases.
+Read SKILL.md for full phase instructions. Execute each non-skipped phase as an
+isolated subagent, passing only file paths (never in-memory content) between phases.
 
-After each phase, print a one-line progress summary.
+**Single-repo mode:** run phases 1–6 in order.
+
+**Multi-repo mode:**
+1. Run Phase 0 (topology mapping) — passes all repo paths, writes `{output_dir}/service-topology.json`
+2. For each repo in `--repos` (one at a time, never interleaved):
+   - Run phases 1–6 for that repo
+   - Pass `{output_dir}/service-topology.json` to the Phase 2 agent as additional context
+3. Run Phase 7 (cross-repo synthesis) — passes `{output_dir}` and all per-repo paths
+
+After each phase (and each per-repo phase in multi-repo mode), print a one-line progress summary.
 
 ## Step 8: Deliver
+
+### Single-repo mode
 
 **If `--output` was explicitly provided:**
 
@@ -228,3 +291,33 @@ No copy is made. Print completion banner:
 ```
 
 Call `present_files` with `{repo_path}/.security-review/final-report.md`.
+
+### Multi-repo mode
+
+Copy each service's report into a subdirectory of `{output_dir}`:
+```bash
+for each repo in REPOS:
+  SVC_NAME=$(basename {repo_path})
+  mkdir -p "{output_dir}/{SVC_NAME}/pocs"
+  cp {repo_path}/.security-review/final-report.md "{output_dir}/{SVC_NAME}/final-report.md"
+  if [ -d "{repo_path}/.security-review/pocs" ] && \
+     [ -n "$(ls -A {repo_path}/.security-review/pocs)" ]; then
+    cp {repo_path}/.security-review/pocs/* "{output_dir}/{SVC_NAME}/pocs/"
+  fi
+done
+# system-report.md and system-findings.json are already in {output_dir} (written by Phase 7)
+```
+
+Print completion banner:
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ Multi-repo security review complete
+📋 System report:  {output_dir}/system-report.md
+📄 Per-service reports:
+   {output_dir}/{svc1}/final-report.md
+   {output_dir}/{svc2}/final-report.md
+   ...
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+Call `present_files` with `{output_dir}/system-report.md`.
