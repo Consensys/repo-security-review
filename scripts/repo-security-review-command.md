@@ -41,13 +41,6 @@ Options:
                         Default: (single-repo: none — everything stays in
                         <repo>/.security-review/) (multi-repo: ./system-security-review/)
   --runtime             Enable Docker-based runtime PoC validation
-  --model <tier>        Model quality/cost tier (default: thorough)
-                        thorough  — most capable model + extended thinking
-                                    (highest quality, highest cost)
-                        balanced  — most capable model, no extended thinking
-                                    (~40% cheaper, slightly less deep arch analysis)
-                        fast      — lightweight models throughout
-                                    (lowest cost, may miss subtle issues)
   --context <pairs>     Optional inline threat model used to calibrate
                         severity. Format: comma-separated key=value pairs.
                         Keys: deployment_target, data_sensitivity,
@@ -124,8 +117,8 @@ Examples:
   # Multi-repo: review three microservices and get a system-level report
   /repo-security-review --repos ~/svcs/auth,~/svcs/gateway,~/svcs/users --output ~/reports/my-system
 
-  # Multi-repo: fast tier, skip secrets, get system synthesis
-  /repo-security-review --repos ~/svcs/auth,~/svcs/gateway --model fast --skip secrets --output ~/reports/my-system
+  # Multi-repo: skip secrets across all services, get system synthesis
+  /repo-security-review --repos ~/svcs/auth,~/svcs/gateway --skip secrets --output ~/reports/my-system
 ```
 
 ---
@@ -144,8 +137,6 @@ Parse `$ARGUMENTS` for:
   Default (single-repo): none — when omitted everything stays at `{repo_path}/.security-review/`
   Default (multi-repo): `./system-security-review/`
 - `--runtime` → enable Docker-based runtime PoC validation in Phase 5
-- `--model <tier>` → `thorough` (default) | `balanced` | `fast`
-  Abort with a clear error if any other value is given.
 - `--context <pairs>` → optional inline threat model as comma-separated
   `key=value` pairs. Allowed keys: `deployment_target`, `data_sensitivity`,
   `auth_required_to_reach`, `include_readme`. Allowed values per key are
@@ -190,7 +181,6 @@ done
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Phases running:   {list}
 Phases skipped:   {list or "none"}
-Model tier:       {thorough / balanced / fast}
 Output:           {output_path if set, else "<repo>/.security-review/final-report.md"}
 Runtime PoC:      {enabled / disabled}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -203,7 +193,6 @@ Runtime PoC:      {enabled / disabled}
 Services:         {svc1}, {svc2}, {svc3}
 Phases running:   Phase 0 → [1–6 per service] → Phase 7
 Phases skipped:   {list or "none" — applies to each service's per-repo phases}
-Model tier:       {thorough / balanced / fast}
 Output:           {output_dir}
 Runtime PoC:      {enabled / disabled}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

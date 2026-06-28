@@ -49,7 +49,7 @@ The user provides:
 
 Parse these from `$ARGUMENTS` using the format:
 ```
-/repo-security-review /path/to/repo [--skip phase1,phase3] [--output /path/to/report.md] [--runtime] [--model thorough|balanced|fast]
+/repo-security-review /path/to/repo [--skip phase1,phase3] [--output /path/to/report.md] [--runtime]
 ```
 
 ### Argument Parsing Rules
@@ -61,7 +61,6 @@ Parse these from `$ARGUMENTS` using the format:
 | `--skip` | none | Comma-separated phase names to skip: `secrets`, `architecture`, `dependencies`, `owasp`, `validation` |
 | `--output` | none — all artifacts stay at `{repo_path}/.security-review/` (single-repo) or `./system-security-review/` (multi-repo) | Directory to copy the final report and PoC scripts into after the run. Created if it doesn't exist. **Strongly recommended in multi-repo mode.** |
 | `--runtime` | false | Enable Docker-based runtime PoC validation |
-| `--model` | `thorough` | Model tier controlling quality vs cost. `thorough` (default), `balanced`, `fast`. See [`--model`](#--model-model-tier) below. |
 | `--context` | none | Inline `key=value,key=value` threat model used to calibrate severity. Optional — omit for default behavior. See [`--context`](#--context-threat-model-calibration) below. |
 
 If no repo path is provided and `--repos` is not set, ask the user before proceeding.
@@ -83,27 +82,21 @@ If no repo path is provided and `--repos` is not set, ask the user before procee
 
 Skipping `owasp` also skips `validation` (Phase 5 has nothing to work from).
 
-### --model: Model Tier
+### Model Configuration
 
-Never hardcode specific model IDs — use the role descriptions below so the skill
-stays valid across version bumps and works if adapted to a different provider.
+The skill always uses the highest-quality configuration. There is no user-facing
+model switch — this is intentional; the skill is designed for periodic deep
+reviews, not CI/PR runs.
 
-| Tier | Phase 2 (Architecture) | All other phases | When to use |
-|------|------------------------|------------------|-------------|
-| `thorough` *(default)* | **`claude-fable-5`** + adaptive thinking enabled | **`claude-sonnet-4-6`** | Pre-launch, pentest prep, unknown codebases |
-| `balanced` | **`claude-fable-5`**, thinking **disabled** (omit `thinking` param) | **`claude-sonnet-4-6`** | Routine audits, known codebases, ~40% cost reduction vs thorough |
-| `fast` | **`claude-sonnet-4-6`**, thinking **disabled** | **`claude-haiku-4-5`** | Quick scans, CI cadence, cost-sensitive runs — may miss subtle architectural issues |
+| Phase | Model | Thinking |
+|-------|-------|---------|
+| Phase 0, 2, 7 (architecture + synthesis) | **`claude-fable-5`** | `thinking: {type: "adaptive"}` |
+| All other phases | **`claude-sonnet-4-6`** | omit `thinking` param |
 
-> **When to update this table:** bump model IDs here when a new flagship tier is released (e.g. when a model above Fable 5 ships). The IDs above are concrete — use them exactly as written. Do **not** substitute an older model based on training-data intuition.
+> **When to update this table:** bump model IDs here when a new flagship model ships. The IDs above are concrete — use them exactly as written. Do **not** substitute an older model based on training-data intuition. Never pass `thinking: {type: "disabled"}` — this returns a 400 on Fable 5; omit the param entirely instead.
 
-**Applying the tier when spawning subagents:**
-- Use the model IDs in the table above directly — do not resolve "most capable" from memory.
-- On `thorough`: Phase 2 uses `thinking: {type: "adaptive"}`. All other phases omit the `thinking` param.
-- On `balanced`/`fast`: omit the `thinking` param entirely for all phases (do NOT pass `thinking: {type: "disabled"}` — this returns a 400 on Fable 5).
-- If a listed model is unavailable in the runtime, fall back to the nearest available model and log a warning.
-
-**Before spawning Phase 1** (or Phase 0 in multi-repo mode), resolve the actual
-model IDs for each phase and write `run-metadata.json`.
+**Before spawning Phase 1** (or Phase 0 in multi-repo mode), write `run-metadata.json`
+with the actual model IDs used. Phase 6 reads this for report attribution.
 
 *Single-repo:* write to `{repo_path}/.security-review/run-metadata.json`.
 *Multi-repo:* write one shared copy to `{output_dir}/run-metadata.json`; each
@@ -111,30 +104,22 @@ per-repo `.security-review/` directory can symlink or copy it.
 
 ```json
 {
-  "model_tier": "thorough | balanced | fast",
-  "phase0_model":  "<actual model ID — only present in multi-repo mode>",
-  "phase1_model":  "<actual model ID selected>",
-  "phase2_model":  "<actual model ID selected>",
+  "phase0_model":  "claude-fable-5 (only present in multi-repo mode)",
+  "phase1_model":  "claude-sonnet-4-6",
+  "phase2_model":  "claude-fable-5",
   "phase2_extended_thinking": true,
-  "phase3_model":  "<actual model ID selected>",
-  "phase4_model":  "<actual model ID selected>",
-  "phase5_model":  "<actual model ID selected>",
-  "phase6_model":  "<actual model ID selected>",
-  "phase7_model":  "<actual model ID — only present in multi-repo mode>"
+  "phase3_model":  "claude-sonnet-4-6",
+  "phase4_model":  "claude-sonnet-4-6",
+  "phase5_model":  "claude-sonnet-4-6",
+  "phase6_model":  "claude-sonnet-4-6",
+  "phase7_model":  "claude-fable-5 (only present in multi-repo mode)"
 }
 ```
-Record the model IDs you actually use — not role descriptions. Phase 6 reads
-this file to include model attribution in the final report.
 
-**When spawning each phase subagent**, use the resolved model ID from
-`run-metadata.json` in the agent description — never infer the model name from
-the tier. Examples:
-- Phase 2 (thorough): `"Phase 2: Architectural analysis ({phase2_model} + extended thinking)"`
-- Phase 2 (balanced): `"Phase 2: Architectural analysis ({phase2_model})"`
-- Other phases: `"Phase N: {phase name} ({phaseN_model})"`
-
-**Validation:** if `--model` is set to anything other than `thorough`, `balanced`, or `fast`, abort with:
-`❌ Invalid --model value: "{value}". Allowed: thorough, balanced, fast`
+**When spawning each phase subagent**, use the model ID from `run-metadata.json`
+in the agent description. Examples:
+- Phase 2: `"Phase 2: Architectural analysis (claude-fable-5 + extended thinking)"`
+- Other phases: `"Phase N: {phase name} (claude-sonnet-4-6)"`
 
 ### --context: Threat-Model Calibration
 

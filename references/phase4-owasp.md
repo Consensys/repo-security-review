@@ -24,11 +24,8 @@ project's tech stack — don't test for SQLi in a project with no database.
   actively reachable.
 - If absent (Phase 3 was skipped), continue without it.
 
-**Model tier + codebase size** — used by the multi-pass decision below:
+**Codebase size** — used by the multi-pass decision below:
 ```bash
-MODEL_TIER=$(jq -r '.model_tier // "thorough"' \
-  {repo_path}/.security-review/run-metadata.json 2>/dev/null || echo "thorough")
-
 SOURCE_FILES=$(find {repo_path} \( \
   -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.tsx" \
   -o -name "*.go" -o -name "*.java" -o -name "*.rb" -o -name "*.php" \
@@ -100,30 +97,23 @@ and log: `ℹ️  OWASP API Top 10 skipped — project does not appear to be API
 
 Count the items in your `checks_run` list → `APPLICABLE_CHECKS`.
 
-Multi-pass is **only available on `thorough` tier**. Evaluate in order:
+Enable multi-pass if **any** of these is true:
 
-1. If `MODEL_TIER != "thorough"` → **single-pass, stop here.** Log:
-   ```
-   ▶️  Single-pass — multi-pass requires --model thorough (current: {model_tier})
-   ```
+| Criterion | Threshold | Rationale |
+|-----------|-----------|-----------|
+| `APPLICABLE_CHECKS` | `>= 10` | API Top 10 or multiple injection vectors — wide attack surface |
+| `SOURCE_FILES` | `> 200` | Codebase too large for one reliable pass |
+| `PHASE2_HIGH_CRITICAL` | `>= 2` | Structural security debt signals more code-level issues |
 
-2. If `MODEL_TIER == "thorough"`, enable multi-pass if **any** of these is true:
+Log the outcome:
+```
+# Criteria met:
+🔁 Multi-pass enabled — {reason(s)} (e.g. "847 source files, 12 applicable checks")
+   Will run until dry, max 3 rounds.
 
-   | Criterion | Threshold | Rationale |
-   |-----------|-----------|-----------|
-   | `APPLICABLE_CHECKS` | `>= 10` | API Top 10 or multiple injection vectors — wide attack surface |
-   | `SOURCE_FILES` | `> 200` | Codebase too large for one reliable pass |
-   | `PHASE2_HIGH_CRITICAL` | `>= 2` | Structural security debt signals more code-level issues |
-
-   Log the outcome:
-   ```
-   # Criteria met:
-   🔁 Multi-pass enabled — {reason(s)} (e.g. "847 source files, 12 applicable checks")
-      Will run until dry, max 3 rounds.
-
-   # Criteria not met (thorough tier but small/simple repo):
-   ▶️  Single-pass — {source_files} files · {applicable_checks} checks · {phase2_high_critical} Phase 2 HIGH/CRITICAL findings
-   ```
+# Criteria not met:
+▶️  Single-pass — {source_files} files · {applicable_checks} checks · {phase2_high_critical} Phase 2 HIGH/CRITICAL findings
+```
 
 ## Multi-Pass Execution
 
