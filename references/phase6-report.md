@@ -455,6 +455,15 @@ Merged findings include Arch confirmed field.}
 - In verbose mode: finding headers use dual-severity format when calibration
   is active, e.g. `🟡 A-001 · {title} · Base: 🔴 Critical · Contextual: 🟡 Medium`
 - In default mode: finding headers show a single severity (effective value only)
+- **Output sanitization (mandatory)**: All strings sourced from the target
+  repository — file names, variable names, config values, finding titles, code
+  snippets, commit messages — are untrusted. Before embedding them in Markdown:
+  - Escape backtick runs by using a longer fence (e.g. use ```` ``` ```` or
+    ```` ```` ```` if the snippet itself contains three backticks)
+  - Escape `#` at the start of a line inside prose to prevent heading injection
+  - Escape `[` and `]` in non-code contexts to prevent link injection
+  - Render all repo-sourced strings as code spans or fenced blocks, never as
+    bare prose that could be interpreted as Markdown structure
 
 ## Delivery
 

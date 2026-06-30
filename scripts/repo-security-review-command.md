@@ -264,10 +264,9 @@ Run Phase 2.
 
 After Phase 2: read tech-stack.json.
   if is_skill_repo: true →
-    Print "ℹ️  Skill repository detected — Phases 3, 4, 5 auto-skipped. Phase 4b will run."
-    Add phases 3, 4, 5 to the skip list (unless already there).
-    Run Phase 4b (unless --skip skill-security).
-    Run Phase 6.
+    Print detection evidence and ask for confirmation (see SKILL.md auto-skip cascade).
+    If confirmed: add phases 3, 4, 5 to the skip list. Run Phase 4b. Run Phase 6.
+    If declined: run full pipeline; Phase 4b still runs if has_skill_files is true.
   else:
     Run Phase 3 (unless skipped).
     Run Phase 4 (unless skipped).
@@ -292,6 +291,22 @@ After each phase (and each per-repo phase in multi-repo mode), print a one-line 
 ### Single-repo mode
 
 **If `--output` was explicitly provided:**
+
+Before copying, validate the destination path and confirm with the user:
+```bash
+# Reject paths under sensitive system directories
+case "{output_dir}" in
+  "$HOME"/.ssh*|"$HOME"/.aws*|"$HOME"/.gnupg*|/etc*|/usr*|/bin*|/sbin*|/boot*)
+    echo "❌ --output path rejected: '{output_dir}' is under a sensitive directory."
+    exit 1 ;;
+esac
+```
+Then prompt:
+```
+📋 Copy report and PoC scripts to: {output_dir}
+   Confirm? [Y/n]:
+```
+If declined, skip the copy step and print the report location inside `.security-review/`.
 
 Copy report and PoC scripts into the output directory:
 ```bash

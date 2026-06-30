@@ -144,13 +144,22 @@ update each finding in `phase3-cves.json` with the results.
 
 **EPSS scores** — batch fetch from FIRST.org (one HTTP call for all CVEs):
 ```bash
+# Extract and validate CVE IDs — only ^CVE-\d{4}-\d+$ patterns are safe to
+# interpolate into a URL. Package names, versions, and other lockfile values
+# are attacker-controlled and must never reach the URL string.
 CVE_LIST=$(jq -r '[.findings[].cve_id] | join(",")' \
-  {repo_path}/.security-review/phase3-cves.json)
+  {repo_path}/.security-review/phase3-cves.json \
+  | tr ',' '\n' \
+  | grep -E '^CVE-[0-9]{4}-[0-9]+$' \
+  | tr '\n' ',' \
+  | sed 's/,$//')
 
 if [ -z "$CVE_LIST" ]; then
   echo '{"data":[]}' > {repo_path}/.security-review/epss-raw.json
 else
-  curl -sf "https://api.first.org/data/v1/epss?cve=${CVE_LIST}" \
+  # Pass as a query parameter via --data-urlencode to avoid shell injection
+  curl -sf -G "https://api.first.org/data/v1/epss" \
+    --data-urlencode "cve=${CVE_LIST}" \
     -o {repo_path}/.security-review/epss-raw.json \
     || echo '{"data":[]}' > {repo_path}/.security-review/epss-raw.json
 fi
