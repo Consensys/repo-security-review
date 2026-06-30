@@ -286,7 +286,7 @@ a finding passes, so unvalidated findings can never get one.
    - Its reference file from `references/`
    - The file paths of its inputs (not the content)
    - The repo path and working directory path
-   - Any flags relevant to it (`--runtime` for Phase 5)
+   - Any flags relevant to it (`--runtime` for Phase 5, `--verbose` for Phase 6)
 
 3. **The orchestrator's only job** is sequencing, path management, and
    printing progress summaries. It must not accumulate findings across phases.
