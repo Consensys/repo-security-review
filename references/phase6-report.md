@@ -202,22 +202,8 @@ Use a flat numbered list — no sub-sections by phase.}
   context if this was a merged arch+code finding, without labeling it as such}
 - **Impact**: {what an attacker can do}
 - **Remediation**: {specific, actionable fix}
-
-{If PoC is available (from phase5-pocs.json):}
-<details>
-<summary>Proof of Concept</summary>
-
-```{language}
-{poc_code}
-```
-**Curl equivalent**:
-```bash
-{curl_equivalent}
-```
-**Success indicator**: {success_indicator}
-**Setup required**: {setup_required}
-
-</details>
+{If PoC file exists for this finding:}
+- **PoC**: `pocs/{poc_filename}`
 
 {If runtime_status == RUNTIME_CONFIRMED:}
 > ✅ **Runtime Validated** — confirmed against a live Docker instance.
@@ -450,8 +436,8 @@ Merged findings include Arch confirmed field.}
 - Use severity emoji consistently: 🔴 Critical, 🟠 High, 🟡 Medium, 🟢 Low
 - Every finding must have a remediation — never "this is bad" without "do this"
 - False Positives section is mandatory — it builds trust with the dev team
-- In default mode: use `<details><summary>Proof of Concept</summary>` to keep
-  long PoC blocks collapsed; they are still present but don't dominate the page
+- In default mode: PoC scripts are referenced by filename only —
+  `- **PoC**: \`pocs/{poc_filename}\`` — never inline code blocks
 - Redact ALL secret values — show only first 4 and last 3 chars
 - In verbose mode: finding headers use dual-severity format when calibration
   is active, e.g. `🟡 A-001 · {title} · Base: 🔴 Critical · Contextual: 🟡 Medium`
