@@ -80,47 +80,111 @@ If no repo path is provided and `--repos` is not set, ask the user before procee
 - `dependencies` → Phase 3 + 3b
 - `owasp` → Phase 4
 - `validation` → Phase 5 (validation + PoC together — skipping validation skips PoC automatically)
+- `skill-security` → Phase 4b
 
 Skipping `owasp` also skips `validation` (Phase 5 has nothing to work from).
+Skipping `architecture` skips Phase 4b too (skill detection requires `tech-stack.json`).
 
 ### Model Configuration
 
-The skill always uses the highest-quality configuration. There is no user-facing
-model switch — this is intentional; the skill is designed for periodic deep
-reviews, not CI/PR runs.
+The skill always uses the highest-quality available model. Model IDs are
+resolved at runtime from the fallback chains below — the orchestrator probes
+availability before Phase 1 and records the resolved IDs in `run-metadata.json`.
 
-| Phase | Model | Thinking |
-|-------|-------|---------|
-| Phase 0, 2, 7 (architecture + synthesis) | **`claude-fable-5`** | `thinking: {type: "adaptive"}` |
-| All other phases | **`claude-sonnet-4-6`** | omit `thinking` param |
+#### Model Tiers
 
-> **When to update this table:** bump model IDs here when a new flagship model ships. The IDs above are concrete — use them exactly as written. Do **not** substitute an older model based on training-data intuition. Never pass `thinking: {type: "disabled"}` — this returns a 400 on Fable 5; omit the param entirely instead.
+Two tiers are used across all phases:
 
-**Before spawning Phase 1** (or Phase 0 in multi-repo mode), write `run-metadata.json`
-with the actual model IDs used. Phase 6 reads this for report attribution.
+| Tier | Used by | Purpose |
+|------|---------|---------|
+| **Deep** | Phase 0, 2, 4b, 7 | Extended reasoning: architecture, LLM security, cross-repo synthesis |
+| **Standard** | Phase 1, 3, 4, 5, 6 | Focused analysis: secrets, CVEs, OWASP, validation, report |
+
+#### Fallback Chains
+
+Try each model in order. Use the first one that is available on the current
+API key / account tier.
+
+```
+Deep tier:
+  1. claude-fable-5          ← preferred; adaptive thinking supported
+  2. claude-opus-4-8         ← fallback; adaptive thinking supported
+  3. claude-sonnet-4-6       ← last resort; no thinking for deep tier
+
+Standard tier:
+  1. claude-sonnet-4-6       ← preferred
+  2. claude-haiku-4-5        ← fallback; reduced analysis depth
+```
+
+#### Thinking Rules (applied to the resolved model)
+
+| Resolved model | Tier | thinking param |
+|---|---|---|
+| `claude-fable-5` | Deep | `thinking: {type: "adaptive"}` |
+| `claude-opus-4-8` | Deep | `thinking: {type: "adaptive"}` |
+| `claude-sonnet-4-6` | Deep (last resort) | omit `thinking` param |
+| `claude-sonnet-4-6` | Standard | omit `thinking` param |
+| `claude-haiku-4-5` | Standard | omit `thinking` param |
+
+> **Never pass `thinking: {type: "disabled"}`** — this returns a 400 on Fable 5
+> and Opus 4.8. Omit the param entirely when thinking is not wanted.
+
+#### Model Resolution Step
+
+**Before spawning Phase 1** (or Phase 0 in multi-repo mode):
+
+```
+1. List available models:
+   Run: claude models list
+   OR query the Anthropic Models API: GET /v1/models
+
+2. Resolve each tier to the highest available model from its chain:
+   - Walk the Deep chain top-to-bottom; pick the first model ID that appears
+     in the available-models list.
+   - Walk the Standard chain top-to-bottom; same rule.
+   - If no model in a chain is available: abort with a clear error.
+
+3. Determine the thinking param for the resolved Deep model (table above).
+
+4. Write run-metadata.json with the resolved IDs and a fallback_notes field.
+```
+
+If `claude models list` or the Models API is unavailable, attempt to use
+`claude-fable-5` directly. If the first agent call fails with a
+model-not-found error (HTTP 404 / "model not available"), catch the error,
+move to the next model in the chain, and retry once. Record the fallback in
+`run-metadata.json → fallback_notes`.
+
+#### run-metadata.json
 
 *Single-repo:* write to `{repo_path}/.security-review/run-metadata.json`.
-*Multi-repo:* write one shared copy to `{output_dir}/run-metadata.json`; each
-per-repo `.security-review/` directory can symlink or copy it.
+*Multi-repo:* write one shared copy to `{output_dir}/run-metadata.json`.
 
 ```json
 {
+  "deep_tier_model":   "claude-fable-5",
+  "standard_tier_model": "claude-sonnet-4-6",
+  "deep_tier_thinking": true,
   "phase0_model":  "claude-fable-5 (only present in multi-repo mode)",
   "phase1_model":  "claude-sonnet-4-6",
   "phase2_model":  "claude-fable-5",
-  "phase2_extended_thinking": true,
   "phase3_model":  "claude-sonnet-4-6",
   "phase4_model":  "claude-sonnet-4-6",
+  "phase4b_model": "claude-fable-5 (only present when has_skill_files: true)",
   "phase5_model":  "claude-sonnet-4-6",
   "phase6_model":  "claude-sonnet-4-6",
-  "phase7_model":  "claude-fable-5 (only present in multi-repo mode)"
+  "phase7_model":  "claude-fable-5 (only present in multi-repo mode)",
+  "fallback_notes": "Deep tier: claude-fable-5 not available, using claude-opus-4-8"
 }
 ```
 
-**When spawning each phase subagent**, use the model ID from `run-metadata.json`
-in the agent description. Examples:
-- Phase 2: `"Phase 2: Architectural analysis (claude-fable-5 + extended thinking)"`
-- Other phases: `"Phase N: {phase name} (claude-sonnet-4-6)"`
+`fallback_notes` is omitted when no fallback was needed. Phase 6 reads it and
+includes a one-line notice in the verbose report header when it is present.
+
+**When spawning each phase subagent**, use the resolved model ID from
+`run-metadata.json` in the agent description:
+- Phase 2: `"Phase 2: Architectural analysis ({deep_tier_model} + extended thinking)"`
+- Other phases: `"Phase N: {phase name} ({standard_tier_model})"`
 
 ### --context: Threat-Model Calibration
 
@@ -225,18 +289,43 @@ Skip any phase present in the `--skip` list.
 Phase 1  → Secret Scanning              [skippable: --skip secrets]
 Phase 2  → Architectural Analysis       [skippable: --skip architecture]
            └─ Produces: tech_stack profile used by Phase 3 and Phase 4
+           └─ Sets has_skill_files and is_skill_repo in tech-stack.json
 Phase 3  → Dependency CVE Scanning      [skippable: --skip dependencies]
            └─ Uses tech_stack from Phase 2 to select correct package ecosystems
+           └─ AUTO-SKIPPED when is_skill_repo: true (no package deps in skill repos)
 Phase 3b → Reachability Validation      [runs as part of Phase 3, not separately skippable]
 Phase 4  → Code-Level OWASP Analysis    [skippable: --skip owasp]
            └─ Uses tech_stack to skip irrelevant checks (no DB → no SQLi, etc.)
            └─ Uses API flag from Phase 2 to decide whether to run API Top 10
+           └─ AUTO-SKIPPED when is_skill_repo: true (no runtime code to scan)
+Phase 4b → LLM / AI Skill Security      [auto-activated: has_skill_files: true]
+           └─ Reads skill_files list from tech-stack.json
+           └─ Checks against OWASP LLM Top 10 (LLM01/02/05/06/07/08)
+           └─ Skippable: --skip skill-security
+           └─ Pure skill repos: runs after Phase 2 (3, 4, 5 auto-skipped)
+           └─ Mixed repos: runs after Phase 4, before Phase 5
 Phase 5  → Validation + PoC             [skippable: --skip validation]
            └─ Validates each Phase 4 finding independently, then immediately
               writes a PoC only for findings that pass the validation gate.
               PoC generation is gated inside this phase — unvalidated findings
               never get a PoC. Optional runtime validation via Docker if --runtime.
+           └─ AUTO-SKIPPED when is_skill_repo: true (no Phase 4 findings to validate)
 Phase 6  → Report Builder               [always runs]
+```
+
+**Auto-skip cascade for skill repositories** (applied after Phase 2 completes):
+
+```
+Read tech-stack.json after Phase 2.
+
+if is_skill_repo: true:
+  Auto-skip Phase 3, Phase 4, Phase 5.
+  Print: "ℹ️  Skill repository detected — Phases 3, 4, 5 auto-skipped
+          (no package deps or runtime code). Phase 4b (LLM security) will run."
+
+if has_skill_files: true AND is_skill_repo: false:
+  Do not skip any phases. Run the full pipeline, then run Phase 4b after Phase 4.
+  Print: "ℹ️  Skill files detected — Phase 4b (LLM security) will run after Phase 4."
 ```
 
 ### Multi-repo mode (`--repos` flag)
@@ -316,6 +405,7 @@ Read the agent instructions for each phase from `references/` before spawning:
 | 2 | `references/phase2-architecture.md` | always |
 | 3 + 3b | `references/phase3-dependencies.md` | always |
 | 4 | `references/phase4-owasp.md` | always |
+| 4b (LLM Security) | `references/phase-llm-security.md` | when `has_skill_files: true` |
 | 5 (Validation + PoC) | `references/phase5-validate-and-poc.md` | always |
 | 6 (Report) | `references/phase6-report.md` | always |
 | 7 (Synthesis) | `references/phase7-synthesis.md` | multi-repo only |
@@ -328,13 +418,14 @@ Each phase writes its findings to a working directory inside the repo:
 ```
 {repo_path}/.security-review/
 ├── run-metadata.json         ← written by orchestrator before Phase 1; model IDs + tier
-├── tech-stack.json           ← written by Phase 2, read by Phase 3 and 4
+├── tech-stack.json           ← written by Phase 2, read by Phase 3, 4, and 4b
 ├── threat-model.json         ← only if --context was provided
 ├── phase1-secrets.json
 ├── phase2-architecture.json
 ├── phase3-cves.json
 ├── phase3b-reachability.json
 ├── phase4-owasp.json
+├── phase-llm-security.json   ← only if has_skill_files: true
 ├── phase5-validated.json
 ├── phase5-pocs.json
 ├── pocs/                     ← individual PoC scripts
@@ -401,7 +492,11 @@ to its normal output. This is the key handoff document:
   "runtime_hints": {
     "entry_point": "app.py",
     "listen_port": 5000
-  }
+  },
+  "is_skill_repo": false,
+  "has_skill_files": false,
+  "skill_files": [],
+  "skill_frameworks": []
 }
 ```
 

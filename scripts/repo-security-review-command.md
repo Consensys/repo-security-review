@@ -93,9 +93,17 @@ Phases you can skip (--skip <name>):
                     findings only. These two steps share one agent — PoC
                     generation is gated on passing validation.
 
+  skill-security    Phase 4b · LLM / AI skill security analysis. Only
+                    runs when Phase 2 detects skill/agent instruction files
+                    in the repo (has_skill_files: true in tech-stack.json).
+                    Analyses instruction files against OWASP LLM Top 10.
+                    Auto-activated — no flag needed to turn it on.
+
 Cascade rules:
   --skip owasp        → also skips validation (nothing to validate)
   --skip validation   → also skips PoC (PoC lives inside Phase 5)
+  --skip architecture → also skips skill-security (skill detection
+                        requires tech-stack.json from Phase 2)
 
 Phase that always runs:
   Report Builder    Aggregates all completed phases into a structured
@@ -144,7 +152,7 @@ Parse `$ARGUMENTS` for:
   When absent, the first positional arg is the single repo path (required).
 - First positional arg → single repo path (required unless `--repos` is set)
 - `--skip <phases>` → comma-separated list from: `secrets`, `architecture`,
-  `dependencies`, `owasp`, `validation`
+  `dependencies`, `owasp`, `validation`, `skill-security`
 - `--output <dir>` → output directory; both `final-report.md` and `pocs/` are
   copied here at the end. Created if it doesn't exist.
   Default (single-repo): none — when omitted everything stays at `{repo_path}/.security-review/`
@@ -164,11 +172,12 @@ Parse `$ARGUMENTS` for:
   the run with a clear error message.
 
 Abort with a clear error if any skip value is not in the allowed list above:
-`❌ Unknown --skip value: "{value}". Allowed: secrets, architecture, dependencies, owasp, validation`
+`❌ Unknown --skip value: "{value}". Allowed: secrets, architecture, dependencies, owasp, validation, skill-security`
 
 Apply cascade rules silently:
 - `--skip owasp` → add `validation` to skip list
 - `--skip validation` → PoC is skipped automatically (it runs inside Phase 5, not as a separate phase)
+- `--skip architecture` → add `skill-security` to skip list (skill detection requires Phase 2 output)
 
 **Multi-repo validation:** if `--repos` is set with only one path, warn:
 `⚠️  Only one repo path provided to --repos. Use the positional arg for single-repo mode.`
@@ -247,12 +256,32 @@ done
 Read SKILL.md for full phase instructions. Execute each non-skipped phase as an
 isolated subagent, passing only file paths (never in-memory content) between phases.
 
-**Single-repo mode:** run phases 1–6 in order.
+**Single-repo mode:**
+
+```
+Run Phase 1.
+Run Phase 2.
+
+After Phase 2: read tech-stack.json.
+  if is_skill_repo: true →
+    Print "ℹ️  Skill repository detected — Phases 3, 4, 5 auto-skipped. Phase 4b will run."
+    Add phases 3, 4, 5 to the skip list (unless already there).
+    Run Phase 4b (unless --skip skill-security).
+    Run Phase 6.
+  else:
+    Run Phase 3 (unless skipped).
+    Run Phase 4 (unless skipped).
+    if has_skill_files: true →
+      Print "ℹ️  Skill files detected — Phase 4b (LLM security) will run."
+      Run Phase 4b (unless --skip skill-security).
+    Run Phase 5 (unless skipped).
+    Run Phase 6.
+```
 
 **Multi-repo mode:**
 1. Run Phase 0 (topology mapping) — passes all repo paths, writes `{output_dir}/service-topology.json`
 2. For each repo in `--repos` (one at a time, never interleaved):
-   - Run phases 1–6 for that repo
+   - Run phases 1–6 for that repo using the single-repo logic above
    - Pass `{output_dir}/service-topology.json` to the Phase 2 agent as additional context
 3. Run Phase 7 (cross-repo synthesis) — passes `{output_dir}` and all per-repo paths
 

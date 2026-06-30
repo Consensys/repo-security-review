@@ -68,6 +68,28 @@ grep -rn "multer\|multipart\|file_upload\|FileField\|upload\|FormData" \
   {repo_path} --include="*.py" --include="*.js" --include="*.ts" -l \
   --exclude-dir="node_modules" | head -10
 
+# --- AI Skill / Agent file detection ---
+
+# Check for Claude Code skill markers
+find {repo_path} -maxdepth 6 \( \
+  -name "SKILL.md" \
+  -o -name "*.md" -path "*/.claude/commands/*" \
+  -o -name "*.md" -path "*/references/phase*" \
+\) -not -path "*/.git/*" -not -path "*/node_modules/*"
+
+# Check for agent instruction patterns in .md files
+grep -rln "subagent\|spawn.*agent\|claude-fable\|claude-sonnet\|claude-opus\|thinking.*adaptive\|## Goal" \
+  {repo_path} --include="*.md" \
+  --exclude-dir=".git" --exclude-dir="node_modules" | head -20
+
+# Count total non-config files and .md files to determine skill-repo ratio
+find {repo_path} -maxdepth 5 -type f \
+  -not -path "*/.git/*" -not -path "*/node_modules/*" \
+  -not -name "*.json" -not -name "*.lock" -not -name "*.yaml" -not -name "*.yml" | wc -l
+
+find {repo_path} -maxdepth 5 -type f -name "*.md" \
+  -not -path "*/.git/*" -not -path "*/node_modules/*" | wc -l
+
 # --- Runtime hints (used by Phase 5 when synthesizing a Dockerfile) ---
 
 # Likely entry point
@@ -115,9 +137,36 @@ Based on findings, write `{repo_path}/.security-review/tech-stack.json`:
   "runtime_hints": {
     "entry_point": "app.py",
     "listen_port": 5000
-  }
+  },
+  "is_skill_repo": false,
+  "has_skill_files": false,
+  "skill_files": [],
+  "skill_frameworks": []
 }
 ```
+
+**Skill detection rules** (set the four `skill_*` fields above):
+
+`has_skill_files: true` — set when **any** of:
+- A file named `SKILL.md` exists anywhere in the repo
+- `.md` files exist under `.claude/commands/`
+- `.md` files with agent instruction patterns are found (grep matched
+  `subagent`, `claude-fable`, `claude-sonnet`, `claude-opus`,
+  `thinking.*adaptive`, `## Goal` — indicating orchestration docs)
+
+`skill_files` — list every `.md` file path that matches the skill detection
+criteria above (relative to repo root), up to 50 files.
+
+`skill_frameworks` — derive from content:
+- `"claude-code"` if `SKILL.md` is present or `.claude/commands/` exists
+- `"anthropic-sdk"` if `anthropic` or `@anthropic-ai` appears in any skill file
+- Leave empty `[]` when frameworks cannot be determined
+
+`is_skill_repo: true` — set when **all** of:
+- `has_skill_files: true`
+- AND no traditional source-code files exist (no `.go`, `.py`, `.ts`, `.js`,
+  `.java`, `.rb`, `.rs`, `.php`, `.cs` files outside of `node_modules`)
+- OR `.md` files constitute ≥60% of total non-config, non-hidden files
 
 `runtime_hints` is best-effort and used only by Phase 5 if it needs to synthesize
 a Dockerfile (when `--runtime` is set and the repo has no Dockerfile or

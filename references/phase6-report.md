@@ -10,15 +10,26 @@ Read all that exist (some may be absent if a phase was skipped):
 ```
 {repo_path}/.security-review/run-metadata.json
 {repo_path}/.security-review/tech-stack.json
-{repo_path}/.security-review/threat-model.json    ← present only if --context was used
+{repo_path}/.security-review/threat-model.json       ← present only if --context was used
 {repo_path}/.security-review/phase1-secrets.json
 {repo_path}/.security-review/phase2-architecture.json
 {repo_path}/.security-review/phase3-cves.json
 {repo_path}/.security-review/phase3b-reachability.json
 {repo_path}/.security-review/phase4-owasp.json
+{repo_path}/.security-review/phase-llm-security.json ← present only if has_skill_files: true
 {repo_path}/.security-review/phase5-validated.json
 {repo_path}/.security-review/phase5-pocs.json
 ```
+
+**LLM security findings** (L-XXX from `phase-llm-security.json`):
+- In **default mode**: included in the unified `## Findings` section like any
+  other finding. Use `- **Category**: AI/LLM Security · {owasp_llm}` as the
+  category line.
+- In **verbose mode**: include as a dedicated **Section 4b: LLM / AI Skill
+  Security** between Section 4 and Section 5. Show the `data_flow` field as an
+  extra line: `- **Data Flow**: {data_flow}`.
+- LLM findings never have PoCs — omit the PoC line entirely.
+- LLM findings are never validated by Phase 5 — omit any validation status.
 
 Check the `--verbose` flag (passed by the orchestrator). It controls which
 report structure is produced — see Report Modes below.
@@ -238,7 +249,9 @@ Investigated and ruled out:
 **Review Date**: {date}
 **Tech Stack**: {languages} / {frameworks} / {database_types}
 **Reviewed By**: Claude Code · repo-security-review skill
-**Models Used**: {"`{phase2_model}` (extended thinking) — Architecture · `{other_model}` — all other phases"}
+**Models Used**: {"`{deep_tier_model}`{if deep_tier_thinking: ` (extended thinking)`} — Architecture{if phase4b ran: ` · LLM Security`}{if phase7 ran: ` · Synthesis`} · `{standard_tier_model}` — all other phases"}
+{if fallback_notes present:}
+> ⚠️ **Model fallback**: {fallback_notes}
 
 ---
 

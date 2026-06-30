@@ -8,14 +8,15 @@ See [SKILL.md](SKILL.md) for the full specification.
 
 ## What it does
 
-Seven sequential phases (single-repo), plus Phase 0 and Phase 7 for multi-repo runs:
+Seven sequential phases (single-repo), plus Phase 0 and Phase 7 for multi-repo runs. Phase 4b runs automatically when skill/agent files are detected:
 
 0. **Service topology mapping** *(multi-repo only)* — reads docker-compose, k8s manifests, OpenAPI specs, and .proto files across all repos; produces a shared `service-topology.json` passed to each service's Phase 2
 1. **Secret scanning** — `gitleaks` across full git history
-2. **Architectural analysis** — trust boundaries, auth model, infra config; produces a tech-stack profile that gates downstream phases
-3. **Dependency CVE scanning** (+ 3b reachability) — `osv-scanner` against ecosystems detected in Phase 2
-4. **Code-level OWASP analysis** — Top 10 + API Top 10, pruned by tech stack (no DB → skip SQLi, etc.)
-5. **Finding validation + PoC generation** — independent re-validation of Phase 4 candidates; PoCs written only for findings that pass the gate (optional Docker runtime validation)
+2. **Architectural analysis** — trust boundaries, auth model, infra config; produces a tech-stack profile that gates downstream phases; also detects AI skill files for Phase 4b
+3. **Dependency CVE scanning** (+ 3b reachability) — `osv-scanner` against ecosystems detected in Phase 2; auto-skipped for pure skill repos
+4. **Code-level OWASP analysis** — Top 10 + API Top 10, pruned by tech stack (no DB → skip SQLi, etc.); auto-skipped for pure skill repos
+4b. **LLM / AI skill security** *(auto-activated when skill files detected)* — analyses agent instruction files against OWASP LLM Top 10: prompt injection, insecure output handling, excessive agency, insecure plugin design, sensitive data disclosure, and supply chain risks. Runs after Phase 2 for pure skill repos; after Phase 4 for mixed repos
+5. **Finding validation + PoC generation** — independent re-validation of Phase 4 candidates; PoCs written only for findings that pass the gate (optional Docker runtime validation); auto-skipped for pure skill repos
 6. **Report builder** — aggregates everything into a single markdown report with severity matrix, remediation table, false-positives log, and PoC scripts
 7. **Cross-repo synthesis** *(multi-repo only)* — identifies vulnerabilities that are only visible at the system level: shared credentials, service-to-service blind trust, auth contract mismatches, cross-service data flows bypassing defenses
 
@@ -93,7 +94,7 @@ In any Claude Code session (CLI or Desktop), invoke the skill on a local reposit
 | Flag | Default | Effect |
 |------|---------|--------|
 | `--repos <paths>` | none | Comma-separated repo paths. Activates multi-repo mode (Phase 0 + Phase 7). |
-| `--skip <phases>` | none | Comma-separated: `secrets`, `architecture`, `dependencies`, `owasp`, `validation` |
+| `--skip <phases>` | none | Comma-separated: `secrets`, `architecture`, `dependencies`, `owasp`, `skill-security`, `validation` |
 | `--output <dir>` | none (single-repo) / `./system-security-review/` (multi-repo) | Directory to copy the report and PoC scripts into after the run. Created if it doesn't exist. |
 | `--runtime` | off | Docker-based runtime PoC validation in Phase 5 |
 | `--verbose` | off | Generate the full detailed report. Default report omits the OWASP Checks Run inventory, standalone Remediation Priority section, and Appendix. Findings, evidence, and per-finding priority labels are present in both modes. |
@@ -143,6 +144,7 @@ flowchart TD
         P3[Phase 3 · Dependency CVEs<br/>osv-scanner]
         P3b[Phase 3b · Reachability Validation]
         P4[Phase 4 · OWASP Code Scan<br/>semgrep + LLM]
+        P4b[Phase 4b · LLM / AI Skill Security<br/>Fable + extended thinking<br/>auto-activated when skill files detected]
 
         P1 --> P2
         P2 --> TS
@@ -150,17 +152,20 @@ flowchart TD
         P3 --> P3b
         P3b --> P4
         TS -. also read by .-> P4
+        TS -. skill_files .-> P4b
+        P4 --> P4b
     end
 
-    P4 -. file path only .-> P5
+    P4b -. file path only .-> P5
 
     subgraph JUDGMENT["JUDGMENT LAYER (isolated context)"]
-        P5[Phase 5 · Validate + PoC<br/>re-validates from scratch<br/>PoCs only for confirmed findings<br/>optional Docker runtime]
+        P5[Phase 5 · Validate + PoC<br/>re-validates Phase 4 findings only<br/>PoCs only for confirmed findings<br/>optional Docker runtime]
     end
 
     P1 --> R[Phase 6 · Report Builder]
     P2 --> R
     P3b --> R
+    P4b --> R
     P5 --> R
     R --> Out([final-report.md + pocs/])
 
@@ -168,7 +173,7 @@ flowchart TD
     classDef judgment fill:#fff4e6,stroke:#e0883a,color:#1a1a1a
     classDef report fill:#e8f5e9,stroke:#5a9a5a,color:#1a1a1a
     classDef store fill:#f5f5f5,stroke:#888,color:#1a1a1a,stroke-dasharray: 3 3
-    class P1,P2,P3,P3b,P4 finder
+    class P1,P2,P3,P3b,P4,P4b finder
     class P5 judgment
     class R report
     class TS store
