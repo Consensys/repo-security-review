@@ -32,11 +32,15 @@ For each finding in `phase4-owasp.json`, execute this sequence in full
 before moving to the next finding:
 
 ```
-1. VALIDATE → 2. DECISION → 3. POC (only if confirmed) → 4. WRITE OUTPUTS
+1. VALIDATE → 2. DECISION → 3. POC (only if confirmed) → 4. RUNTIME? (per-finding, only if --runtime) → 5. WRITE OUTPUTS
 ```
 
 Never batch-validate all findings first and then batch-write PoCs. Process
 one finding end-to-end at a time.
+
+Step 4 is evaluated independently for each finding — Docker is only started if
+at least one confirmed finding actually warrants runtime validation. See
+"Runtime Value Assessment" below.
 
 ---
 
@@ -95,6 +99,41 @@ After the above steps, assign one of:
 | `CONFIRMED_LOW_CONFIDENCE` | Real but exploitability uncertain | Write PoC, flag confidence |
 | `FALSE_POSITIVE` | Not exploitable or mitigated | Record reason, no PoC |
 | `NEEDS_RUNTIME` | Cannot confirm statically | Attempt runtime probe if `--runtime`, else no PoC |
+
+### Runtime Value Assessment
+
+After assigning a `CONFIRMED` or `CONFIRMED_LOW_CONFIDENCE` status, decide
+whether runtime validation would add meaningful evidence **for this specific
+finding**. This decision is made per-finding, before any Docker work begins.
+
+**Runtime earns its cost** — attempt Docker when the finding is confirmed:
+
+| Finding type | Why runtime adds evidence |
+|---|---|
+| BOLA / IDOR | Proves ownership bypass at the HTTP layer — needs two auth tokens and an actual 200 response to another user's resource |
+| SQL injection | Demonstrates actual data exfiltration in the response, not just a vulnerable code pattern |
+| SSRF | Requires observing an HTTP callback or metadata response — code alone only shows the URL is user-controlled |
+| Command injection | Blind variants need timing side-channel; non-blind variants benefit from response proof |
+| Broken authentication / session bypass | Proving auth bypass requires actually receiving a protected resource without credentials |
+
+**Static analysis is conclusive** — skip Docker, set `RUNTIME_NOT_NEEDED`:
+
+| Finding type | Why static is enough |
+|---|---|
+| Hardcoded secret | The value is plainly in the code |
+| Missing cookie flags (Secure, HttpOnly, SameSite) | Code directly sets or omits the flag — no ambiguity |
+| Fail-open auth (`return nil` / no error in validation) | The code path is right there; runtime just replays what code already shows |
+| Debug / dev mode bypass | A constant or config value — observable from source |
+| Missing audit log | Grep conclusively confirms absence of log calls |
+| CI/CD injection (`${{ }}` in workflow YAML) | A text file — Docker cannot execute GitHub Actions |
+| Weak crypto algorithm | Algorithm string is in the code; runtime proves nothing |
+| Missing security headers | Headers are set (or not) in code — unambiguous |
+| Missing rate limiting | No rate-limit middleware in the code path — runtime just confirms the absence |
+
+**Docker startup rule:** Only start Docker if at least one confirmed finding in
+this run is in the "earns its cost" list. If every confirmed finding is in the
+"static conclusive" list, skip Docker entirely for the whole run — set
+`runtime_status: RUNTIME_NOT_NEEDED` on each finding with the specific reason.
 
 ---
 
@@ -242,15 +281,30 @@ for url in [
 
 ## Part 3: Optional Runtime Validation (if `--runtime` flag set)
 
-After writing the PoC script, execute it against a live Docker instance
-to confirm exploitability at runtime.
+Only enter this section if the current finding is in the "runtime earns its cost"
+list from the Runtime Value Assessment above. For all other confirmed findings,
+set `runtime_status: RUNTIME_NOT_NEEDED` and skip to Part 5.
+
+### Critical rule: never reason about the host toolchain
+
+When a `Dockerfile` is present, **always attempt `docker build` directly** —
+do not inspect the FROM stage, do not check whether Go / Java / Node is
+installed on the host, do not pre-emptively skip. Multi-stage builds supply
+their own toolchain inside the container. If the build fails, Docker's own
+error output explains why. Capture that output and report it.
+
+Wrong: "The Dockerfile uses `FROM golang:1.22-alpine AS builder` and Go is not
+in the sandbox, so the build will fail — marking RUNTIME_SKIPPED."
+
+Right: run `docker build .`, capture stdout/stderr, and report
+`RUNTIME_BUILD_FAILED` with the actual error if it fails.
 
 ### Check Docker availability
 ```bash
 docker --version && docker compose version || echo "Docker not available"
 ```
 
-If unavailable, mark `runtime_status: RUNTIME_SKIPPED` and continue.
+If unavailable, mark `runtime_status: RUNTIME_SKIPPED`, reason: `docker_not_available`, and continue.
 
 ### Decision tree — how to stand up the application
 
@@ -282,15 +336,32 @@ fi
 if [ -n "$COMPOSE_FILE" ]; then
   docker compose -f "$COMPOSE_FILE" up -d --build 2>&1 \
     | tee {repo_path}/.security-review/docker-startup.log
-  RUNTIME_ENV="project"
+  if [ ${PIPESTATUS[0]} -ne 0 ]; then
+    echo "BUILD_FAILED"  # handled below
+  else
+    RUNTIME_ENV="project"
+  fi
 elif [ -f "{repo_path}/Dockerfile" ]; then
   PORT=$(jq -r '.runtime_hints.listen_port // 8080' $TS)
-  docker build -t sec-review-target {repo_path} && \
-  docker run -d --name sec-review-target -p ${PORT}:${PORT} sec-review-target
-  RUNTIME_ENV="project"
+  docker build -t sec-review-target {repo_path} 2>&1 \
+    | tee {repo_path}/.security-review/docker-build.log
+  if [ ${PIPESTATUS[0]} -ne 0 ]; then
+    echo "BUILD_FAILED"  # handled below
+  else
+    docker run -d --name sec-review-target -p ${PORT}:${PORT} sec-review-target
+    RUNTIME_ENV="project"
+  fi
 else
   # No Docker setup found — go to Part 3a
   :
+fi
+
+# If build failed, record RUNTIME_BUILD_FAILED and stop — do not attempt synthesis
+# as a fallback when the project HAS a Dockerfile that failed.
+if [ "$BUILD_FAILED" ]; then
+  echo "❌ Docker build failed — see docker-build.log / docker-startup.log for details"
+  # Set runtime_status: RUNTIME_BUILD_FAILED for all findings in this run
+  # Include the last 20 lines of the build log in runtime_notes
 fi
 ```
 
@@ -483,10 +554,18 @@ swallow a failure.
 | Status | Trigger | Required notes |
 |---|---|---|
 | `RUNTIME_CONFIRMED` | PoC ran, success indicator observed | — |
-| `RUNTIME_NOT_CONFIRMED` | PoC ran fully, success indicator not observed | This is a safety signal — only use when the PoC actually executed |
-| `RUNTIME_SKIPPED` | Docker unavailable / stack unsupported / multi-service deps / PoC setup step failed (`missing_seed_data`) | Reason code required; `missing_seed_data` must note that the vulnerability was not tested, not ruled out |
+| `RUNTIME_NOT_CONFIRMED` | PoC ran fully, success indicator not observed | Safety signal — only use when the PoC actually executed |
+| `RUNTIME_NOT_NEEDED` | Finding type is in the "static conclusive" list | Reason: which specific criterion (e.g. "fail-open auth confirmed by direct code path") |
+| `RUNTIME_SKIPPED` | Docker unavailable · stack unsupported · PoC setup step failed (`missing_seed_data`) | Reason code required; `missing_seed_data` must note the vulnerability was not tested, not ruled out |
+| `RUNTIME_BUILD_FAILED` | Docker was available and a Dockerfile was found, but `docker build` failed | Last 20 lines of build output; include the image name that failed to pull if that was the cause |
 | `RUNTIME_SYNTHESIS_FAILED` | Synthesis attempted but build / startup failed | Last 20 lines of `docker compose logs` |
 | `RUNTIME_ERROR` | Unexpected failure during PoC execution | Exception or exit code |
+
+**`RUNTIME_BUILD_FAILED` is distinct from `RUNTIME_SKIPPED`**: "skipped" means
+the attempt was never made; "build failed" means Docker ran and reported an
+error. The distinction matters for the report: a build failure often has a
+fixable cause (image tag doesn't exist, build arg missing, registry auth) that
+the user can act on — include the actual Docker error in `runtime_notes`.
 
 ---
 
@@ -641,6 +720,8 @@ other two fields are absent.
     "needs_runtime": 0,
     "pocs_generated": 0,
     "runtime_confirmed": 0,
+    "runtime_not_needed": 0,
+    "runtime_build_failed": 0,
     "runtime_synthesis_failed": 0
   },
   "findings": [
@@ -663,7 +744,8 @@ other two fields are absent.
       "poc_generated": true,
       "poc_file": "poc_O-001_sqli.py",
       "runtime_status": "RUNTIME_SKIPPED",
-      "runtime_notes": "Docker not available in this environment"
+      "runtime_notes": "Docker not available in this environment",
+      "manual_validation_instructions": "Build the app locally, then: python3 .security-review/pocs/poc_O-001_sqli.py"
     },
     {
       "original_id": "O-003",
@@ -700,7 +782,8 @@ where `{type}` is a short lowercase slug matching the vulnerability type:
       "curl_equivalent": "curl -X GET 'http://localhost:3000/api/users/1?id=...'",
       "setup_required": "Valid auth token for any user account",
       "success_indicator": "Response contains rows from other users",
-      "cleanup": "N/A — read-only exploit"
+      "cleanup": "N/A — read-only exploit",
+      "manual_validation_instructions": "Build the app locally, then: python3 .security-review/pocs/poc_O-001_sqli.py"
     }
   ]
 }
