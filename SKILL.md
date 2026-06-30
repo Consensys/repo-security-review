@@ -139,27 +139,29 @@ Comma-separated `key=value` pairs. All four keys are optional and order does
 not matter. Whitespace around `=` and `,` is trimmed.
 
 ```
---context deployment_target=internal_tool,data_sensitivity=internal,auth_required_to_reach=true
+--context deployment_target=local,auth_required_to_reach=true
 ```
 
-There is no file-path form. The schema is small and fixed (four keys, all
+There is no file-path form. The schema is small and fixed (three keys, all
 enum-valued or boolean), so inline is the only input format.
 
 #### Allowed keys and values
 
 | Key | Allowed values |
 |---|---|
-| `deployment_target` | `local_cli` \| `internal_tool` \| `public_service` |
-| `data_sensitivity` | `none` \| `internal` \| `pii` |
+| `deployment_target` | `local` \| `public` |
 | `auth_required_to_reach` | `true` \| `false` |
 | `include_readme` | `true` \| `false` |
+
+`data_sensitivity` is not a user-facing key — it is hardcoded to `pii`
+(worst-case) for all runs. All findings are scored as if sensitive data is
+always at risk.
 
 #### Strict defaults — applied to any missing key
 
 | Field | Default | Rationale |
 |---|---|---|
-| `deployment_target` | `public_service` | Hardest reachable case |
-| `data_sensitivity` | `pii` | Assume sensitive data |
+| `deployment_target` | `public` | Hardest reachable case |
 | `auth_required_to_reach` | `false` | Pessimistic |
 | `include_readme` | `true` | README is read for project context by default |
 
@@ -177,7 +179,9 @@ TM_OUT={repo_path}/.security-review/threat-model.json
 # 2. For each pair:
 #    - split on '=' (exactly once); trim whitespace
 #    - reject if not exactly two non-empty parts → "❌ invalid pair: <pair>"
-#    - reject if key not in {deployment_target, data_sensitivity, auth_required_to_reach, include_readme}
+#    - reject if key not in {deployment_target, auth_required_to_reach, include_readme}
+#    - reject if key is "data_sensitivity" → "❌ data_sensitivity is not a valid key;
+#      data sensitivity is always treated as pii"
 #    - reject if value not in the allowed list for that key
 #    - reject duplicate keys
 # 3. Fill missing keys with strict defaults above.
@@ -186,7 +190,7 @@ TM_OUT={repo_path}/.security-review/threat-model.json
 #    {
 #      "source": "user",
 #      "deployment_target": "...",
-#      "data_sensitivity": "...",
+#      "data_sensitivity": "pii",
 #      "auth_required_to_reach": true|false,
 #      "include_readme": true|false
 #    }

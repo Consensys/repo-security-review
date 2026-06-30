@@ -43,15 +43,17 @@ Options:
   --runtime             Enable Docker-based runtime PoC validation
   --context <pairs>     Optional inline threat model used to calibrate
                         severity. Format: comma-separated key=value pairs.
-                        Keys: deployment_target, data_sensitivity,
-                        auth_required_to_reach, include_readme.
-                        All keys optional; omitted keys fall back to strict
-                        defaults. include_readme controls whether README.md
-                        is read for project context (default: true). Omit
-                        the flag entirely for default behavior (no
+                        Keys: deployment_target (local|public),
+                        auth_required_to_reach (true|false),
+                        include_readme (true|false).
+                        data_sensitivity is not a key — always defaults to pii.
+                        All keys optional; omitted keys use strict defaults.
+                        Omit the flag entirely for default behavior (no
                         calibration).
-                        Example:
-                        --context deployment_target=internal_tool,data_sensitivity=internal,auth_required_to_reach=true,include_readme=true
+                        Examples:
+                        --context deployment_target=local
+                        --context auth_required_to_reach=true
+                        --context deployment_target=local,auth_required_to_reach=true
   --help                Show this help
 
 Phases you can skip (--skip <name>):
@@ -111,8 +113,11 @@ Examples:
   # Skip arch (you already reviewed it) — deps + OWASP only
   /repo-security-review ~/repos/my-service --skip architecture,secrets
 
-  # Full review with severity calibrated to an internal tool
-  /repo-security-review ~/repos/my-service --context deployment_target=internal_tool,data_sensitivity=internal,auth_required_to_reach=true
+  # Full review with severity calibrated to a local CLI tool
+  /repo-security-review ~/repos/my-service --context deployment_target=local
+
+  # Full review calibrated to an internal (auth-required) service
+  /repo-security-review ~/repos/my-service --context auth_required_to_reach=true
 
   # Multi-repo: review three microservices and get a system-level report
   /repo-security-review --repos ~/svcs/auth,~/svcs/gateway,~/svcs/users --output ~/reports/my-system
@@ -138,10 +143,11 @@ Parse `$ARGUMENTS` for:
   Default (multi-repo): `./system-security-review/`
 - `--runtime` → enable Docker-based runtime PoC validation in Phase 5
 - `--context <pairs>` → optional inline threat model as comma-separated
-  `key=value` pairs. Allowed keys: `deployment_target`, `data_sensitivity`,
-  `auth_required_to_reach`, `include_readme`. Allowed values per key are
-  listed in SKILL.md. `include_readme` controls whether README.md is read
-  for project context by Phase 2 and Phase 4 agents; defaults to `true`.
+  `key=value` pairs. Allowed keys: `deployment_target` (`local`|`public`),
+  `auth_required_to_reach` (`true`|`false`), `include_readme` (`true`|`false`).
+  `data_sensitivity` is not an accepted key — reject it with a clear error.
+  `include_readme` controls whether README.md is read for project context by
+  Phase 2 and Phase 4 agents; defaults to `true`.
   When set, the orchestrator validates the pairs and writes a normalized
   `threat-model.json` to the working directory. When unset, the skill
   behaves exactly as before — no calibration logic runs anywhere. Any

@@ -227,31 +227,7 @@ When the file is present, read it and check the declared values against what
 the code actually shows. The goal is to prevent a user from silently softening
 findings by declaring a falsely permissive context.
 
-### Check 1: `data_sensitivity` drift
-
-If `data_sensitivity` is `none` or `internal`, look for code patterns
-indicating more sensitive data is handled:
-
-```bash
-# PII / regulated indicators
-grep -rniE "ssn|social.security|tax.id|date.of.birth|passport|driver.license|\
-patient|medical|diagnosis|credit.card|cvv|card.number|iban|routing.number|\
-biometric|fingerprint" {repo_path} \
-  --include="*.py" --include="*.js" --include="*.ts" --include="*.go" \
-  --include="*.java" --include="*.rb" --include="*.sql" \
-  --exclude-dir="node_modules" --exclude-dir=".git" \
-  --exclude-dir="vendor" --exclude-dir="tests" --exclude-dir="test" | head -20
-
-# Schema indicators
-grep -rniE "email.*varchar|email.*string|address.*varchar|phone.*varchar" \
-  {repo_path} --include="*.sql" --include="*.py" --include="*.js" \
-  --include="*.ts" | head -10
-```
-
-If concrete PII-handling code is found while `data_sensitivity` is declared
-`none`, emit a drift finding (see "Drift finding shape" below).
-
-### Check 2: `auth_required_to_reach` drift
+### Check 1: `auth_required_to_reach` drift
 
 If `auth_required_to_reach` is `true`, scan for publicly reachable routes
 with no authentication middleware/decorator:
@@ -270,10 +246,10 @@ For each route, check whether the surrounding 10 lines contain auth markers
 etc.). If multiple unauthenticated public routes exist while
 `auth_required_to_reach` is `true`, emit a drift finding.
 
-### Check 3: `deployment_target` — no automatic drift check
+### Check 2: `deployment_target` — no automatic drift check
 
-There is no reliable code signal for whether something is a CLI, internal
-service, or public service. Take this field at face value.
+There is no reliable code signal for whether something is a local tool or a
+public service. Take this field at face value.
 
 ### Drift finding shape
 
@@ -285,35 +261,34 @@ Drift findings are normal Phase 2 findings with category `threat_model_drift`:
   "category": "threat_model_drift",
   "severity": "MEDIUM",
   "title": "Declared threat model contradicts observed code",
-  "description": "Threat model declares data_sensitivity=none, but code reads PII columns (users.email, users.ssn).",
-  "evidence": ["models/user.py:L12-L18", "schema.sql:L45"],
-  "impact": "Findings calibrated against the declared sensitivity will under-report exposure risk.",
-  "remediation": "Update the threat-model file to reflect actual data handling, OR remove the PII-handling code.",
+  "description": "Threat model declares auth_required_to_reach=true, but Phase 2 finds multiple public routes with no auth middleware.",
+  "evidence": ["routes/api.go:L34", "routes/api.go:L67", "routes/api.go:L89"],
+  "impact": "Pre-auth findings have been downgraded by −1 tier, but the service is actually reachable without authentication.",
+  "remediation": "Add auth middleware to all public routes, or set auth_required_to_reach=false in --context.",
   "poc_needed": false,
-  "drift_dimension": "data_sensitivity",
-  "declared": "none",
-  "observed": "pii"
+  "drift_dimension": "auth_required_to_reach",
+  "declared": true,
+  "observed": false
 }
 ```
 
 ### Side effect on the threat model
 
-When drift is detected for a dimension, write a `drift_overrides` block into
-`threat-model.json` so downstream phases revert that dimension to the strict
-default for this run:
+When drift is detected, write a `drift_overrides` block into `threat-model.json`
+so downstream phases revert that dimension to the strict default for this run:
 
 ```json
 {
   "source": "user",
-  "deployment_target": "internal_tool",
-  "data_sensitivity": "none",
+  "deployment_target": "public",
+  "data_sensitivity": "pii",
   "auth_required_to_reach": true,
   "drift_overrides": {
-    "data_sensitivity": "pii"
+    "auth_required_to_reach": false
   }
 }
 ```
 
 Phase 5 reads `drift_overrides` and uses those values (not the declared ones)
-for the affected dimensions when computing `contextual_severity`. This ensures
-users cannot silence findings by passing a falsely permissive context.
+when computing `contextual_severity`. This ensures users cannot silence findings
+by passing a falsely permissive context.

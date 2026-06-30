@@ -252,9 +252,9 @@ repo-security-review/
 
 ## Adding context (`--context`)
 
-By default the skill assumes the worst case — a public, anonymous-facing service handling PII — and grades severity accordingly. That's the right baseline when nothing is known about deployment, but it produces noise on internal tools (e.g. flagging "no rate limit on /login" for a CLI that only runs on a developer's laptop) and under-calibrates true public services.
+By default the skill assumes the worst case — a public, anonymous-facing service handling sensitive data — and grades severity accordingly. That's the right baseline for unknown codebases, but it produces noise for a CLI that only runs on a developer's laptop.
 
-The `--context` flag lets you provide a small inline threat model. The skill uses it to compute a **contextual severity** alongside the base CVSS-style severity for Architecture, CVE, and code-level findings — each shows both: the technical impact (context-free) and the calibrated impact (after context). Secrets are not calibrated; rotation is always required regardless of deployment context.
+The `--context` flag lets you provide a small inline threat model. The skill uses it to compute a **contextual severity** alongside the base severity for Architecture, CVE, and code-level findings — each shows both: the technical impact (context-free) and the calibrated impact (after context). Secrets are not calibrated; rotation is always required regardless of deployment context.
 
 **Opt-in only.** If you don't pass `--context`, **nothing changes** — the skill runs exactly as before. No new file is written, no calibration runs, no new report sections appear.
 
@@ -263,14 +263,14 @@ The `--context` flag lets you provide a small inline threat model. The skill use
 Comma-separated `key=value` pairs. All keys are optional; missing keys fall back to strict defaults. Order doesn't matter.
 
 ```text
---context deployment_target=internal_tool,data_sensitivity=internal,auth_required_to_reach=true
+--context deployment_target=local,auth_required_to_reach=true
 ```
 
 You can pass any subset:
 
 ```text
---context deployment_target=local_cli
---context data_sensitivity=none,auth_required_to_reach=true
+--context deployment_target=local
+--context auth_required_to_reach=true
 --context include_readme=false
 ```
 
@@ -278,10 +278,11 @@ You can pass any subset:
 
 | Key | Allowed values |
 |---|---|
-| `deployment_target` | `local_cli` \| `internal_tool` \| `public_service` |
-| `data_sensitivity` | `none` \| `internal` \| `pii` |
+| `deployment_target` | `local` \| `public` |
 | `auth_required_to_reach` | `true` \| `false` |
 | `include_readme` | `true` \| `false` |
+
+`data_sensitivity` is not a user-facing key — it is hardcoded to `pii` (worst-case) for every run. All findings are scored as if sensitive data is always at risk.
 
 Any unknown key, unknown value, malformed pair, or duplicate key aborts the run with a clear error — there is no silent fallback for invalid input.
 
@@ -289,8 +290,7 @@ Any unknown key, unknown value, malformed pair, or duplicate key aborts the run 
 
 | Field | Default | Rationale |
 |---|---|---|
-| `deployment_target` | `public_service` | Hardest reachable case |
-| `data_sensitivity` | `pii` | Assume sensitive data |
+| `deployment_target` | `public` | Hardest reachable case |
 | `auth_required_to_reach` | `false` | Pessimistic |
 | `include_readme` | `true` | README is read for project context by default |
 
@@ -302,23 +302,21 @@ Each axis applies an independent softener to the base severity. Floor: nothing d
 
 | Axis | Effect |
 |---|---|
-| `deployment_target: local_cli` | −2 tiers, all findings |
-| `deployment_target: internal_tool` | −1 tier, all findings |
-| `deployment_target: public_service` | no change |
-| `data_sensitivity: none` | −1 tier, only for data-exposure findings (SQLi, IDOR, info disclosure) |
-| `data_sensitivity: internal` / `pii` | no change |
+| `deployment_target: local` | −2 tiers, all findings |
+| `deployment_target: public` | no change (default) |
 | `auth_required_to_reach: true` | −1 tier, only for pre-auth findings (unauthenticated SSRF, anonymous SQLi) |
-| `auth_required_to_reach: false` | no change |
+| `auth_required_to_reach: false` | no change (default) |
+
+**Internal services:** use `auth_required_to_reach=true` to reflect that an attacker must first authenticate before reaching the service. This applies the same −1 tier softener that an explicit `internal` deployment tier would have provided.
 
 ### Drift detection — you can't downgrade findings by lying
 
-Phase 2 cross-checks two of the three axes against actual code:
+Phase 2 checks the one axis that has a reliable code signal:
 
-- If you declare `data_sensitivity: none` but Phase 2 finds PII columns (`users.ssn`, `patients.email`, etc.), it emits a "threat model drift" finding **and** reverts that dimension to the strict default for this run.
-- If you declare `auth_required_to_reach: true` but Phase 2 finds public routes with no auth middleware, same thing.
+- If you declare `auth_required_to_reach: true` but Phase 2 finds public routes with no auth middleware, it emits a "threat model drift" finding **and** reverts that dimension to the strict default for this run.
 - `deployment_target` has no reliable code signal — it's taken at face value.
 
-This means the worst case from a wrong context file is "a finding shows up as MEDIUM with a visible note explaining it was downgraded" — never "a finding disappears."
+This means the worst case from a wrong context is "a finding shows up as MEDIUM with a visible note explaining it was downgraded" — never "a finding disappears."
 
 ### Report changes when calibration is active
 

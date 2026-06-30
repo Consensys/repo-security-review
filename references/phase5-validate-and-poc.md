@@ -599,8 +599,8 @@ TM={repo_path}/.security-review/threat-model.json
 # Apply drift overrides if Phase 2 wrote any — these revert specific
 # dimensions to the strict default for this run.
 DEPLOY=$(jq -r '.drift_overrides.deployment_target // .deployment_target' $TM)
-DATA=$(jq -r '.drift_overrides.data_sensitivity // .data_sensitivity' $TM)
 AUTH=$(jq -r '.drift_overrides.auth_required_to_reach // .auth_required_to_reach' $TM)
+# data_sensitivity is always "pii" — hardcoded, not read from the threat model
 ```
 
 ### Step 2: Apply axis softeners
@@ -614,24 +614,10 @@ Floor: nothing drops below `LOW`. Ceiling: never above `cvss_base_severity`.
 
 | Value | Effect | Applies to |
 |---|---|---|
-| `public_service` | no change | all findings |
-| `internal_tool` | −1 tier | all findings |
-| `local_cli` | −2 tiers | all findings |
+| `public` | no change (default) | all findings |
+| `local` | −2 tiers | all findings |
 
-#### Axis 2: `data_sensitivity` (only for data-exposure findings)
-
-Data-exposure findings include: SQL/NoSQL injection, IDOR/BOLA, information
-disclosure, sensitive data in logs, mass assignment, broken object-property
-authorization. Does NOT apply to: command injection, SSRF (unless leaking
-metadata), authentication bypass for actions other than data read.
-
-| Value | Effect on data-exposure findings |
-|---|---|
-| `pii` | no change |
-| `internal` | no change |
-| `none` | −1 tier |
-
-#### Axis 3: `auth_required_to_reach` (only for pre-auth findings)
+#### Axis 2: `auth_required_to_reach` (only for pre-auth findings)
 
 Pre-auth findings are those exploitable without first authenticating to the
 service. Phase 4 should flag this; if unclear, check the data flow notes from
@@ -639,15 +625,14 @@ Step 1 of validation.
 
 | Value | Effect on pre-auth findings |
 |---|---|
-| `false` | no change |
+| `false` | no change (default) |
 | `true` | −1 tier |
 
 #### Composition
 
-Softeners stack. Example: a CRITICAL pre-auth SQLi against PII columns, on a
-`local_cli` (−2) with `auth_required_to_reach: true` (−1, pre-auth) and
-`data_sensitivity: none` (would be −1, but this is a data-exposure finding,
-so it applies) = CRITICAL − 4 tiers → LOW (clamped at floor).
+Softeners stack. Example: a CRITICAL pre-auth SQLi on a `local` deployment
+(−2) with `auth_required_to_reach: true` (−1, pre-auth) =
+CRITICAL − 3 tiers → LOW (clamped at floor).
 
 ### Step 3: Record the adjustment per finding
 
@@ -661,7 +646,7 @@ For each finding, capture WHY the severity changed so the report is auditable:
   "severity_adjustment": {
     "applied": true,
     "softeners": [
-      {"axis": "deployment_target", "value": "internal_tool", "delta_tiers": -1},
+      {"axis": "deployment_target", "value": "local", "delta_tiers": -2},
       {"axis": "auth_required_to_reach", "value": true, "delta_tiers": -1, "reason": "pre-auth finding gated by login"}
     ],
     "drift_overrides_applied": []
@@ -682,7 +667,7 @@ When calibration is active, the summary gains:
   "...existing counters...",
   "calibrated": true,
   "downgraded_count": 0,
-  "drift_overrides_active": ["data_sensitivity"]
+  "drift_overrides_active": ["auth_required_to_reach"]
 }
 ```
 
