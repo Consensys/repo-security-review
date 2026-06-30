@@ -83,6 +83,9 @@ In any Claude Code session (CLI or Desktop), invoke the skill on a local reposit
 /repo-security-review /path/to/repo --runtime
 /repo-security-review /path/to/repo --skip architecture --output ~/reports/myapp --runtime
 
+# Full detailed report (includes Appendix, OWASP coverage, Remediation Priority)
+/repo-security-review /path/to/repo --verbose --output ~/reports/myapp
+
 # Multi-repo — analyze three microservices and get a system-level report
 /repo-security-review --repos ~/svcs/auth,~/svcs/gateway,~/svcs/users --output ~/reports/my-system
 ```
@@ -93,6 +96,7 @@ In any Claude Code session (CLI or Desktop), invoke the skill on a local reposit
 | `--skip <phases>` | none | Comma-separated: `secrets`, `architecture`, `dependencies`, `owasp`, `validation` |
 | `--output <dir>` | none (single-repo) / `./system-security-review/` (multi-repo) | Directory to copy the report and PoC scripts into after the run. Created if it doesn't exist. |
 | `--runtime` | off | Docker-based runtime PoC validation in Phase 5 |
+| `--verbose` | off | Generate the full detailed report. Default report omits the OWASP Checks Run inventory, standalone Remediation Priority section, and Appendix. Findings, evidence, and per-finding priority labels are present in both modes. |
 | `--context <pairs>` | none | Optional inline threat model (`key=value,key=value`) used to calibrate severity. See "Adding context" below |
 | `--help` | — | Show usage |
 

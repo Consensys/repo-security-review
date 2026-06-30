@@ -41,6 +41,11 @@ Options:
                         Default: (single-repo: none — everything stays in
                         <repo>/.security-review/) (multi-repo: ./system-security-review/)
   --runtime             Enable Docker-based runtime PoC validation
+  --verbose             Generate the full detailed report. Default report
+                        (suitable for dev teams) omits the OWASP Checks Run
+                        inventory, Remediation Priority section, and Appendix.
+                        All findings, evidence, and per-finding priority labels
+                        are present in both modes.
   --context <pairs>     Optional inline threat model used to calibrate
                         severity. Format: comma-separated key=value pairs.
                         Keys: deployment_target (local|public),
@@ -110,6 +115,9 @@ Examples:
   # Full review with runtime PoC validation via Docker
   /repo-security-review ~/repos/my-service --runtime --output ~/reports/my-service
 
+  # Full detailed report (includes Appendix, OWASP coverage, Remediation Priority)
+  /repo-security-review ~/repos/my-service --verbose --output ~/reports/my-service
+
   # Skip arch (you already reviewed it) — deps + OWASP only
   /repo-security-review ~/repos/my-service --skip architecture,secrets
 
@@ -142,6 +150,7 @@ Parse `$ARGUMENTS` for:
   Default (single-repo): none — when omitted everything stays at `{repo_path}/.security-review/`
   Default (multi-repo): `./system-security-review/`
 - `--runtime` → enable Docker-based runtime PoC validation in Phase 5
+- `--verbose` → pass to Phase 6 to generate the full detailed report
 - `--context <pairs>` → optional inline threat model as comma-separated
   `key=value` pairs. Allowed keys: `deployment_target` (`local`|`public`),
   `auth_required_to_reach` (`true`|`false`), `include_readme` (`true`|`false`).
@@ -189,6 +198,7 @@ Phases running:   {list}
 Phases skipped:   {list or "none"}
 Output:           {output_path if set, else "<repo>/.security-review/final-report.md"}
 Runtime PoC:      {enabled / disabled}
+Report mode:      {detailed (--verbose) / lean (default)}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
@@ -201,6 +211,7 @@ Phases running:   Phase 0 → [1–6 per service] → Phase 7
 Phases skipped:   {list or "none" — applies to each service's per-repo phases}
 Output:           {output_dir}
 Runtime PoC:      {enabled / disabled}
+Report mode:      {detailed (--verbose) / lean (default)}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
