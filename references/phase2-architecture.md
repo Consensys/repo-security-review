@@ -73,6 +73,22 @@ grep -rn "render_template\|res\.render\|return.*html\|template\." \
   {repo_path} --include="*.py" --include="*.js" --include="*.ts" \
   -l --exclude-dir="node_modules" | head -10
 
+# Check for JS-expression template attributes (Alpine.js, Vue, React, HTMX js: prefix)
+# These require a separate XSS check — HTML auto-escaping does NOT protect JS expression contexts
+grep -rln "x-data=\|x-if=\|x-on:\|x-bind:\|v-bind\|dangerouslySetInnerHTML\|hx-vals=\"js:" \
+  {repo_path} \
+  --include="*.html" --include="*.templ" --include="*.jsx" --include="*.tsx" \
+  --include="*.vue" --include="*.erb" --include="*.hbs" \
+  --exclude-dir="node_modules" --exclude-dir=".git" | head -20
+
+# Check for server-side string formatting that may reach JS expression attributes
+# fmt.Sprintf / string concat bypasses template auto-escaping entirely
+grep -rln "fmt\.Sprintf\|fmt\.Fprintf\|strings\.Builder\|strings\.Join\|\
+string(.*)\|+.*templ\|+.*component\|+.*render" \
+  {repo_path} --include="*.go" --include="*.py" --include="*.rb" \
+  --include="*.js" --include="*.ts" \
+  --exclude-dir="node_modules" --exclude-dir=".git" | head -20
+
 # Check for outbound HTTP
 grep -rn "requests\.\|fetch(\|axios\.\|http\.get\|urllib\|httpx\." \
   {repo_path} --include="*.py" --include="*.js" --include="*.ts" \
@@ -153,6 +169,9 @@ Based on findings, write `{repo_path}/.security-review/tech-stack.json`:
     "entry_point": "app.py",
     "listen_port": 5000
   },
+  "has_js_expression_attributes": false,
+  "has_server_formatted_js_templates": false,
+  "js_expression_frameworks": [],
   "is_skill_repo": false,
   "has_skill_files": false,
   "skill_files": [],
@@ -184,6 +203,21 @@ criteria above (relative to repo root), up to 50 files.
 - `"claude-code"` if `SKILL.md` is present or `.claude/commands/` exists
 - `"anthropic-sdk"` if `anthropic` or `@anthropic-ai` appears in any skill file
 - Leave empty `[]` when frameworks cannot be determined
+
+**JS expression attribute detection rules:**
+
+`has_js_expression_attributes: true` — set when Alpine `x-data`/`x-if`/`x-on`/`x-bind`,
+Vue `v-bind`/`:attr`, React `dangerouslySetInnerHTML`, or HTMX `hx-vals="js:` are found
+in any template file.
+
+`has_server_formatted_js_templates: true` — set when BOTH:
+- `has_js_expression_attributes: true`, AND
+- Server-side string formatting (`fmt.Sprintf`, string concatenation, `strings.Builder`)
+  is found in source files in the same package or directory as template rendering calls.
+  This combination is the highest-risk pattern: server-built strings reach JS evaluation
+  contexts where HTML entity escaping is decoded before execution.
+
+`js_expression_frameworks` — list the detected frameworks, e.g. `["alpine", "vue", "react"]`.
 
 `is_skill_repo: true` — set when **all** of:
 - `has_skill_files: true`

@@ -77,8 +77,10 @@ skipping and why — this appears in the report.
 | A08 Unsafe YAML/pickle | language-specific (Python: pickle/yaml.load) | not applicable |
 | A09 Logging Failures | always | — |
 | A10 SSRF | `has_external_http_calls: true` | `has_external_http_calls: false` |
-| Client-side XSS | `has_html_rendering: true` | `is_api_only: true` |
-| Stored XSS | `has_html_rendering: true` AND `has_database: true` | either false |
+| Client-side XSS (HTML context) | `has_html_rendering: true` | `is_api_only: true` |
+| Stored XSS (HTML context) | `has_html_rendering: true` AND `has_database: true` | either false |
+| A03 JS-Context XSS | `has_js_expression_attributes: true` | `has_js_expression_attributes: false` — **do NOT skip because the project uses an auto-escaping template engine** |
+| A01 Field-level Data Exposure | always | — |
 
 ### OWASP API Top 10 — Run Only if `is_api_only: true` OR API endpoints detected
 
@@ -218,11 +220,95 @@ Only run checks from your check plan above.
 - Privilege escalation paths? (role assignment, admin routes)
 - Check: route files, controller methods, middleware application
 
+**A01 — Field-Level Data Exposure Within Permitted Routes** (always run):
+
+A user with legitimate route-level access may receive response fields they
+should not see. This is distinct from BOLA (accessing the wrong *resource*) —
+this is the right resource, but too many *fields* of it are returned.
+
+Pattern to find: handler populates a struct/serializer with a field matching a
+sensitive name → struct passed to template/response → field rendered for all
+users with the route permission, regardless of whether they should see it.
+
+```bash
+# Sensitive field names in struct population or serializer assignment
+grep -rn \
+  "\.Code\b\|\.VerificationCode\b\|\.Pin\b\|\.Otp\b\|\.Token\b\
+\|\.Secret\b\|\.Seed\b\|\.RecoveryCode\b\|\.BackupCode\b\
+\|\.Password\b\|\.ApiKey\b\|\.PrivateKey\b" \
+  {repo_path} \
+  --include="*.go" --include="*.py" --include="*.rb" \
+  --include="*.ts" --include="*.js" \
+  --exclude-dir="vendor" --exclude-dir="node_modules" --exclude-dir=".git" \
+  | head -40
+
+# Same field names rendered in templates
+grep -rn \
+  "VerificationCode\|verification_code\|verificationCode\
+\|\.Code}\|\.Pin}\|\.Otp}\|\.Token}\|\.Secret}" \
+  {repo_path} \
+  --include="*.templ" --include="*.html" --include="*.jsx" \
+  --include="*.tsx" --include="*.erb" --include="*.vue" \
+  --exclude-dir="node_modules" --exclude-dir=".git" \
+  | head -30
+```
+
+For each match: read the route handler, identify the permission required to
+reach it, and determine whether the sensitive field is conditionally gated per
+role or unconditionally included for all permitted users. Also check whether the
+template renders the field visually hidden (CSS `display:none`, Alpine
+`x-show=false`) — hidden in the UI does not mean hidden in the HTML source;
+the value is still transmitted and visible in DevTools.
+
+Severity guide:
+- **HIGH**: Security-critical value (verification code, OTP, recovery code,
+  token) leaked to users who hold the permission for the resource category but
+  should not see the specific field
+- **MEDIUM**: PII or business-sensitive value (financial amount, internal ID)
+  over-exposed to a broader role than intended
+- **LOW**: Non-sensitive metadata exposed to slightly broader audience than
+  the data model implies
+
 ### A02 - Cryptographic Failures
-- Sensitive data in plaintext in DB? (passwords, SSNs, card numbers)
-- Weak hashing? (MD5, SHA1, unsalted SHA256)
-- Weak encryption? (ECB mode, hardcoded IVs, static keys)
-- HTTP used where HTTPS should be? Insecure cookie flags?
+
+```bash
+# Weak hash algorithms (flag in password / token / integrity contexts)
+grep -rn "md5\|MD5\|sha1\b\|SHA1\b\|sha256\b\|SHA256\b\|hashlib\." \
+  {repo_path} \
+  --include="*.go" --include="*.py" --include="*.js" --include="*.ts" \
+  --include="*.rb" --include="*.php" --include="*.java" \
+  --exclude-dir="vendor" --exclude-dir="node_modules" --exclude-dir=".git" | head -30
+
+# Insecure PRNG used for security-sensitive values
+grep -rn '"math/rand"\|rand\.Intn\|rand\.Float\|random\.random()\|Math\.random()\b' \
+  {repo_path} \
+  --include="*.go" --include="*.py" --include="*.js" --include="*.ts" \
+  --exclude-dir="vendor" --exclude-dir="node_modules" --exclude-dir=".git" | head -20
+
+# Weak or misconfigured encryption
+grep -rn "ECB\|\.new(key\|AES\.new\|createCipher(\|DES\b\|3DES\|RC4\|Blowfish" \
+  {repo_path} \
+  --include="*.py" --include="*.js" --include="*.ts" --include="*.rb" \
+  --exclude-dir="vendor" --exclude-dir="node_modules" --exclude-dir=".git" | head -20
+
+# Cookie flag checks (look for Set-Cookie without Secure / HttpOnly / SameSite)
+grep -rn "Set-Cookie\|SetCookie\|http\.SetCookie\|cookie\.New\|cookies\.set(" \
+  {repo_path} \
+  --include="*.go" --include="*.py" --include="*.js" --include="*.ts" \
+  --exclude-dir="vendor" --exclude-dir="node_modules" --exclude-dir=".git" | head -20
+```
+
+For each hit, apply this severity guide:
+
+- **MD5 / SHA1 used for password hashing**: CRITICAL — broken for this purpose; bcrypt / argon2 / scrypt required
+- **MD5 / SHA1 used for data integrity (HMAC, checksums)**: MEDIUM — collision-vulnerable; upgrade to SHA-256+
+- **`math/rand` / `Math.random()` / `random.random()` producing tokens, IVs, or session IDs**: HIGH — predictable PRNG; use `crypto/rand`, `secrets.token_bytes()`, `crypto.getRandomValues()`
+- **`createCipher(` (Node.js deprecated API)**: HIGH — IV is derived from the key, trivially predictable; replace with `createCipheriv()`
+- **ECB mode**: HIGH — identical plaintext blocks produce identical ciphertext blocks; leaks data patterns
+- **DES / 3DES / RC4 / Blowfish**: HIGH — broken or near-broken; replace with AES-GCM
+- **Session cookie missing `Secure`, `HttpOnly`, or `SameSite=Strict/Lax`**: MEDIUM — exposed to network sniffing or CSRF
+
+Also check: sensitive fields stored in plaintext (passwords, SSNs, card numbers, private keys) in DB schema or ORM models — look for field names like `password`, `ssn`, `card_number`, `private_key` in model definitions without encryption annotations.
 
 ### A03 - Injection (run only applicable sub-checks per check plan)
 
@@ -235,13 +321,78 @@ Only run checks from your check plan above.
 - `exec`, `system`, `subprocess` with user input
 - `shell=True` with user-controlled string
 
-**Client-side XSS** (only if `has_html_rendering: true`):
-- Unencoded user input in HTML output
-- `innerHTML`, `document.write`, `dangerouslySetInnerHTML`
-- Template rendering without escaping
+**XSS — Tier 1: HTML Context** (only if `has_html_rendering: true`):
+
+Auto-escaping frameworks (Go `templ`, `html/template`, Django, Jinja2, Rails ERB,
+React JSX text nodes) protect values interpolated via the framework's standard
+variable syntax in HTML contexts. Tier 1 risk is LOW for these frameworks unless:
+- `innerHTML`, `document.write`, or equivalent used with dynamic values
+- Unsafe output filter explicitly applied: Django/Jinja2 `|safe`, Rails
+  `html_safe`/`raw`, Go `template.HTML(...)` cast, React `dangerouslySetInnerHTML`
+- User input passed directly to `render(template=user_input)` (template injection)
+
+**XSS — Tier 2: JavaScript Expression Context** (run when `has_js_expression_attributes: true`):
+
+> ⚠️ **Auto-escaping does NOT protect this tier and must not be used to dismiss it.**
+> HTML entity encoding (e.g. `&#39;` for `'`) is decoded by the browser's HTML
+> parser **before** the JavaScript engine evaluates the expression. A value that
+> appears safely HTML-encoded at the server is JS-injectable at the client.
+
+JS expression sinks — every one of these must be checked regardless of templating framework:
+- **Alpine.js**: `x-data=`, `x-if=`, `x-on:event=`, `x-bind:attr=` — content is evaluated as JavaScript
+- **Vue.js**: `v-bind:attr=`, `:attr=`, `v-if=`, `v-on:event=` — ditto
+- **HTMX**: `hx-vals="js:..."` — JS expression prefix
+- **React**: `dangerouslySetInnerHTML={{__html: ...}}`
+- **Inline `<script>` blocks** containing server-rendered variable interpolation
+
+For each JS expression sink, determine the data source:
+
+*Sub-case A — Server-side string formatting → JS attribute* (HIGH/CRITICAL severity):
+`fmt.Sprintf(...)`, string concatenation, or `strings.Builder` producing a string
+that is passed into any JS expression attribute. This completely bypasses template
+auto-escaping: the string is already built before the template engine sees it, so
+no escaping is applied at all.
+
+```bash
+# Find server-side string formatting near template rendering (Go)
+grep -rn "fmt\.Sprintf\|fmt\.Fprintf\|strings\.Builder\|strings\.Join" \
+  {repo_path} --include="*.go" \
+  --exclude-dir="vendor" --exclude-dir=".git" | head -40
+
+# Find Alpine/Vue JS expression attributes in templates
+grep -rn 'x-data=\|x-if=\|x-on:\|x-bind:\|v-bind\|:class=\|:href=\|dangerouslySetInnerHTML' \
+  {repo_path} \
+  --include="*.html" --include="*.templ" --include="*.jsx" \
+  --include="*.tsx" --include="*.vue" --include="*.erb" \
+  --exclude-dir="node_modules" --exclude-dir=".git" | head -40
+
+# Find fmt.Sprintf strings that end up in x-data / x-if attributes (Go + templ)
+grep -rn 'x-data=.*%[sqvf]\|x-if=.*%[sqvf]\|x-on.*%[sqvf]' \
+  {repo_path} --include="*.templ" --include="*.html" \
+  --exclude-dir=".git" | head -20
+```
+
+For each `fmt.Sprintf` / string-formatting hit: trace the source values. If any
+source is user-controlled, DB-stored (writable by untrusted input), or sourced
+from external config (e.g. translation locale keys from a CMS/JSONB column), the
+finding is confirmed. DB-stored = Stored XSS.
+
+*Sub-case B — Template variable interpolation → JS attribute*:
+The template engine writes a variable directly into a JS expression attribute.
+Check whether the framework performs **JavaScript-context** escaping (not just
+HTML escaping) for this attribute type. Most do not:
+- Go `templ`: HTML entity escaping only — `{ variable }` inside `x-data` emits
+  the HTML-encoded value; the browser decodes `&#39;` → `'` before Alpine evaluates
+- Go `html/template`: context-aware, but only when it can statically determine
+  the JS context — dynamic attribute names defeat this
+- Jinja2 / Django: HTML escaping only in attribute context
+- Only purpose-built context-aware escapers (e.g. Google Closure Templates) are safe
+
+If context-aware JS escaping is NOT confirmed: treat direct variable interpolation
+into JS expression attributes as a potential XSS sink and trace the source.
 
 **Template Injection** (only if `has_html_rendering: true`):
-- User input passed directly to template engine
+- User input passed directly to template engine as the template name/path
 - `render(template=user_input)` patterns
 
 **NoSQL Injection** (only if mongodb/redis in `database_types`):
@@ -259,9 +410,52 @@ Only run checks from your check plan above.
 - Unnecessary features/endpoints?
 
 ### A07 - Auth & Session Failures
-- Brute force protection on login?
-- Session fixation? Session regenerated after login?
-- Password complexity enforced?
+
+```bash
+# JWT: algorithm confusion and signature bypass
+grep -rn 'alg.*none\|algorithm.*none\|algorithms=\[\|"none"\|ParseUnverified\|SkipClaimsValidation' \
+  {repo_path} \
+  --include="*.go" --include="*.py" --include="*.js" --include="*.ts" \
+  --exclude-dir="vendor" --exclude-dir="node_modules" --exclude-dir=".git" | head -20
+
+# PyJWT: decode without signature verification
+grep -rn "jwt\.decode\|decode(.*verify.*False\|options.*verify_signature" \
+  {repo_path} --include="*.py" \
+  --exclude-dir="vendor" --exclude-dir=".git" | head -20
+
+# Go JWT: parsing without full verification
+grep -rn "jwt\.Parse\b\|ParseWithClaims\|token\.Valid\b" \
+  {repo_path} --include="*.go" \
+  --exclude-dir="vendor" --exclude-dir=".git" | head -20
+
+# Rate limiting / brute-force protection presence check
+grep -rn "rate.*limit\|ratelimit\|throttl\|limiter\|RateLimit\|Throttle" \
+  {repo_path} \
+  --include="*.go" --include="*.py" --include="*.js" --include="*.ts" \
+  --exclude-dir="vendor" --exclude-dir="node_modules" --exclude-dir=".git" | head -20
+
+# Login / auth routes (cross-reference with rate-limit presence above)
+grep -rn "login\|signin\|authenticate\|/token\b\|/auth\b\|/reset.*password\|/verify" \
+  {repo_path} \
+  --include="*.go" --include="*.py" --include="*.js" --include="*.ts" \
+  --exclude-dir="vendor" --exclude-dir="node_modules" --exclude-dir=".git" | head -30
+
+# Session regeneration after login
+grep -rn "session\b\|Session\b" \
+  {repo_path} \
+  --include="*.go" --include="*.py" --include="*.rb" --include="*.php" \
+  --exclude-dir="vendor" --exclude-dir=".git" | grep -i "regenerate\|renew\|rotate\|new_session" | head -20
+```
+
+For each hit:
+
+- **`alg: none` accepted, `verify=False`, or `ParseUnverified` in an auth decision path**: CRITICAL — attacker can forge any token without a key
+- **`algorithms=` list includes `"none"` or does not explicitly exclude it**: HIGH — per CVE-2022-21449 class; allowlist must be `["HS256"]` or a single expected algorithm
+- **`jwt.Parse` result used without checking `token.Valid == true`**: HIGH — parse succeeds with invalid signature in some libraries; always gate on `.Valid`
+- **No rate limiting on `/login`, `/reset`, `/verify`, `/token`**: HIGH — enables credential stuffing and brute-force at scale
+- **Session ID not regenerated after successful login**: MEDIUM — session fixation: attacker sets a known session ID before login and inherits the authenticated session after
+
+Also check password hashing: search for bcrypt / argon2 / scrypt in the codebase. If auth stores passwords and none of these are present, escalate to an A02 finding (plain or weak hash on passwords).
 
 ### A08 - Deserialization (only if `has_deserialization: true`)
 - `pickle.loads`, `yaml.load` (not `yaml.safe_load`), `unserialize`
@@ -273,17 +467,90 @@ Only run checks from your check plan above.
 - Logs stored securely?
 
 ### A10 - SSRF (only if `has_external_http_calls: true`)
-- User-controlled URLs fetched server-side?
-- URL allowlists? IP restrictions?
-- Internal metadata endpoints reachable?
+
+```bash
+# HTTP client calls — Go
+grep -rn "http\.Get(\|http\.Post(\|http\.NewRequest(\|http\.Do(\|http\.Head(" \
+  {repo_path} --include="*.go" \
+  --exclude-dir="vendor" --exclude-dir=".git" | head -30
+
+# HTTP client calls — Python
+grep -rn "requests\.get\|requests\.post\|requests\.request\|urllib\.request\|httpx\.\|aiohttp\." \
+  {repo_path} --include="*.py" \
+  --exclude-dir="vendor" --exclude-dir=".git" | head -30
+
+# HTTP client calls — JS/TS
+grep -rn "fetch(\|axios\.get\|axios\.post\|axios\.request\|got\.\|node-fetch\|superagent" \
+  {repo_path} --include="*.js" --include="*.ts" \
+  --exclude-dir="node_modules" --exclude-dir=".git" | head -30
+
+# URL validation / allowlist presence (absence = likely SSRF)
+grep -rn "allowlist\|whitelist\|validateURL\|isAllowed\|parseURL\|net\.ParseIP\|net\.LookupHost" \
+  {repo_path} \
+  --include="*.go" --include="*.py" --include="*.js" --include="*.ts" \
+  --exclude-dir="vendor" --exclude-dir="node_modules" --exclude-dir=".git" | head -20
+
+# Internal IP / metadata endpoint references (present in validation = good; absent = gap)
+grep -rn "169\.254\|192\.168\.\|10\.\|172\.1[6-9]\.\|172\.2[0-9]\.\|172\.3[0-1]\.\|127\.0\|localhost\|metadata\." \
+  {repo_path} \
+  --include="*.go" --include="*.py" --include="*.js" --include="*.ts" \
+  --exclude-dir="vendor" --exclude-dir="node_modules" --exclude-dir=".git" | head -20
+```
+
+For each HTTP client call, trace the URL argument:
+
+1. **Is the URL (or any component of it) derived from user input?** — request param, body field, header, DB-stored value, webhook config, import/fetch-by-URL feature.
+2. **Is there a scheme + hostname allowlist?** — scheme must be restricted to `https://`; hostname must match a static list or validated against a public-only resolver.
+3. **Is the resolved IP checked against private ranges?** — RFC-1918 (`10.x`, `172.16–31.x`, `192.168.x`), loopback (`127.x`), link-local (`169.254.x`), and cloud metadata (`169.254.169.254`).
+4. **Is HTTP redirect following disabled or capped?** — an attacker can redirect from a public URL to an internal one; set `CheckRedirect` / `allow_redirects=False` or validate each redirect target.
+
+Severity guide:
+- **CRITICAL**: URL directly from a request parameter/body with no scheme or hostname validation, internal network reachable (cloud instance, Kubernetes API, metadata endpoint)
+- **HIGH**: URL from DB-stored / admin-configurable value without IP blocklist; redirect following into private ranges
+- **MEDIUM**: URL with scheme validated but no IP blocklist; redirect loop without target validation
 
 ---
 
 ### OWASP API Top 10 (only if API project)
 
-**API1 - BOLA**
-- Every endpoint returning/modifying a resource by ID: ownership verified?
-- Look for: `GET /api/items/{id}`, `PUT /api/orders/{id}` without ownership check
+**API1 - BOLA (Broken Object-Level Authorization)**
+
+BOLA is the most common API vulnerability class. The pattern: a route accepts a
+resource ID in the path/query, the handler fetches the resource by that ID alone
+(no `WHERE user_id = current_user` condition), and no middleware scopes the query
+to the caller's resources.
+
+```bash
+# Routes with ID path parameters
+grep -rn "/:id\b\|/{id}\b\|/:orderId\|/:userId\|/:itemId\|/{orderId}\|/{userId}\|/{itemId}" \
+  {repo_path} \
+  --include="*.go" --include="*.py" --include="*.js" --include="*.ts" \
+  --exclude-dir="vendor" --exclude-dir="node_modules" --exclude-dir=".git" | head -40
+
+# DB queries fetching by ID only (no ownership join)
+grep -rn "WHERE id =\|WHERE id=\|\.Find(id\|\.FindByID\|\.GetByID\|\.ByID(\|First(&.*,.*id\b" \
+  {repo_path} \
+  --include="*.go" --include="*.py" --include="*.js" --include="*.ts" \
+  --exclude-dir="vendor" --exclude-dir="node_modules" --exclude-dir=".git" | head -30
+
+# Ownership / scoping patterns (absence near ID-fetch = BOLA signal)
+grep -rn "user_id\|owner_id\|account_id\|\.UserID\|\.OwnerID\|\.AccountID\|currentUser\b\|ctx\.UserID" \
+  {repo_path} \
+  --include="*.go" --include="*.py" --include="*.js" --include="*.ts" \
+  --exclude-dir="vendor" --exclude-dir="node_modules" --exclude-dir=".git" | head -30
+```
+
+For each ID-based route handler, determine:
+1. Does the DB query include `AND user_id = currentUser.ID` (or equivalent ownership condition)?
+2. Is there a middleware layer that globally scopes queries to the authenticated user's tenant/account?
+3. Is the resource intentionally public (e.g., public product catalog, published post)?
+
+If none of the above: confirmed BOLA. Verify by checking whether user A can read/modify/delete user B's resource by substituting B's resource ID.
+
+Severity guide:
+- **CRITICAL**: Write/delete operation (PUT/PATCH/DELETE) on another user's resource
+- **HIGH**: Read operation exposing sensitive data (PII, financial, health records) of another user
+- **MEDIUM**: Read operation on non-sensitive resource of another user (e.g., public-ish metadata)
 
 **API2 - Broken Authentication**
 - JWT signature actually verified?
@@ -307,9 +574,35 @@ Only run checks from your check plan above.
 
 **API7 - SSRF** (only if `has_external_http_calls: true`)
 
-**API8 - Misconfiguration**
-- CORS: wildcard or reflecting Origin header?
-- Verbose errors in API responses?
+**API8 - Security Misconfiguration**
+
+```bash
+# CORS configuration
+grep -rn "Access-Control-Allow-Origin\|AllowOrigins\|cors\.New\|cors\.Default\|CORS(\|CORSMiddleware\|corsMiddleware" \
+  {repo_path} \
+  --include="*.go" --include="*.py" --include="*.js" --include="*.ts" \
+  --exclude-dir="vendor" --exclude-dir="node_modules" --exclude-dir=".git" | head -20
+
+# Wildcard or reflected Origin patterns
+grep -rn 'AllowOrigins.*\*\|allow_origins.*\*\|\*.*Access-Control\|r\.Header\.Get.*Origin\|c\.Request\.Header.*Origin\|req\.headers.*origin' \
+  {repo_path} \
+  --include="*.go" --include="*.py" --include="*.js" --include="*.ts" \
+  --exclude-dir="vendor" --exclude-dir="node_modules" --exclude-dir=".git" | head -20
+
+# Verbose error / stack trace exposure in API responses
+grep -rn "debug.*true\|DEBUG.*True\|stack_trace\|traceback\|printStackTrace\|fmt\.Errorf.*%w\|errors\.Wrap" \
+  {repo_path} \
+  --include="*.go" --include="*.py" --include="*.js" --include="*.ts" \
+  --exclude-dir="vendor" --exclude-dir="node_modules" --exclude-dir=".git" | head -20
+```
+
+For CORS:
+- **Wildcard `*` with `AllowCredentials: true`**: CRITICAL — spec-forbidden combination that some misconfigured gateways allow; enables cross-origin credential theft
+- **Origin reflected from `r.Header.Get("Origin")` without an allowlist**: HIGH — any origin can make credentialed cross-origin requests; attacker hosts a page that calls the API with the victim's cookies
+- **Overly broad allowlist** using prefix/suffix matching (e.g., `endsWith(".example.com")` matches `evil.example.com`): MEDIUM
+- **`AllowOrigins: ["*"]` on a public API with no credentials**: LOW/informational — acceptable if no session cookies or auth tokens are used
+
+For verbose errors: check whether unhandled panics / 500 responses include stack traces, internal file paths, SQL queries, or framework internals in the response body. These are HIGH if they leak DB schema or internal topology.
 
 **API9 - Inventory Management**
 - Old API versions still accessible?

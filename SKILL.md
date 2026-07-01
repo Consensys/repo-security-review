@@ -524,6 +524,9 @@ to its normal output. This is the key handoff document:
     "entry_point": "app.py",
     "listen_port": 5000
   },
+  "has_js_expression_attributes": false,
+  "has_server_formatted_js_templates": false,
+  "js_expression_frameworks": [],
   "is_skill_repo": false,
   "has_skill_files": false,
   "skill_files": [],
