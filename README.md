@@ -139,12 +139,12 @@ flowchart TD
 
     subgraph FINDER["FINDER LAYER (sequential subagents)"]
         P1[Phase 1 · Secret Scanning<br/>gitleaks + grep]
-        P2[Phase 2 · Architectural Analysis<br/>Fable + extended thinking]
+        P2[Phase 2 · Architectural Analysis<br/>deep-tier model · extended thinking]
         TS[(tech-stack.json)]
         P3[Phase 3 · Dependency CVEs<br/>osv-scanner]
         P3b[Phase 3b · Reachability Validation]
         P4[Phase 4 · OWASP Code Scan<br/>semgrep + LLM]
-        P4b[Phase 4b · LLM / AI Skill Security<br/>Fable + extended thinking<br/>auto-activated when skill files detected]
+        P4b[Phase 4b · LLM / AI Skill Security<br/>deep-tier model · extended thinking<br/>auto-activated when skill files detected]
 
         P1 --> P2
         P2 --> TS
