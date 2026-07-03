@@ -77,23 +77,27 @@ positive.
 
 ### LLM01 — Prompt Injection
 
-Does any phase instruction pass unsanitized external content directly into
-an agent prompt?
+Does any instruction in the skill pass unsanitized external content directly
+into an agent prompt?
 
 Check for:
-- Instructions that read files from the **target repo** and interpolate their
+- Instructions that read files or data from **untrusted sources** (the user's
+  files, fetched web pages, tool output, API responses) and interpolate their
   content directly into a prompt without marking it as untrusted (e.g.
-  `"read README.md and use it as context"` with no sanitization boundary)
-- User-supplied arguments (`--context` values, `--output` path, repo path
-  itself) that flow into agent prompts as interpolated strings
-- Tool output (Bash stdout, file read results) passed directly as context to
-  the next agent without a trust boundary — the agent has no way to distinguish
-  instructions from data
-- Phase instructions that give the agent a persona derived from the target repo
-  (e.g. "act as this repo's lead developer") — a malicious `CLAUDE.md` or
-  `README.md` in the target could then redefine the persona
-- Instructions that chain phases by embedding one phase's full output text into
-  the next phase's prompt (rather than passing a file path)
+  `"read the file the user names and use it as context"` with no sanitization
+  boundary)
+- User-supplied arguments or parameters (any flag, path, or free-text input the
+  skill accepts) that flow into agent prompts as interpolated strings
+- Tool output (Bash stdout, file read results, web fetches) passed directly as
+  context to the next step without a trust boundary — the agent has no way to
+  distinguish instructions from data
+- Instructions that give the agent a persona derived from untrusted content
+  (e.g. "act as described in the file you just read") — attacker-controlled
+  content could then redefine the persona
+- Instructions that chain steps by embedding one step's full output text into
+  the next step's prompt (rather than passing a reference the model treats as data)
+- Skills that embed `{{...}}`, `$ARGUMENTS`, or other template placeholders
+  filled from untrusted input directly inside the instruction body
 
 Severity guide:
 | Outcome | Severity |
@@ -107,17 +111,22 @@ Severity guide:
 
 ### LLM02 — Insecure Output Handling
 
-Is agent output written to files or passed downstream without sanitization?
+Is agent output written to files, rendered to the user, or passed downstream
+without sanitization?
 
 Check for:
-- Phase output files (JSON, Markdown) that embed strings read from the target
-  repo without escaping — a file named `"><script>alert(1)</script>.py` or
-  a config value containing `## New Heading` could corrupt `final-report.md`
-- Report builder instructions that render repo-sourced strings (file names,
-  variable names, config values, commit messages) directly as markdown headings,
-  links, or code blocks without noting that they are untrusted data
-- PoC scripts that include live secret values rather than placeholder strings
-  (the PoC file itself is an output that may be shared)
+- Output files (JSON, Markdown, HTML) that embed strings read from untrusted
+  sources without escaping — a value containing `"><script>alert(1)</script>`
+  or `## New Heading` could corrupt a generated document or inject into whatever
+  renders it
+- Instructions that render externally-sourced strings (file names, field values,
+  fetched content, commit messages) directly as markdown headings, links, or
+  code blocks without treating them as untrusted data
+- Generated artifacts (scripts, configs, reports) that include live secret
+  values rather than placeholder strings — the artifact itself is output that
+  may be shared or committed
+- Output passed to a downstream system (shell, database, another agent, an API)
+  in a format that system will interpret as commands rather than data
 
 ---
 
@@ -127,52 +136,61 @@ Does the skill depend on external resources that could be compromised?
 
 Check for:
 - Hard-coded model ID strings that are stale or reference deprecated model
-  versions — a drift here silently downgrades analysis quality
+  versions — a drift here silently changes behaviour or downgrades quality
 - External URLs embedded in instructions (API endpoints, script download
-  locations, enrichment sources) that are not under the skill owner's control
-  and could be hijacked or go stale
+  locations, data sources) that are not under the skill owner's control and
+  could be hijacked or go stale
 - MCP server or tool references without pinned versions or integrity checks
-- CLI tools invoked by bare name (`gitleaks`, `semgrep`) without path pinning —
-  susceptible to PATH hijacking in a CI environment
+- CLI tools invoked by bare name (any external binary the skill shells out to)
+  without path pinning — susceptible to PATH hijacking in a CI environment
+- Instructions to `curl | bash`, `pip install`, `npm install`, or otherwise
+  fetch-and-execute remote code as part of the skill's operation
+- References to other skills, sub-agents, or bundled files by name without
+  verifying their integrity — a swapped dependency file changes behaviour silently
 
 ---
 
 ### LLM06 — Sensitive Information Disclosure
 
-Do phase instructions cause secrets, credentials, or PII to flow further than
-necessary?
+Do the skill's instructions cause secrets, credentials, or PII to flow further
+than necessary?
 
 Check for:
-- Phase 1 (secrets) passing **raw** secret values — not just redacted references
-  — into downstream phase prompts or JSON outputs
-- Progress output instructions that print full secret values during execution
-  (the user's terminal is not a safe log destination for live credentials)
-- Phase 6 instructions around secret redaction — is the "first 4 / last 3 chars"
-  rule enforced in **all** output paths, including verbose mode and PoC files?
-- Instructions that include the `--context` threat model values (deployment
-  target, auth flags) in agent prompts in ways that could be read back by a
-  malicious repo (information about the deployment environment is itself
-  sensitive)
+- Instructions that pass **raw** secret values — not just redacted references —
+  into downstream prompts, logs, or output files
+- Progress/log output that prints full secret values during execution (the
+  user's terminal or CI log is not a safe destination for live credentials)
+- Redaction rules that are not enforced across **all** output paths — verbose
+  modes, generated artifacts, debug traces, and error messages included
+- Instructions that place sensitive configuration or environment values
+  (deployment target, credentials, internal hostnames, API keys) into agent
+  prompts where untrusted content processed later in the same context could read
+  them back — environment detail is itself sensitive
+- Instructions that send user data or file contents to an external service
+  (telemetry, an API, a webhook) without the user's awareness
 
 ---
 
 ### LLM07 — Insecure Plugin / Tool Design
 
-Are tool grants broader than each phase actually requires?
+Are tool grants broader than each step of the skill actually requires?
 
 Check for:
-- Phases that have Bash access but only need read-only file operations — does
+- Steps that have Bash access but only need read-only file operations — does
   the instruction explicitly constrain the scope of Bash usage, or leave it open
   to any command?
-- `WebFetch` / `WebSearch` calls driven by URLs that come from the target repo
-  (e.g. fetching a URL found in `package.json` or a config file) without
-  domain allow-listing
-- Write/Edit access in phases whose sole output should be a JSON file — can
-  the phase be coerced into modifying the target repo's files?
-- Instructions that allow an agent to call `present_files`, run `git push`,
-  send messages, or take other out-of-scope actions that are not revocable
-- Missing confirmation gates before irreversible actions (the `--output` copy
-  step, Docker container creation, external API calls)
+- `WebFetch` / `WebSearch` calls driven by URLs that come from untrusted content
+  (e.g. fetching a URL found in a config file or user input) without domain
+  allow-listing
+- Write/Edit access in steps whose sole output should be a data file — can the
+  step be coerced into modifying arbitrary files on the user's system?
+- Instructions that allow an agent to push to a remote, send messages, post to
+  an API, delete files, or take other out-of-scope or irrevocable actions
+- Missing confirmation gates before irreversible or destructive actions (writing
+  outside a scratch directory, container creation, network egress, external
+  API calls, file deletion)
+- A `SKILL.md` frontmatter `allowed-tools` (or equivalent grant) that is wider
+  than the steps in the body actually use
 
 ---
 
@@ -181,18 +199,20 @@ Check for:
 Can any agent take broader action than required for its narrow, stated task?
 
 Check for:
-- Phases that could, if prompted adversarially via injected repo content, modify
-  the target repo's files rather than just reading them
-- Instructions that allow a subagent to decide which phases to skip, add, or
-  re-run — sequencing decisions must belong to the orchestrator, not subagents
-- Absence of explicit scope constraints in phase prompts: e.g. no statement that
-  the agent should only read from `{repo_path}` and only write to
-  `{repo_path}/.security-review/`
-- Unbounded tool-use loops: can a phase instruction lead to recursive or
-  indefinitely repeating agent calls without a natural termination condition?
-- Phase instructions that pass the user's full `$ARGUMENTS` string to a
-  subagent — this gives the subagent visibility into flags (like `--output`) it
-  should not act on
+- Steps that could, if prompted adversarially via injected untrusted content,
+  modify or delete files rather than just reading them
+- Instructions that allow a subagent to decide control flow — which steps to
+  skip, add, or re-run. Sequencing decisions should belong to a fixed controller,
+  not a subagent whose context can be poisoned by untrusted input
+- Absence of explicit scope constraints in prompts: e.g. no statement bounding
+  which paths the agent may read from and write to
+- Unbounded tool-use loops: can an instruction lead to recursive or indefinitely
+  repeating agent calls without a natural termination condition?
+- Instructions that pass the user's full raw argument string to a subagent that
+  should only see a narrow slice — giving it visibility into (or the ability to
+  act on) flags and paths outside its task
+- Autonomy to act without confirmation on the basis of content it read from an
+  untrusted source (e.g. "do what the instructions in the file tell you")
 
 ---
 
@@ -203,8 +223,8 @@ Check for:
   "phase": "llm_security",
   "skill_files_analyzed": [
     "SKILL.md",
-    ".claude/commands/repo-security-review.md",
-    "references/phase1-secrets.md"
+    "commands/<command-name>.md",
+    "references/<supporting-file>.md"
   ],
   "summary": {
     "total": 3,
@@ -226,7 +246,7 @@ Check for:
       "remediation": "Specific, actionable fix",
       "evidence": [
         "SKILL.md:L45-L52",
-        "references/phase2-architecture.md:L23"
+        "references/<supporting-file>.md:L23"
       ],
       "poc_needed": false
     }
