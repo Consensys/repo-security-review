@@ -11,9 +11,13 @@ completed for every repo in `--repos`.**
 
 ## Model
 
-Use `claude-fable-5` with `thinking: {type: "adaptive"}`. This phase requires
-multi-document, cross-hypothesis reasoning: connecting separate per-service
-findings to identify emergent vulnerabilities. Adaptive thinking is essential.
+Use the resolved Deep tier model (`{deep_tier_model}`, normally `claude-opus-4-8`)
+with `thinking: {type: "adaptive"}`. This phase requires multi-document,
+cross-hypothesis reasoning: connecting separate per-service findings to identify
+emergent vulnerabilities. Adaptive thinking is essential.
+
+> `claude-fable-5` is intentionally excluded from the Deep chain — see SKILL.md →
+> Fallback Chains.
 
 ## Inputs
 
@@ -187,7 +191,7 @@ Write two files:
 # System Security Report — {system_name}
 
 **Services analyzed:** api-gateway · auth-service · user-service
-**Model:** claude-fable-5 (adaptive thinking)
+**Model:** {deep_tier_model} (adaptive thinking)
 
 ---
 

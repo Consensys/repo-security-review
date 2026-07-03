@@ -34,11 +34,18 @@ and spawns this phase only when it is set.
 
 ## Model Guidance
 
-**Use `claude-fable-5` with `thinking: {type: "adaptive"}`.**
+**Use the resolved Deep tier model (`{deep_tier_model}`, normally `claude-opus-4-8`)
+with `thinking: {type: "adaptive"}`.**
 
 This phase requires deep multi-hop reasoning: following data flows through
 instruction chains, identifying subtle injection vectors, and reasoning about
-permission boundary violations. Do not use Sonnet for this phase.
+permission boundary violations. Do not use Sonnet as the primary model for this
+phase unless it is the resolved fallback.
+
+> `claude-fable-5` is intentionally excluded from the Deep chain — its
+> post-release guardrails can cause over-cautious hedging or refusal on the
+> concrete injection-vector reasoning this phase depends on. See SKILL.md →
+> Fallback Chains.
 
 ## Inputs
 

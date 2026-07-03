@@ -107,27 +107,32 @@ API key / account tier.
 
 ```
 Deep tier:
-  1. claude-fable-5          ← preferred; adaptive thinking supported
-  2. claude-opus-4-8         ← fallback; adaptive thinking supported
-  3. claude-sonnet-4-6       ← last resort; no thinking for deep tier
+  1. claude-opus-4-8         ← preferred; adaptive thinking supported
+  2. claude-sonnet-4-6       ← fallback; no thinking for deep tier
 
 Standard tier:
   1. claude-sonnet-4-6       ← preferred
   2. claude-haiku-4-5        ← fallback; reduced analysis depth
 ```
 
+> **Note on `claude-fable-5`:** Fable 5 is intentionally *not* in the Deep chain.
+> Although it is nominally the most capable tier, its post-release guardrails can
+> cause over-cautious hedging or refusal on the concrete attack-path and
+> injection-vector reasoning that Phases 2 and 4b depend on. Opus 4.8 is preferred
+> for this workload. Re-add Fable 5 to the top of the chain only after confirming
+> its security-analysis output is not degraded.
+
 #### Thinking Rules (applied to the resolved model)
 
 | Resolved model | Tier | thinking param |
 |---|---|---|
-| `claude-fable-5` | Deep | `thinking: {type: "adaptive"}` |
 | `claude-opus-4-8` | Deep | `thinking: {type: "adaptive"}` |
-| `claude-sonnet-4-6` | Deep (last resort) | omit `thinking` param |
+| `claude-sonnet-4-6` | Deep (fallback) | omit `thinking` param |
 | `claude-sonnet-4-6` | Standard | omit `thinking` param |
 | `claude-haiku-4-5` | Standard | omit `thinking` param |
 
-> **Never pass `thinking: {type: "disabled"}`** — this returns a 400 on Fable 5
-> and Opus 4.8. Omit the param entirely when thinking is not wanted.
+> **Never pass `thinking: {type: "disabled"}`** — this returns a 400 on Opus 4.8.
+> Omit the param entirely when thinking is not wanted.
 
 #### Model Resolution Step
 
@@ -150,7 +155,7 @@ Standard tier:
 ```
 
 If `claude models list` or the Models API is unavailable, attempt to use
-`claude-fable-5` directly. If the first agent call fails with a
+`claude-opus-4-8` directly. If the first agent call fails with a
 model-not-found error (HTTP 404 / "model not available"), catch the error,
 move to the next model in the chain, and retry once. Record the fallback in
 `run-metadata.json → fallback_notes`.
@@ -162,19 +167,19 @@ move to the next model in the chain, and retry once. Record the fallback in
 
 ```json
 {
-  "deep_tier_model":   "claude-fable-5",
+  "deep_tier_model":   "claude-opus-4-8",
   "standard_tier_model": "claude-sonnet-4-6",
   "deep_tier_thinking": true,
-  "phase0_model":  "claude-fable-5 (only present in multi-repo mode)",
+  "phase0_model":  "claude-opus-4-8 (only present in multi-repo mode)",
   "phase1_model":  "claude-sonnet-4-6",
-  "phase2_model":  "claude-fable-5",
+  "phase2_model":  "claude-opus-4-8",
   "phase3_model":  "claude-sonnet-4-6",
   "phase4_model":  "claude-sonnet-4-6",
-  "phase4b_model": "claude-fable-5 (only present when has_skill_files: true)",
+  "phase4b_model": "claude-opus-4-8 (only present when has_skill_files: true)",
   "phase5_model":  "claude-sonnet-4-6",
   "phase6_model":  "claude-sonnet-4-6",
-  "phase7_model":  "claude-fable-5 (only present in multi-repo mode)",
-  "fallback_notes": "Deep tier: claude-fable-5 not available, using claude-opus-4-8"
+  "phase7_model":  "claude-opus-4-8 (only present in multi-repo mode)",
+  "fallback_notes": "Deep tier: claude-opus-4-8 not available, using claude-sonnet-4-6"
 }
 ```
 
