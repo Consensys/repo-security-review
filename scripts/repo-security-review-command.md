@@ -90,8 +90,13 @@ Phases you can skip (--skip <name>):
   validation        Phase 5 · Independent validation of Phase 4 findings
                     (data flow tracing, mitigation checks, false positive
                     filtering) + immediate PoC generation for confirmed
-                    findings only. These two steps share one agent — PoC
-                    generation is gated on passing validation.
+                    findings only. Skipping this skips PoC as well.
+
+  poc               PoC generation only. Phase 5 validation still runs and
+                    confirms/rejects findings — no PoC files are written.
+                    Use when you want validation verdicts without the time
+                    cost of PoC generation, or in headless/CI runs where
+                    PoC scripts are not needed.
 
   skill-security    Phase 4b · LLM / AI skill security analysis. Only
                     runs when Phase 2 detects skill/agent instruction files
@@ -100,8 +105,9 @@ Phases you can skip (--skip <name>):
                     Auto-activated — no flag needed to turn it on.
 
 Cascade rules:
-  --skip owasp        → also skips validation (nothing to validate)
-  --skip validation   → also skips PoC (PoC lives inside Phase 5)
+  --skip owasp        → also skips validation and poc (nothing to validate)
+  --skip validation   → also skips poc (PoC requires a validation verdict)
+  --skip poc          → validation runs; PoC generation suppressed
   --skip architecture → also skips skill-security (skill detection
                         requires tech-stack.json from Phase 2)
 
@@ -152,7 +158,7 @@ Parse `$ARGUMENTS` for:
   When absent, the first positional arg is the single repo path (required).
 - First positional arg → single repo path (required unless `--repos` is set)
 - `--skip <phases>` → comma-separated list from: `secrets`, `architecture`,
-  `dependencies`, `owasp`, `validation`, `skill-security`
+  `dependencies`, `owasp`, `validation`, `poc`, `skill-security`
 - `--output <dir>` → output directory; both `final-report.md` and `pocs/` are
   copied here at the end. Created if it doesn't exist.
   Default (single-repo): none — when omitted everything stays at `{repo_path}/.security-review/`
@@ -172,11 +178,12 @@ Parse `$ARGUMENTS` for:
   the run with a clear error message.
 
 Abort with a clear error if any skip value is not in the allowed list above:
-`❌ Unknown --skip value: "{value}". Allowed: secrets, architecture, dependencies, owasp, validation, skill-security`
+`❌ Unknown --skip value: "{value}". Allowed: secrets, architecture, dependencies, owasp, validation, poc, skill-security`
 
 Apply cascade rules silently:
-- `--skip owasp` → add `validation` to skip list
-- `--skip validation` → PoC is skipped automatically (it runs inside Phase 5, not as a separate phase)
+- `--skip owasp` → add `validation` and `poc` to skip list
+- `--skip validation` → add `poc` to skip list (PoC requires a validation verdict)
+- `--skip poc` → pass `--skip poc` flag to Phase 5; validation still runs normally
 - `--skip architecture` → add `skill-security` to skip list (skill detection requires Phase 2 output)
 
 **Multi-repo validation:** if `--repos` is set with only one path, warn:

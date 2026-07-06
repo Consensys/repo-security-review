@@ -58,7 +58,7 @@ Parse these from `$ARGUMENTS` using the format:
 |----------|---------|-------------|
 | (first positional) | required (single-repo mode) | Repo path. Omit when `--repos` is used. |
 | `--repos` | none | Comma-separated list of repo paths for multi-repo mode. Activates Phase 0 and Phase 7. When set, the first positional arg is not required. |
-| `--skip` | none | Comma-separated phase names to skip: `secrets`, `architecture`, `dependencies`, `owasp`, `validation` |
+| `--skip` | none | Comma-separated phase names to skip: `secrets`, `architecture`, `dependencies`, `owasp`, `validation`, `poc` |
 | `--output` | none — all artifacts stay at `{repo_path}/.security-review/` (single-repo) or `./system-security-review/` (multi-repo) | Directory to copy the final report and PoC scripts into after the run. Created if it doesn't exist. **Strongly recommended in multi-repo mode.** |
 | `--runtime` | false | Enable Docker-based runtime PoC validation |
 | `--verbose` | false | Generate the full detailed report. Default report (for dev teams) omits the OWASP Checks Run inventory, the standalone Remediation Priority section, and the Appendix. All findings, evidence, and per-finding priority labels are included in both modes. In multi-repo mode the flag applies to both the per-service reports (Phase 6) and the system-level synthesis report (Phase 7). |
@@ -79,11 +79,14 @@ If no repo path is provided and `--repos` is not set, ask the user before procee
 - `architecture` → Phase 2
 - `dependencies` → Phase 3 + 3b
 - `owasp` → Phase 4
-- `validation` → Phase 5 (validation + PoC together — skipping validation skips PoC automatically)
+- `validation` → Phase 5 entirely (validation + PoC both skipped)
+- `poc` → PoC generation only; Phase 5 validation still runs and confirms/rejects findings
 - `skill-security` → Phase 4b
 
-Skipping `owasp` also skips `validation` (Phase 5 has nothing to work from).
-Skipping `architecture` skips Phase 4b too (skill detection requires `tech-stack.json`).
+**Cascade rules**:
+- `--skip owasp` → also skips `validation` and `poc` (Phase 5 has nothing to work from)
+- `--skip validation` → also skips `poc` (PoC requires a validation verdict)
+- `--skip poc` → validation runs normally; Phase 5 confirms/rejects findings but writes no PoC files
 
 ### Model Configuration
 
@@ -314,6 +317,8 @@ Phase 5  → Validation + PoC             [skippable: --skip validation]
               writes a PoC only for findings that pass the validation gate.
               PoC generation is gated inside this phase — unvalidated findings
               never get a PoC. Optional runtime validation via Docker if --runtime.
+           └─ --skip poc: runs validation only; no PoC files are written.
+              Confirmed/rejected verdicts still appear in the report.
            └─ AUTO-SKIPPED when is_skill_repo: true (no Phase 4 findings to validate)
 Phase 6  → Report Builder               [always runs]
 ```

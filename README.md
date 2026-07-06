@@ -94,7 +94,7 @@ In any Claude Code session (CLI or Desktop), invoke the skill on a local reposit
 | Flag | Default | Effect |
 |------|---------|--------|
 | `--repos <paths>` | none | Comma-separated repo paths. Activates multi-repo mode (Phase 0 + Phase 7). |
-| `--skip <phases>` | none | Comma-separated: `secrets`, `architecture`, `dependencies`, `owasp`, `skill-security`, `validation` |
+| `--skip <phases>` | none | Comma-separated: `secrets`, `architecture`, `dependencies`, `owasp`, `skill-security`, `validation`, `poc` |
 | `--output <dir>` | none (single-repo) / `./system-security-review/` (multi-repo) | Directory to copy the report and PoC scripts into after the run. Created if it doesn't exist. |
 | `--runtime` | off | Docker-based runtime PoC validation in Phase 5 |
 | `--verbose` | off | Generate the full detailed report. Default report omits the OWASP Checks Run inventory, standalone Remediation Priority section, and Appendix. Findings, evidence, and per-finding priority labels are present in both modes. |
@@ -102,8 +102,35 @@ In any Claude Code session (CLI or Desktop), invoke the skill on a local reposit
 | `--help` | — | Show usage |
 
 **Cascade rules** (applied silently):
-- `--skip owasp` → also skips `validation` (nothing to validate)
-- `--skip validation` → PoC is skipped too (it lives inside Phase 5)
+- `--skip owasp` → also skips `validation` and `poc` (nothing to validate or PoC)
+- `--skip validation` → also skips `poc` (PoC requires a validation verdict)
+- `--skip poc` → validation still runs; only PoC file generation is suppressed
+- `--skip architecture` → also skips `skill-security` (skill detection requires Phase 2 output)
+
+### Phase 4b — LLM / AI Skill Security (`skill-security`)
+
+This phase analyses AI skill and agent instruction files (`.md` files that define
+agent behaviour, tool grants, and multi-step pipelines) against the
+[OWASP LLM Top 10](https://owasp.org/www-project-top-10-for-large-language-model-applications/).
+It covers:
+
+- **LLM01 — Prompt injection**: unsanitized external content flowing into agent prompts
+- **LLM02 — Insecure output handling**: agent output written without sanitization to files, the terminal, or downstream systems
+- **LLM05 — Supply chain**: stale model IDs, unverified external URLs, unpinned CLI tools
+- **LLM06 — Sensitive information disclosure**: secrets or env values leaking through prompts or output files
+- **LLM07 — Insecure plugin/tool design**: tool grants broader than the phase requires, missing confirmation gates
+- **LLM08 — Excessive agency**: subagents with unconstrained scope, unbounded loops, adversarial control-flow
+
+**It is auto-activated — no flag is needed to turn it on.** Phase 2 detects skill
+and agent files in the repository (SKILL.md, `.claude/commands/`, agent instruction
+files) and sets `has_skill_files: true` in `tech-stack.json`. The orchestrator reads
+that flag after Phase 2 completes and conditionally spawns Phase 4b. For repos that
+are *purely* skill files (no application code), it can also auto-skip Phases 3, 4,
+and 5 with your confirmation, since those phases target runtime code that isn't
+present.
+
+To suppress it explicitly: `--skip skill-security`. Note that `--skip architecture`
+also suppresses it (skill detection happens in Phase 2).
 
 ### Casual phrasings
 

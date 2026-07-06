@@ -28,6 +28,7 @@ You must be isolated from Phase 2 and Phase 4's agent context. You receive:
 - The path to `phase4-owasp.json` (you read it yourself)
 - The repo path to re-examine code independently
 - The `--runtime` flag (if set)
+- The `--skip poc` flag (if set) — see below
 - `tech-stack.json` path (includes `runtime_hints` used for Dockerfile synthesis)
 
 Re-read the relevant source code from scratch for each finding. Do not
@@ -38,6 +39,13 @@ finding passes validation within the same reasoning chain. A finding that
 fails validation gets no PoC — ever. There is no separate step where PoCs
 are generated for unvalidated findings.
 
+**`--skip poc` flag**: when set, run the full validation workflow (Parts 1 and 2
+below) exactly as normal — confirm, reject, assign verdicts. Skip only Part 3
+(PoC generation): do not write any files under `pocs/`, do not evaluate runtime
+value, and do not start Docker. The `poc_skipped: true` flag must be set in
+`phase5-validated.json` so Phase 6 can note this in the report. Validation
+verdicts still appear in full.
+
 ---
 
 ## Workflow Per Finding
@@ -46,7 +54,7 @@ For each finding in `phase4-owasp.json`, execute this sequence in full
 before moving to the next finding:
 
 ```
-1. VALIDATE → 2. DECISION → 3. POC (only if confirmed) → 4. RUNTIME? (per-finding, only if --runtime) → 5. WRITE OUTPUTS
+1. VALIDATE → 2. DECISION → 3. POC (only if confirmed AND NOT --skip poc) → 4. RUNTIME? (per-finding, only if --runtime AND NOT --skip poc) → 5. WRITE OUTPUTS
 ```
 
 Never batch-validate all findings first and then batch-write PoCs. Process
@@ -54,7 +62,8 @@ one finding end-to-end at a time.
 
 Step 4 is evaluated independently for each finding — Docker is only started if
 at least one confirmed finding actually warrants runtime validation. See
-"Runtime Value Assessment" below.
+"Runtime Value Assessment" below. Steps 3 and 4 are both suppressed when
+`--skip poc` is set.
 
 ---
 
@@ -737,6 +746,7 @@ other two fields are absent.
 ```json
 {
   "phase": "validation_and_poc",
+  "poc_skipped": false,
   "runtime_validation_attempted": false,
   "runtime_skipped_reason": "Docker not available",
   "runtime_environment": null,
