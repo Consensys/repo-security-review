@@ -549,6 +549,13 @@ tech-stack detection before proceeding (see each phase's reference file).
 
 ## Progress Updates
 
+**These updates MUST be printed to the main session chat** — the text channel the
+user is reading — after each phase subagent returns, *before* the next phase is
+spawned. Do not rely on the background `/workflows` view as the only progress
+signal: if phases are dispatched as background tasks, the main chat can otherwise
+go silent for the entire run. The orchestrator resumes between phases; emit the
+one-line summary in that gap. A silent run is a bug, not a style choice.
+
 After each phase completes, print a one-line summary:
 ```
 ✅ Phase 1 complete — 3 secrets found (2 API keys, 1 private key)
@@ -558,6 +565,35 @@ After each phase completes, print a one-line summary:
 ✅ Phase 5 complete — 5 confirmed, 3 false positives filtered, 5 PoCs generated (3 static, 2 runtime-validated)
 ✅ Phase 6 complete — Report written to {repo_path}/.security-review/final-report.md
 ```
+
+### Multi-repo progress
+
+Multi-repo runs are long — surfacing progress in the main chat matters most here.
+Print, in the main session chat:
+
+1. A run header once, right after Phase 0 completes, listing the service queue:
+   ```
+   ✅ Phase 0 complete — topology mapped: 3 services (auth, gateway, users)
+   ▶️  Starting per-service review — this runs sequentially; progress will appear here after each phase.
+   ```
+2. A service banner before starting each repo, with a running counter:
+   ```
+   ━━━ Service 2/3: gateway ━━━
+   ```
+3. The per-phase one-line summaries (above) under each service banner as each
+   phase completes.
+4. A per-service completion line when its Phase 6 finishes:
+   ```
+   ✅ gateway complete — 4 findings (1 HIGH, 3 MEDIUM) · report written
+   ```
+5. A synthesis line when Phase 7 finishes:
+   ```
+   ✅ Phase 7 complete — 2 cross-service findings · system-report.md written
+   ```
+
+If the orchestrator spawns any phase as a background task and also prints the
+`/workflows` pointer, it must still emit these lines in the main chat as each task
+returns — the pointer supplements the main-chat updates, it does not replace them.
 
 ## Error Handling
 

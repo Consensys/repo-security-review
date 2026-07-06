@@ -286,7 +286,12 @@ After Phase 2: read tech-stack.json.
    and the `--verbose` flag (Phase 7 uses it to pick lean vs. full system-report.md,
    the same way Phase 6 does for per-service reports)
 
-After each phase (and each per-repo phase in multi-repo mode), print a one-line progress summary.
+After each phase (and each per-repo phase in multi-repo mode), print a one-line
+progress summary **in the main session chat** as the phase's subagent returns —
+see SKILL.md → Progress Updates for the multi-repo format (run header, per-service
+banner with counter, per-phase lines, synthesis line). If any phase is dispatched
+as a background task, the `/workflows` pointer supplements these main-chat updates;
+it does not replace them. The main chat must never go silent for the whole run.
 
 ## Step 8: Deliver
 
