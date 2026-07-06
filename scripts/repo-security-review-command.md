@@ -282,7 +282,9 @@ After Phase 2: read tech-stack.json.
 2. For each repo in `--repos` (one at a time, never interleaved):
    - Run phases 1–6 for that repo using the single-repo logic above
    - Pass `{output_dir}/service-topology.json` to the Phase 2 agent as additional context
-3. Run Phase 7 (cross-repo synthesis) — passes `{output_dir}` and all per-repo paths
+3. Run Phase 7 (cross-repo synthesis) — passes `{output_dir}`, all per-repo paths,
+   and the `--verbose` flag (Phase 7 uses it to pick lean vs. full system-report.md,
+   the same way Phase 6 does for per-service reports)
 
 After each phase (and each per-repo phase in multi-repo mode), print a one-line progress summary.
 
