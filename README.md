@@ -119,6 +119,12 @@ In any Claude Code session (CLI or Desktop), invoke the skill on a local reposit
 /repo-security-review /path/to/repo --runtime
 /repo-security-review /path/to/repo --skip architecture --output ~/reports/myapp --runtime
 
+# CI / headless — validation only (no PoC files), no interactive prompts
+/repo-security-review . --output ./security-report --skip poc --yes
+
+# CI — full review including PoC generation
+/repo-security-review . --output ./security-report --yes
+
 # Full detailed report (includes Appendix, OWASP coverage, Remediation Priority)
 /repo-security-review /path/to/repo --verbose --output ~/reports/myapp
 
@@ -132,6 +138,7 @@ In any Claude Code session (CLI or Desktop), invoke the skill on a local reposit
 | `--skip <phases>` | none | Comma-separated: `secrets`, `architecture`, `dependencies`, `owasp`, `skill-security`, `validation`, `poc` |
 | `--output <dir>` | none (single-repo) / `./system-security-review/` (multi-repo) | Directory to copy the report and PoC scripts into after the run. Created if it doesn't exist. |
 | `--runtime` | off | Docker-based runtime PoC validation in Phase 5 |
+| `--yes` | off | Non-interactive / CI mode. Auto-confirms the `--output` copy gate, the Docker runtime gate, and the pure-skill-repo auto-skip cascade. Path-validation safety checks are never bypassed. Requires a repo path or `--repos`. |
 | `--verbose` | off | Generate the full detailed report. Default report omits the OWASP Checks Run inventory, standalone Remediation Priority section, and Appendix. Findings, evidence, and per-finding priority labels are present in both modes. |
 | `--context <pairs>` | none | Optional inline threat model (`key=value,key=value`) used to calibrate severity. See "Adding context" below |
 | `--help` | — | Show usage |

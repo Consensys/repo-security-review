@@ -63,8 +63,10 @@ Parse these from `$ARGUMENTS` using the format:
 | `--runtime` | false | Enable Docker-based runtime PoC validation |
 | `--verbose` | false | Generate the full detailed report. Default report (for dev teams) omits the OWASP Checks Run inventory, the standalone Remediation Priority section, and the Appendix. All findings, evidence, and per-finding priority labels are included in both modes. In multi-repo mode the flag applies to both the per-service reports (Phase 6) and the system-level synthesis report (Phase 7). |
 | `--context` | none | Inline `key=value,key=value` threat model used to calibrate severity. Optional — omit for default behavior. See [`--context`](#--context-threat-model-calibration) below. |
+| `--yes` | false | Non-interactive mode. Auto-confirms all user-facing prompts: the `--output` copy confirmation, the Docker runtime gate (`--runtime`), and the pure-skill-repo auto-skip cascade. Path-validation safety checks (rejecting sensitive `--output` destinations) are never bypassed. Use in CI or scripted runs. |
 
 If no repo path is provided and `--repos` is not set, ask the user before proceeding.
+Exception: if `--yes` is set and no repo path is provided, abort with a clear error rather than prompting — interactive input is not available.
 
 **Multi-repo mode** is activated by the presence of `--repos`. In this mode:
 - The comma-separated paths are the list of services to analyze.
@@ -335,12 +337,17 @@ Phase 6  → Report Builder               [always runs]
 Read tech-stack.json after Phase 2.
 
 if is_skill_repo: true:
-  Print the detection evidence and ask for confirmation before skipping:
+  Print the detection evidence:
   "ℹ️  Phase 2 detected a skill/agent-instruction repository based on:
        {skill_detection_evidence list}
    Propose: auto-skip Phases 3, 4, 5 (no package deps or runtime code)
-            and run Phase 4b (LLM security) instead.
-   Confirm? [Y/n]:"
+            and run Phase 4b (LLM security) instead."
+
+  If --yes is set: auto-confirm silently. Print:
+  "ℹ️  --yes set — auto-skipping Phases 3, 4, 5. Running Phase 4b."
+  Then skip Phases 3, 4, 5 and run Phase 4b.
+
+  Otherwise ask: "Confirm? [Y/n]:"
   If confirmed (or evidence is unambiguous — SKILL.md present at repo root):
     Skip Phases 3, 4, 5. Run Phase 4b.
   If declined: run the full pipeline. Phase 4b still runs if has_skill_files is true.

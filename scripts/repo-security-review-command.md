@@ -41,6 +41,12 @@ Options:
                         Default: (single-repo: none — everything stays in
                         <repo>/.security-review/) (multi-repo: ./system-security-review/)
   --runtime             Enable Docker-based runtime PoC validation
+  --yes                 Non-interactive / CI mode. Auto-confirms all prompts:
+                        the --output copy gate, the Docker runtime gate, and
+                        the pure-skill-repo auto-skip cascade. Path-validation
+                        safety checks (sensitive --output destinations) are
+                        never bypassed. Requires a repo path or --repos —
+                        aborts if neither is provided.
   --verbose             Generate the full detailed report. Default report
                         (suitable for dev teams) omits the OWASP Checks Run
                         inventory, Remediation Priority section, and Appendix.
@@ -129,6 +135,12 @@ Examples:
   # Full review with runtime PoC validation via Docker
   /repo-security-review ~/repos/my-service --runtime --output ~/reports/my-service
 
+  # CI / headless — no interactive prompts, validation only (no PoC files)
+  /repo-security-review . --output ./security-report --skip poc --yes
+
+  # CI — full review including PoC generation, auto-confirm all gates
+  /repo-security-review . --output ./security-report --yes
+
   # Full detailed report (includes Appendix, OWASP coverage, Remediation Priority)
   /repo-security-review ~/repos/my-service --verbose --output ~/reports/my-service
 
@@ -164,6 +176,11 @@ Parse `$ARGUMENTS` for:
   Default (single-repo): none — when omitted everything stays at `{repo_path}/.security-review/`
   Default (multi-repo): `./system-security-review/`
 - `--runtime` → enable Docker-based runtime PoC validation in Phase 5
+- `--yes` → non-interactive mode: auto-confirm all user-facing prompts
+  (the `--output` copy gate, the Docker runtime gate, the pure-skill-repo
+  auto-skip cascade). Path-validation safety checks are never bypassed.
+  If `--yes` is set and no repo path is provided, abort with:
+  `❌ --yes requires a repo path or --repos — interactive input unavailable`
 - `--verbose` → pass to Phase 6 to generate the full detailed report
 - `--context <pairs>` → optional inline threat model as comma-separated
   `key=value` pairs. Allowed keys: `deployment_target` (`local`|`public`),
@@ -315,12 +332,15 @@ case "{output_dir}" in
     exit 1 ;;
 esac
 ```
-Then prompt:
+If `--yes` is NOT set, prompt:
 ```
 📋 Copy report and PoC scripts to: {output_dir}
    Confirm? [Y/n]:
 ```
 If declined, skip the copy step and print the report location inside `.security-review/`.
+
+If `--yes` IS set, skip the prompt and proceed directly to the copy step.
+Print: `📋 Copying report to {output_dir} (--yes)`
 
 Copy report and PoC scripts into the output directory:
 ```bash

@@ -317,19 +317,24 @@ set `runtime_status: RUNTIME_NOT_NEEDED` and skip to Part 5.
 
 ### Confirmation gate before any Docker build/run
 
-Before executing `docker build` or `docker run` on target-repo code, print
-a confirmation prompt and wait for explicit user approval:
+Before executing `docker build` or `docker run` on target-repo code:
 
+**If `--yes` is NOT set**, print a confirmation prompt and wait for explicit
+user approval:
 ```
 ⚠️  Runtime validation requires building and running untrusted code.
     Dockerfile: {path}
     This will execute code from the target repository on your host.
     Proceed? [y/N]:
 ```
+If the user does not confirm, set `runtime_status: RUNTIME_SKIPPED`,
+reason: `user_confirmation_required`, and continue without Docker.
 
-If the user does not confirm (or input is non-interactive), set
-`runtime_status: RUNTIME_SKIPPED`, reason: `user_confirmation_required`,
-and continue without Docker. Never silently execute target-repo Dockerfiles.
+**If `--yes` IS set**, skip the prompt and proceed directly.
+Print: `⚠️  Running Docker against untrusted repo code (--yes)` then continue.
+This is the expected behaviour in CI — `--yes` is explicit consent that Docker
+execution is intentional. Never silently execute target-repo Dockerfiles without
+either a confirmed prompt or an explicit `--yes` flag.
 
 When Docker is approved, add hardening flags to every `docker run` call:
 ```bash
