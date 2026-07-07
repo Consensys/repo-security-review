@@ -145,6 +145,10 @@ Standard tier:
 1. List available models:
    Run: claude models list
    OR query the Anthropic Models API: GET /v1/models
+   The query uses whatever API key is active in the session (ANTHROPIC_API_KEY
+   env var if set, otherwise the default Claude Code credentials). Different
+   subscription tiers and API keys expose different model sets — the resolution
+   step handles this automatically by walking the fallback chain.
 
 2. Resolve each tier to the highest available model from its chain:
    - Walk the Deep chain top-to-bottom; pick the first model ID that appears
@@ -155,6 +159,8 @@ Standard tier:
 3. Determine the thinking param for the resolved Deep model (table above).
 
 4. Write run-metadata.json with the resolved IDs and a fallback_notes field.
+   Include fallback_notes whenever the top of a chain was unavailable, so
+   Phase 6 can surface a one-line notice in the verbose report header.
 ```
 
 If `claude models list` or the Models API is unavailable, attempt to use

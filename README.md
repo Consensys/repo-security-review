@@ -68,6 +68,41 @@ cd ~/.claude/skills/repo-security-review && git pull
 
 ---
 
+## Credentials & subscriptions
+
+The skill runs inside Claude Code and inherits whatever authentication is active in the session. No extra configuration is needed for normal interactive use.
+
+### Using a specific API key
+
+Set `ANTHROPIC_API_KEY` before invoking the skill. This overrides the default session credentials and is the correct mechanism for CI and for switching between subscriptions (e.g., personal vs. work account):
+
+```bash
+# One-off: set for the current command only
+ANTHROPIC_API_KEY=sk-ant-... claude code
+
+# Persistent for the shell session
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# CI (GitHub Actions, GitLab CI, etc.) — inject from a secret
+env:
+  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+> Never pass the key as a CLI flag or embed it in a script — it will appear in shell history and `ps` output. Always use the env var.
+
+### Subscription tier and model availability
+
+Different API keys expose different model sets depending on the subscription tier. The skill resolves models at runtime by querying the Anthropic Models API with the active key, then walking the fallback chain:
+
+| Tier | Deep phases (2, 4b, 7) | Standard phases (1, 3, 4, 5, 6) |
+|------|------------------------|----------------------------------|
+| Full access | `claude-opus-4-8` | `claude-sonnet-4-6` |
+| Limited access | falls back to `claude-sonnet-4-6` | falls back to `claude-haiku-4-5` |
+
+If your key does not have access to a model, the skill falls back automatically and records the substitution in `run-metadata.json → fallback_notes`. The report header reflects what was actually used.
+
+---
+
 ## Usage
 
 In any Claude Code session (CLI or Desktop), invoke the skill on a local repository path:
