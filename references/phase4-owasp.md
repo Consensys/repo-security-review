@@ -58,7 +58,30 @@ PHASE2_HIGH_CRITICAL=$(jq '[.findings[] | select(.severity == "CRITICAL" or .sev
 Use tech-stack.json to build your check list BEFORE scanning. Log what you're
 skipping and why — this appears in the report.
 
+### Fail-safe gating — a skip requires a *confident* negative
+
+> A `false` gating boolean only earns a skip when it is a **confident negative**.
+> Before skipping any high-severity check, read `tech-stack.json → detection`:
+>
+> - If the check's gating signal appears in `detection.low_confidence_signals`
+>   or `detection.truncated_signals`, **RUN the check anyway** and tag its
+>   findings `detection_confidence: "reduced"`. Do not skip.
+> - **Never skip these high-severity injection checks on a low-confidence
+>   negative**: A03 SQL Injection, A03 Command Injection, A08 Deserialization.
+>   If detection for their signal was manifest-only, unrecognized-stack, or
+>   truncated, run them. A missed injection is far costlier than a wasted pass.
+> - A signal that is `false`, absent from both `detection` lists, on a
+>   recognized and fully-searched stack → confident negative → skip is allowed.
+>
+> When you run a check because of this rule (rather than a positive signal),
+> log it distinctly in the check plan (see below) so the report is honest about
+> why the check ran.
+
 ### OWASP Top 10 — Applicability Matrix
+
+The "Skip if" column applies **only when the negative is confident** (see
+fail-safe rule above). A low-confidence or truncated negative flips these rows
+back to "run".
 
 | Check | Run if | Skip if |
 |-------|--------|---------|
@@ -104,11 +127,16 @@ and log: `ℹ️  OWASP API Top 10 skipped — project does not appear to be API
 ```
 📋 OWASP Check Plan:
   ✅ Running: A01, A02, A03-SQLi, A07, A09, API1-API9
-  ⏭️  Skipped: A03-XSS (is_api_only=true, no HTML rendering)
-  ⏭️  Skipped: A03-CmdInj (has_shell_execution=false)
-  ⏭️  Skipped: A08-Deser (has_deserialization=false)
-  ⏭️  Skipped: A10-SSRF (has_external_http_calls=false)
+  ⚠️  Running (reduced-confidence detection): A08-Deser
+        (has_deserialization=false but signal is low-confidence — running to be safe)
+  ⏭️  Skipped: A03-XSS (is_api_only=true, no HTML rendering — confident negative)
+  ⏭️  Skipped: A03-CmdInj (has_shell_execution=false — confident negative)
+  ⏭️  Skipped: A10-SSRF (has_external_http_calls=false — confident negative)
 ```
+
+Every skip line must state that the negative was confident. Every ⚠️ line names
+the signal and why it was treated as low-confidence. This makes the coverage
+decision auditable in the report.
 
 ### Multi-Pass Decision
 

@@ -554,13 +554,25 @@ to its normal output. This is the key handoff document:
   "is_skill_repo": false,
   "has_skill_files": false,
   "skill_files": [],
-  "skill_frameworks": []
+  "skill_frameworks": [],
+  "detection": {
+    "low_confidence_signals": [],
+    "truncated_signals": [],
+    "notes": ""
+  }
 }
 ```
 
 `runtime_hints` is best-effort and consumed only by Phase 5 when `--runtime`
 is set on a repo without its own Dockerfile / docker-compose. Fields may be
 `null`; Phase 5 falls back to framework defaults or declines synthesis.
+
+The `detection` block records where capability detection was uncertain. Phase 4
+reads it to decide whether a `false` gating boolean is a *confident* negative
+(skip allowed) or a *low-confidence* negative (run the check anyway). A gating
+boolean set `true` only by a dependency-manifest backstop, or set `false` on an
+unrecognized/unsearched stack, must be listed in `low_confidence_signals`. See
+`references/phase2-architecture.md` → "Detection reliability".
 
 If Phase 2 is skipped, Phase 3 and Phase 4 must run their own lightweight
 tech-stack detection before proceeding (see each phase's reference file).

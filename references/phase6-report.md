@@ -460,7 +460,11 @@ State these plainly so a clean result is not over-interpreted:
   "no injectable data flow exists."
 - **Detection-gated checks.** Checks are pruned by the Phase 2 tech-stack profile.
   Any class listed under "Skipped" was not tested; "skipped" is not evidence of
-  absence. {If any detection step reported truncation, name the affected checks.}
+  absence. Only *confident* negatives are skipped — a check whose detection was
+  uncertain is run anyway. {Read `tech-stack.json → detection`: if
+  `low_confidence_signals` or `truncated_signals` is non-empty, list them here
+  and name any Phase 4 check that ran at reduced detection confidence
+  (findings tagged `detection_confidence: "reduced"`).}
 - **Runtime PoCs** (if `--runtime` ran with `--network none`) cannot validate
   SSRF or any network-dependent exploit — those remain statically assessed only.
 

@@ -145,6 +145,61 @@ grep -rnE "app\.listen\(|\.listen\([0-9]|PORT *= *[0-9]|port *= *[0-9]|listen *:
   --exclude-dir="node_modules" --exclude-dir="vendor" | head -10
 ```
 
+### Detection reliability — read before setting gating booleans
+
+The booleans below (`has_database`, `has_shell_execution`, `has_deserialization`,
+`has_external_http_calls`, `has_html_rendering`) **gate whether entire Phase 4
+check classes run**. A wrong negative silently removes a high-severity test, and
+the report then reads "not applicable" — which a reader mistakes for "safe". Two
+rules prevent that:
+
+**1. Back the booleans with dependency evidence, not just source greps.**
+The source greps above only search a fixed set of file types and a fixed pattern
+list. An unusual stack (Ruby, Kotlin, Scala, PHP, Rust, raw `.sql`) or an
+ORM/driver whose name isn't in the pattern list produces zero matches — a
+confident-looking `false` built on an incomplete search. Cross-check the package
+manifests found in Step 0 and set the boolean `true` if a relevant library is
+declared, even when the source grep found nothing:
+
+```bash
+# Database drivers / ORMs across ecosystems → has_database = true
+grep -rEn "psycopg2|asyncpg|sqlalchemy|django|pg\"|mysql2?|mongoose|mongodb|\
+redis|gorm|sqlx|sequelize|typeorm|prisma|knex|activerecord|hibernate|\
+sqlite3?|pymysql|mariadb" \
+  {repo_path} --include="package.json" --include="requirements*.txt" \
+  --include="pyproject.toml" --include="go.mod" --include="Gemfile" \
+  --include="pom.xml" --include="build.gradle" --include="Cargo.toml" \
+  --include="composer.json" --exclude-dir="node_modules" | head -20
+
+# HTTP clients → has_external_http_calls = true
+grep -rEn "requests|httpx|aiohttp|axios|node-fetch|got|undici|resty|reqwest|\
+guzzle|faraday|okhttp|apache-httpclient" \
+  {repo_path} --include="package.json" --include="requirements*.txt" \
+  --include="pyproject.toml" --include="go.mod" --include="Gemfile" \
+  --include="pom.xml" --include="Cargo.toml" --include="composer.json" \
+  --exclude-dir="node_modules" | head -20
+
+# Serialization libs → has_deserialization = true
+grep -rEn "pickle|pyyaml|jackson|fastjson|marshal|cloudpickle|dill|\
+xstream|kryo" \
+  {repo_path} --include="package.json" --include="requirements*.txt" \
+  --include="pyproject.toml" --include="go.mod" --include="pom.xml" \
+  --include="Gemfile" --exclude-dir="node_modules" | head -20
+```
+
+If a manifest indicates the capability but the source grep did not, set the
+boolean `true` and add the signal name to `detection.low_confidence_signals` with
+a note — the check must still run, and the report should say detection was
+manifest-only.
+
+**2. A negative that is not confident is a low-confidence negative.**
+When the primary language is not in the searched `--include` set, or the repo
+uses a framework you don't recognize, a `false` on any gating boolean is not
+trustworthy. Record every such signal in `detection.low_confidence_signals`.
+Phase 4 will **run** those checks anyway rather than skip them. Only a negative
+with no supporting manifest AND a recognized, fully-searched stack is a
+"confident negative" that earns a skip.
+
 Based on findings, write `{repo_path}/.security-review/tech-stack.json`:
 ```json
 {
@@ -176,9 +231,27 @@ Based on findings, write `{repo_path}/.security-review/tech-stack.json`:
   "has_skill_files": false,
   "skill_files": [],
   "skill_frameworks": [],
-  "skill_detection_evidence": []
+  "skill_detection_evidence": [],
+  "detection": {
+    "low_confidence_signals": [],
+    "truncated_signals": [],
+    "notes": ""
+  }
 }
 ```
+
+**`detection` block rules:**
+- `low_confidence_signals`: list any gating boolean whose value is uncertain —
+  a negative on an unrecognized/unsearched stack, or a positive set only from a
+  manifest backstop. Example: `["has_database (manifest-only: sqlalchemy in requirements.txt, no ORM call sites matched)"]`.
+- `truncated_signals`: list any detection or evidence enumeration that hit a
+  `head` cap (more results existed than were captured). Example:
+  `["skill_files (>50 matches)", "reachability call sites (>N)"]`.
+- `notes`: free text — the primary language, whether it was fully searched, and
+  anything that would help a reviewer judge detection reliability.
+- When any gating boolean is `false` and its signal is NOT in
+  `low_confidence_signals`, that is a **confident negative** — Phase 4 may skip
+  the dependent check. Otherwise Phase 4 runs the check regardless.
 
 **Skill detection rules** (set the four `skill_*` fields above):
 

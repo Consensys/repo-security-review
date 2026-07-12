@@ -254,6 +254,17 @@ Unreachable CVEs are still reported but at lower effective severity.
 **INDETERMINATE**:
 - Call graph too complex to trace confidently
 - Package used dynamically (`eval`, `require(variable)`)
+- **Import/call-site search was incomplete** — output hit a display cap, a file
+  type was not searched, or dynamic dispatch obscures the call. A search that did
+  not confidently cover the whole codebase cannot yield `UNREACHABLE`; default to
+  `INDETERMINATE` and keep CVSS severity. Absence of evidence from a bounded
+  search is not evidence of unreachability.
+
+> **Do not downgrade on a bounded negative.** `UNREACHABLE` requires a *complete*
+> search that found zero call sites — not a `head`-capped or filetype-limited one.
+> When in doubt, use `INDETERMINATE` (keeps severity) rather than `UNREACHABLE`
+> (downgrades it). If any enumeration was capped, note it in the finding's
+> `notes` field.
 
 ### How to Assess Reachability
 
