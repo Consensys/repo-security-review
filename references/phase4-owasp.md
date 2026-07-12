@@ -181,32 +181,78 @@ if the same location appears in multiple rounds.
 
 ## Step 2: Run Semgrep (scoped to relevant rules)
 
-```bash
-# Use language-specific configs, not --config=auto (too noisy)
-LANG=$(python3 -c \
-  "import json; d=json.load(open('{repo_path}/.security-review/tech-stack.json')); \
-   langs=d.get('languages',[]); print(langs[0] if langs else '')" 2>/dev/null)
+Build the ruleset from three layers: always-on security rules, the detected
+language pack, and framework-specific packs. `--config=auto` is intentionally
+avoided (too noisy), but pinning to a single pack leaves most of Semgrep's signal
+unused — framework packs and the taint-aware `p/security-audit` pack are where the
+high-value interprocedural findings come from.
 
-# Map tech-stack language names to Semgrep registry pack names.
+```bash
+TECH={repo_path}/.security-review/tech-stack.json
+
+# Primary language → Semgrep registry pack name.
 # Go's registry pack is p/golang, not p/go — all others match their language name.
+LANG=$(python3 -c \
+  "import json; d=json.load(open('$TECH')); \
+   langs=d.get('languages',[]); print(langs[0] if langs else '')" 2>/dev/null)
 case "$LANG" in
   go) SEMGREP_LANG="golang" ;;
   *)  SEMGREP_LANG="$LANG" ;;
 esac
 
-if [ -n "$LANG" ]; then
-  semgrep --config="p/${SEMGREP_LANG}" --config="p/owasp-top-ten" \
-    --json --output {repo_path}/.security-review/semgrep-raw.json \
-    {repo_path} 2>/dev/null
-else
-  # Language unknown — fall back to OWASP rules only
-  semgrep --config="p/owasp-top-ten" \
-    --json --output {repo_path}/.security-review/semgrep-raw.json \
-    {repo_path} 2>/dev/null
-fi
+# Always-on layers: OWASP Top 10 + the taint-aware security-audit pack.
+# p/security-audit includes interprocedural taint rules — the closest this
+# pipeline gets to cross-file source→sink tracing, so it is always included.
+CONFIGS="--config=p/owasp-top-ten --config=p/security-audit"
+
+# Language pack (if the language is known).
+[ -n "$SEMGREP_LANG" ] && CONFIGS="$CONFIGS --config=p/${SEMGREP_LANG}"
+
+# Language-specific security pack, where a dedicated one exists.
+case "$SEMGREP_LANG" in
+  golang)     CONFIGS="$CONFIGS --config=p/gosec" ;;
+  python)     CONFIGS="$CONFIGS --config=p/python-security" ;;
+  javascript|typescript)
+              CONFIGS="$CONFIGS --config=p/javascript --config=p/nodejs-scan" ;;
+esac
+
+# Framework packs — map detected frameworks in tech-stack.json to Semgrep packs.
+# Only packs that exist in the registry are added; unknown frameworks are skipped.
+FRAMEWORKS=$(python3 -c \
+  "import json; d=json.load(open('$TECH')); \
+   print(' '.join(d.get('frameworks',[])))" 2>/dev/null)
+for fw in $FRAMEWORKS; do
+  case "$fw" in
+    django)          CONFIGS="$CONFIGS --config=p/django" ;;
+    flask)           CONFIGS="$CONFIGS --config=p/flask" ;;
+    express|express.js) CONFIGS="$CONFIGS --config=p/express" ;;
+    react)           CONFIGS="$CONFIGS --config=p/react" ;;
+    gin|echo|fiber)  CONFIGS="$CONFIGS --config=p/gitlab-gosec" ;;
+    spring|springboot) CONFIGS="$CONFIGS --config=p/java" ;;
+    rails)           CONFIGS="$CONFIGS --config=p/ruby-security" ;;
+  esac
+done
+
+# Run once with the assembled ruleset. Missing/unavailable packs are skipped by
+# Semgrep with a warning on stderr (discarded) — they do not abort the scan.
+semgrep $CONFIGS \
+  --json --output {repo_path}/.security-review/semgrep-raw.json \
+  {repo_path} 2>/dev/null
+
+# Record which packs were requested so Phase 6 can report scan depth.
+echo "$CONFIGS" > {repo_path}/.security-review/semgrep-configs.txt
 ```
 
 Parse semgrep output as seed findings, then validate each one manually.
+
+> **Coverage note — interprocedural taint.** `p/security-audit` provides Semgrep's
+> taint-mode rules, but Semgrep's taint tracking is bounded (single-file / limited
+> cross-function, not whole-program interprocedural). This pipeline has **no
+> whole-program taint engine**: cross-file flows (source in one module → helper →
+> sink in another) are only caught when the deep-analysis LLM traces them by hand
+> or a taint rule happens to span the path. Treat a clean Semgrep result as
+> "no rule-matched sink," not "no injectable data flow." Phase 6 must surface this
+> as an explicit limitation in the report (see phase6 → Coverage limitations).
 
 ## Step 3: Deep Analysis by Category
 
