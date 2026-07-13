@@ -20,6 +20,17 @@ Find code-level vulnerabilities mapped to OWASP Top 10 and OWASP API Security
 Top 10. Scope the analysis to checks that are actually relevant to this
 project's tech stack — don't test for SQLi in a project with no database.
 
+## Execution Log (only if `--debug` was passed)
+
+If `--debug` is set, append a `## Phase 4` section to
+`{repo_path}/.security-review/execution-log.md` following the canonical format in
+SKILL.md → Execution Log. Record every file read (line range + `FULL`/`PARTIAL`),
+the security-relevant files and whether each was read whole, the greps/semgrep
+config run, and — in the **Checks run / skipped** subsection — every check with
+its decision and the confidence behind each skip (confident negative vs
+reduced-confidence run). Write rows as you go. Skip entirely if `--debug` is not
+set, and never let logging change which files you read or checks you run.
+
 ## Step 0: Load Context
 
 **tech-stack.json** (required — gates all checks):

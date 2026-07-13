@@ -48,6 +48,16 @@ verdicts still appear in full.
 
 ---
 
+## Execution Log (only if `--debug` was passed)
+
+If `--debug` is set, append a `## Phase 5` section to
+`{repo_path}/.security-review/execution-log.md` following the canonical format in
+SKILL.md → Execution Log. Since you re-read source independently per finding,
+record each file you open with its line range and a `FULL`/`PARTIAL` flag — this
+is the clearest signal of whether validation re-read the whole implementation or
+only a window. Write rows as you go. Skip entirely if `--debug` is not set, and
+never let logging change your validation reads or verdicts.
+
 ## Workflow Per Finding
 
 For each finding in `phase4-owasp.json`, execute this sequence in full

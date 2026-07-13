@@ -64,6 +64,7 @@ Parse these from `$ARGUMENTS` using the format:
 | `--verbose` | false | Generate the full detailed report. Default report (for dev teams) omits the OWASP Checks Run inventory, the standalone Remediation Priority section, and the Appendix. All findings, evidence, and per-finding priority labels are included in both modes. In multi-repo mode the flag applies to both the per-service reports (Phase 6) and the system-level synthesis report (Phase 7). |
 | `--context` | none | Inline `key=value,key=value` threat model used to calibrate severity. Optional — omit for default behavior. See [`--context`](#--context-threat-model-calibration) below. |
 | `--yes` | false | Non-interactive mode. Auto-confirms all user-facing prompts: the `--output` copy confirmation, the Docker runtime gate (`--runtime`), and the pure-skill-repo auto-skip cascade. Path-validation safety checks (rejecting sensitive `--output` destinations) are never bypassed. Use in CI or scripted runs. |
+| `--debug` | false | Write a paste-friendly execution log to `{repo_path}/.security-review/execution-log.md` recording how the file-reading phases actually ran — every file read with its line range and a full/partial flag, which files were classified security-relevant and whether they were read whole, the greps/tools run, and checks run vs skipped. For inspecting skill behaviour; independent of report mode. See [Execution Log](#execution-log---debug). |
 
 If no repo path is provided and `--repos` is not set, ask the user before proceeding.
 Exception: if `--yes` is set and no repo path is provided, abort with a clear error rather than prompting — interactive input is not available.
@@ -430,7 +431,8 @@ a finding passes, so unvalidated findings can never get one.
    - The file paths of its inputs (not the content)
    - The repo path and working directory path
    - Any flags relevant to it (`--runtime` for Phase 5, `--verbose` for
-     Phase 6 **and** Phase 7 — both honor it to select lean vs. full report mode)
+     Phase 6 **and** Phase 7 — both honor it to select lean vs. full report mode,
+     `--debug` for Phases 2, 4, and 5 — they append to the execution log)
 
 3. **The orchestrator's only job** is sequencing, path management, and
    printing progress summaries. It must not accumulate findings across phases.
@@ -576,6 +578,48 @@ unrecognized/unsearched stack, must be listed in `low_confidence_signals`. See
 
 If Phase 2 is skipped, Phase 3 and Phase 4 must run their own lightweight
 tech-stack detection before proceeding (see each phase's reference file).
+
+## Execution Log (`--debug`)
+
+When `--debug` is set, the orchestrator passes it to Phases 2, 4, and 5. Each of
+those phases **appends** a section to `{repo_path}/.security-review/execution-log.md`
+recording how it actually ran. The file is created (empty) by the orchestrator
+before Phase 1 when `--debug` is set. This is a self-report by each phase agent —
+useful and structured, but the authoritative record of tool calls remains the
+Claude Code session transcript. To keep the self-report accurate, each phase must
+write each file-read row **at the moment it reads the file**, and mark a read
+`PARTIAL` whenever it used an offset/limit window rather than reading the whole file.
+
+**Canonical format** — each phase appends one section in exactly this shape:
+
+```markdown
+## Phase {N} — {phase name}   (model: {resolved_model})
+
+### Files read
+| File | Lines | Coverage | Reason |
+|------|-------|----------|--------|
+| src/controllers/OrdersController.ts | 1-401 | FULL | route/controller |
+| src/auth/middleware.ts | 1-88 | FULL | auth middleware |
+| src/util/helpers.ts | 272-401 | PARTIAL (window around grep hit L300) | grep: exec() |
+
+### Security-relevant files
+Files classified security-relevant (routes, controllers, handlers, auth,
+middleware, or the locus of a candidate finding) and whether each was read whole:
+- src/controllers/OrdersController.ts — FULL ✓
+- src/controllers/UsersController.ts — NOT READ ⚠️ (no grep hit pointed here)
+
+### Tools / greps run
+- `grep -rnE "app\.(get|post)" ...` → 12 hits
+- `semgrep p/owasp-top-ten,p/security-audit,...` → 6 seed findings   (Phase 4 only)
+
+### Checks run / skipped   (Phase 4 only)
+- SQLi: RUN (has_database=true)
+- Command Injection: SKIP (confident negative)
+- Deserialization: RUN (reduced-confidence — manifest-only signal)
+```
+
+Keep it factual and terse — this is instrumentation, not narrative. If `--debug`
+is not set, write nothing and do not create the file.
 
 ## Progress Updates
 

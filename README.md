@@ -139,6 +139,7 @@ In any Claude Code session (CLI or Desktop), invoke the skill on a local reposit
 | `--output <dir>` | none (single-repo) / `./system-security-review/` (multi-repo) | Directory to copy the report and PoC scripts into after the run. Created if it doesn't exist. |
 | `--runtime` | off | Docker-based runtime PoC validation in Phase 5 |
 | `--yes` | off | Non-interactive / CI mode. Auto-confirms the `--output` copy gate, the Docker runtime gate, and the pure-skill-repo auto-skip cascade. Path-validation safety checks are never bypassed. Requires a repo path or `--repos`. |
+| `--debug` | off | Write an execution log (`.security-review/execution-log.md`) showing how the file-reading phases (2, 4, 5) actually ran — every file read with its line range and a full/partial flag, which files were treated as security-relevant, the greps run, and checks run vs skipped. Independent of `--verbose`. See "Inspecting skill behaviour" below. |
 | `--verbose` | off | Generate the full detailed report. Default report omits the OWASP Checks Run inventory, standalone Remediation Priority section, and Appendix. Findings, evidence, and per-finding priority labels are present in both modes. |
 | `--context <pairs>` | none | Optional inline threat model (`key=value,key=value`) used to calibrate severity. See "Adding context" below |
 | `--help` | — | Show usage |
@@ -173,6 +174,27 @@ present.
 
 To suppress it explicitly: `--skip skill-security`. Note that `--skip architecture`
 also suppresses it (skill detection happens in Phase 2).
+
+### Inspecting skill behaviour (`--debug`)
+
+If you want to see *how* the skill worked rather than just its findings — in
+particular whether Phase 2, 4, and 5 read important files in full or only in
+windows around grep hits — run with `--debug`:
+
+```text
+/repo-security-review /path/to/repo --debug
+```
+
+This writes `.security-review/execution-log.md`, a paste-friendly record of every
+file each of those phases read (with line ranges and a **FULL/PARTIAL** flag),
+which files were classified security-relevant and whether they were read whole,
+the greps and Semgrep config run, and the checks run vs skipped (with the
+confidence behind each skip).
+
+> The log is each phase's **self-report**, not harness-level ground truth. It is
+> a strong, structured signal, but the authoritative record of tool calls is the
+> Claude Code session transcript (the `Read (lines X–Y)` lines shown in chat).
+> For the most reliable read-coverage analysis, share both.
 
 ### Casual phrasings
 

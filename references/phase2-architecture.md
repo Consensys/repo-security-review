@@ -25,6 +25,16 @@ Two outputs from this phase:
 Use extended thinking if available — architectural analysis requires reasoning
 about intent, missing controls, and design decisions holistically.
 
+## Execution Log (only if `--debug` was passed)
+
+If `--debug` is set, append a `## Phase 2` section to
+`{repo_path}/.security-review/execution-log.md` following the canonical format in
+SKILL.md → Execution Log. Record **every file you read** with its line range and
+a `FULL`/`PARTIAL` flag, write each row at the moment you read the file, and list
+which files you classified as security-relevant and whether each was read whole.
+If `--debug` is not set, skip this entirely. Do not let logging alter your
+analysis — read whatever you would have read regardless.
+
 ## Step 0: Build the Tech Stack Profile FIRST
 
 Before any security analysis, survey the repository structure to understand
