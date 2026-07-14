@@ -465,6 +465,14 @@ State these plainly so a clean result is not over-interpreted:
   `low_confidence_signals` or `truncated_signals` is non-empty, list them here
   and name any Phase 4 check that ran at reduced detection confidence
   (findings tagged `detection_confidence: "reduced"`).}
+- **Reduced-confidence negatives.** {Read `phase4-owasp.json → class_negatives`.
+  For each entry, state plainly: this check class came back clean, but not every
+  file that could contain it was examined — name the `unexamined_files`. A
+  reduced-confidence negative is "not found in what was read," not "absent."}
+- **File coverage.** {Read `phase2-architecture.json → coverage`. If `not_read`
+  is non-empty, note how many security-relevant files were not fully read and
+  why, so the reader knows the review's breadth. If `read_chunked` shows large
+  files were split, that is fine — full coverage — and needs no caveat.}
 - **Runtime PoCs** (if `--runtime` ran with `--network none`) cannot validate
   SSRF or any network-dependent exploit — those remain statically assessed only.
 

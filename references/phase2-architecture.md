@@ -340,6 +340,55 @@ Phase 3 and Phase 4 will not run correctly without it.
 
 ---
 
+## Step 0.5: Account for Every Security-Relevant File
+
+Before the security analysis, build a **file inventory** so coverage is a
+deliberate decision, not an accident of which greps happened to hit. Cherry-picking
+files by intuition is how the most important file gets skipped — the security-critical
+logic is not always where the first grep points.
+
+```bash
+# Full source inventory with sizes, largest first (adapt extensions to the stack)
+find {repo_path} -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" \
+  -o -name "*.tsx" -o -name "*.go" -o -name "*.rs" -o -name "*.java" \
+  -o -name "*.rb" -o -name "*.php" -o -name "*.cs" -o -name "*.kt" \
+  -o -name "*.scala" \) \
+  -not -path "*/.git/*" -not -path "*/node_modules/*" -not -path "*/vendor/*" \
+  -not -path "*/target/*" -not -path "*/dist/*" -not -path "*/build/*" \
+  | xargs wc -l 2>/dev/null | sort -rn
+```
+
+From that inventory, classify each file as **security-relevant** or not. A file is
+security-relevant if its name or path suggests any of: routing/dispatch, auth,
+permissions, trust, command/process construction, network/HTTP, secrets/credentials,
+serialization/parsing of untrusted input, configuration loading, or persistence.
+When unsure, treat it as security-relevant.
+
+**Read every security-relevant file — completely.** Two rules that override the
+model's default token-frugality:
+
+1. **Size is never a reason to skip or downgrade to grep-only.** A large file is
+   more likely to matter, not less. If a security-relevant file exceeds the
+   single-read line limit, read it in **consecutive chunks until the whole file is
+   covered** — do not settle for a grep or a single window. (The largest file in a
+   codebase is often its dispatch table, rule registry, or config surface.)
+2. **Account for what you skip.** Every security-relevant file you do **not** read
+   in full must be listed with a concrete reason (e.g. "pure output formatter, no
+   trust decision"). "Didn't reach it" is not a reason.
+
+Do not let one directory's early files satisfy you: if you read some files in a
+module, account for **all** non-trivial files in that same module — the risky one
+may be the sibling you didn't open (data persistence, credential handling, and
+trust logic frequently live one file over from where you started).
+
+Record the accounting:
+- In `phase2-architecture.json`, add a `coverage` block:
+  `{ "security_relevant_files": [...], "read_full": [...], "read_chunked": [...], "not_read": [{"file": "...", "reason": "..."}] }`
+- If `--debug` is set, this is the roster the execution log's "Security-relevant
+  files" section must reflect — including the `not_read` entries with reasons.
+
+---
+
 ## Security Analysis
 
 ### 1. Trust Boundaries
@@ -396,6 +445,14 @@ Write to `{repo_path}/.security-review/phase2-architecture.json`:
 ```json
 {
   "phase": "architecture",
+  "coverage": {
+    "security_relevant_files": ["src/router.go", "src/auth/mw.go", "..."],
+    "read_full": ["src/router.go", "src/auth/mw.go"],
+    "read_chunked": ["src/handlers.go (large — read in 2 chunks)"],
+    "not_read": [
+      {"file": "src/format/pretty.go", "reason": "pure output formatter, no trust decision"}
+    ]
+  },
   "summary": {
     "total": 0,
     "critical": 0,

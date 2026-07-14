@@ -698,6 +698,54 @@ For verbose errors: check whether unhandled panics / 500 responses include stack
 
 ---
 
+## Finalization: Sibling-Family Sweep & Honest Negatives
+
+Before writing output, close two systematic gaps. A finding in one file is a lead
+about its whole family; a negative is only as trustworthy as the breadth behind it.
+
+### 1. Sweep the sibling family of every confirmed finding
+
+When a finding is confirmed in a file, that file almost always belongs to a
+**family** — other files sharing its directory, suffix, or naming convention
+(e.g. `*_handler.*`, `*_cmd.*`, everything under `controllers/`, `routes/`,
+`cmds/*/`, `integrations/`). A vulnerable sink found in one member is a strong
+signal the same sink exists in the siblings.
+
+For each confirmed finding, before finalizing:
+- Identify the sink pattern concretely (the function/idiom that caused it — e.g.
+  a specific logging/persistence call, a shell-string builder, an unredacted
+  write, a URL passthrough).
+- **Grep that exact pattern across the entire family**, not just the file where
+  you found it.
+- Read each sibling that matches, confirm or dismiss, and add every confirmed
+  instance as its own finding. Do not report the pattern once and move on —
+  enumerate where it recurs.
+
+Log the sweep so it is auditable: for each finding, record `family_swept` (the
+glob/pattern searched) and `family_matches` (files checked) in the finding object.
+
+### 2. A class-level "confident negative" requires family breadth
+
+You may only record a check class (SSRF, SQL/command/other injection,
+deserialization, data-exposure) as a **confident negative** when the files that
+could contain that class were **all at least grep-swept** — not when a sample of
+them came back clean.
+
+Concretely, before marking a class negative:
+- Enumerate the files capable of that class (e.g. for SSRF: every file that makes
+  an outbound request or wraps a network tool; for injection: every command/query
+  builder).
+- If any such file was **not** examined, the negative is **reduced-confidence**,
+  not confident. Say so, and name the unexamined files.
+
+> Example of the failure this prevents: concluding "SSRF: confident negative"
+> after reading the `curl` wrapper while a sibling `wget` wrapper in the same
+> directory went unread. One unread member of the family invalidates a *confident*
+> negative for the whole class — downgrade it to reduced-confidence and list what
+> you didn't reach.
+
+---
+
 ## Output Format
 
 Write to `{repo_path}/.security-review/phase4-owasp.json`:
@@ -711,10 +759,13 @@ Write to `{repo_path}/.security-review/phase4-owasp.json`:
   },
   "checks_run": ["A01", "A02", "A03-SQLi", "A07", "A09", "API1", "API2"],
   "checks_skipped": [
-    {"check": "A03-XSS", "reason": "is_api_only=true, no HTML rendering detected"},
-    {"check": "A03-CmdInj", "reason": "has_shell_execution=false"},
-    {"check": "A08-Deser", "reason": "has_deserialization=false"},
-    {"check": "OWASP-API-Top-10", "reason": "project is not API-based"}
+    {"check": "A03-XSS", "reason": "is_api_only=true, no HTML rendering detected", "negative_confidence": "confident"},
+    {"check": "A03-CmdInj", "reason": "has_shell_execution=false", "negative_confidence": "confident"},
+    {"check": "A08-Deser", "reason": "has_deserialization=false", "negative_confidence": "confident"},
+    {"check": "OWASP-API-Top-10", "reason": "project is not API-based", "negative_confidence": "confident"}
+  ],
+  "class_negatives": [
+    {"class": "SSRF", "confidence": "reduced", "unexamined_files": ["src/cmds/cloud/wget_cmd.rs"], "note": "curl wrapper clean; wget sibling not read"}
   ],
   "summary": {
     "total": 0,
@@ -740,11 +791,18 @@ Write to `{repo_path}/.security-review/phase4-owasp.json`:
       "sink": "SQL query | HTML output | shell command | ...",
       "remediation": "Specific fix with code example if possible",
       "poc_needed": true,
-      "validation_notes": "What the validator should check"
+      "validation_notes": "What the validator should check",
+      "family_swept": "src/cmds/*/  (pattern: timer.track(format!(...)))",
+      "family_matches": ["src/cmds/cloud/curl_cmd.rs", "src/cmds/cloud/wget_cmd.rs"]
     }
   ]
 }
 ```
+
+`family_swept`/`family_matches` are present on any finding that belongs to a file
+family (omit for standalone findings). `class_negatives` lists every check class
+marked negative at **reduced** confidence with the files that were not examined —
+this is the honest-negative record from the Finalization step.
 
 ## Quality Bar
 
