@@ -371,7 +371,6 @@ You can pass any subset:
 ```text
 --context deployment_target=local
 --context auth_required_to_reach=true
---context include_readme=false
 ```
 
 ### Allowed keys and values
@@ -380,9 +379,10 @@ You can pass any subset:
 |---|---|
 | `deployment_target` | `local` \| `public` |
 | `auth_required_to_reach` | `true` \| `false` |
-| `include_readme` | `true` \| `false` |
 
 `data_sensitivity` is not a user-facing key — it is hardcoded to `pii` (worst-case) for every run. All findings are scored as if sensitive data is always at risk.
+
+**README is always read** by Phase 2 for project context, on every run — it is not a `--context` key.
 
 Any unknown key, unknown value, malformed pair, or duplicate key aborts the run with a clear error — there is no silent fallback for invalid input.
 
@@ -392,7 +392,6 @@ Any unknown key, unknown value, malformed pair, or duplicate key aborts the run 
 |---|---|---|
 | `deployment_target` | `public` | Hardest reachable case |
 | `auth_required_to_reach` | `false` | Pessimistic |
-| `include_readme` | `true` | README is read for project context by default |
 
 **Invariant:** defaults are the most pessimistic value for each axis. A value you provide can only soften severity, never tighten it. `contextual_severity` is never higher than `cvss_base_severity`.
 

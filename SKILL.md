@@ -224,7 +224,7 @@ not matter. Whitespace around `=` and `,` is trimmed.
 --context deployment_target=local,auth_required_to_reach=true
 ```
 
-There is no file-path form. The schema is small and fixed (three keys, all
+There is no file-path form. The schema is small and fixed (two keys, both
 enum-valued or boolean), so inline is the only input format.
 
 #### Allowed keys and values
@@ -233,11 +233,13 @@ enum-valued or boolean), so inline is the only input format.
 |---|---|
 | `deployment_target` | `local` \| `public` |
 | `auth_required_to_reach` | `true` \| `false` |
-| `include_readme` | `true` \| `false` |
 
 `data_sensitivity` is not a user-facing key — it is hardcoded to `pii`
 (worst-case) for all runs. All findings are scored as if sensitive data is
 always at risk.
+
+> **README is always read.** Phase 2 reads the repo's `README.md` for project
+> context on every run, independent of `--context`. It is not a configurable key.
 
 #### Strict defaults — applied to any missing key
 
@@ -245,7 +247,6 @@ always at risk.
 |---|---|---|
 | `deployment_target` | `public` | Hardest reachable case |
 | `auth_required_to_reach` | `false` | Pessimistic |
-| `include_readme` | `true` | README is read for project context by default |
 
 **Invariant: defaults are the most pessimistic value for each axis.** A
 user-provided value can only soften severity, never tighten it further.
@@ -261,25 +262,24 @@ TM_OUT={repo_path}/.security-review/threat-model.json
 # 2. For each pair:
 #    - split on '=' (exactly once); trim whitespace
 #    - reject if not exactly two non-empty parts → "❌ invalid pair: <pair>"
-#    - reject if key not in {deployment_target, auth_required_to_reach, include_readme}
+#    - reject if key not in {deployment_target, auth_required_to_reach}
 #    - reject if key is "data_sensitivity" → "❌ data_sensitivity is not a valid key;
 #      data sensitivity is always treated as pii"
 #    - reject if value not in the allowed list for that key
 #    - reject duplicate keys
 # 3. Fill missing keys with strict defaults above.
-# 4. Coerce auth_required_to_reach and include_readme values to boolean.
+# 4. Coerce auth_required_to_reach value to boolean.
 # 5. Write JSON to $TM_OUT:
 #    {
 #      "source": "user",
 #      "deployment_target": "...",
 #      "data_sensitivity": "pii",
-#      "auth_required_to_reach": true|false,
-#      "include_readme": true|false
+#      "auth_required_to_reach": true|false
 #    }
-# 6. When include_readme is true: pass the repo's README.md path to Phase 2
-#    (and Phase 4) so agents can read it for project context. When false,
-#    agents must not read README.md for context.
 ```
+
+README handling is not part of `--context`. Phase 2 always reads `README.md`
+(when present) for project context, whether or not `--context` was passed.
 
 All validation errors must abort the run with a clear message that names the
 offending key, value, and the allowed alternatives. Do not silently fall back

@@ -62,9 +62,10 @@ Options:
   --context <pairs>     Optional inline threat model used to calibrate
                         severity. Format: comma-separated key=value pairs.
                         Keys: deployment_target (local|public),
-                        auth_required_to_reach (true|false),
-                        include_readme (true|false).
+                        auth_required_to_reach (true|false).
                         data_sensitivity is not a key — always defaults to pii.
+                        README is always read by Phase 2 for context — it is
+                        not a --context key.
                         All keys optional; omitted keys use strict defaults.
                         Omit the flag entirely for default behavior (no
                         calibration).
@@ -198,10 +199,9 @@ Parse `$ARGUMENTS` for:
 - `--verbose` → pass to Phase 6 to generate the full detailed report
 - `--context <pairs>` → optional inline threat model as comma-separated
   `key=value` pairs. Allowed keys: `deployment_target` (`local`|`public`),
-  `auth_required_to_reach` (`true`|`false`), `include_readme` (`true`|`false`).
+  `auth_required_to_reach` (`true`|`false`).
   `data_sensitivity` is not an accepted key — reject it with a clear error.
-  `include_readme` controls whether README.md is read for project context by
-  Phase 2 and Phase 4 agents; defaults to `true`.
+  README.md is always read by Phase 2 for context, regardless of `--context`.
   When set, the orchestrator validates the pairs and writes a normalized
   `threat-model.json` to the working directory. When unset, the skill
   behaves exactly as before — no calibration logic runs anywhere. Any
