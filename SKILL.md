@@ -62,6 +62,7 @@ Parse these from `$ARGUMENTS` using the format:
 | `--output` | none — all artifacts stay at `{repo_path}/.security-review/` (single-repo) or `./system-security-review/` (multi-repo) | Directory to copy the final report and PoC scripts into after the run. Created if it doesn't exist. **Strongly recommended in multi-repo mode.** |
 | `--runtime` | false | Enable Docker-based runtime PoC validation |
 | `--verbose` | false | Generate the full detailed report. Default report (for dev teams) omits the OWASP Checks Run inventory, the standalone Remediation Priority section, and the Appendix. All findings, evidence, and per-finding priority labels are included in both modes. In multi-repo mode the flag applies to both the per-service reports (Phase 6) and the system-level synthesis report (Phase 7). |
+| `--vendor` | false | Vendor / open-source audit mode. Audits a third-party repo the company is considering adopting; audience is the internal security team, deliverable is an adoption risk judgment (not a fix-list for the vendor). Forces skip of `secrets`, `dependencies`, and `poc`; pins every phase to `claude-sonnet-4-6`; and switches Phase 6 to the vendor report format. See [Vendor Mode](#vendor-mode---vendor) below. |
 | `--context` | none | Inline `key=value,key=value` threat model used to calibrate severity. Optional — omit for default behavior. See [`--context`](#--context-threat-model-calibration) below. |
 | `--yes` | false | Non-interactive mode. Auto-confirms all user-facing prompts: the `--output` copy confirmation, the Docker runtime gate (`--runtime`), and the pure-skill-repo auto-skip cascade. Path-validation safety checks (rejecting sensitive `--output` destinations) are never bypassed. Use in CI or scripted runs. |
 | `--debug` | false | Write a paste-friendly execution log to `{repo_path}/.security-review/execution-log.md` recording how the file-reading phases actually ran — every file read with its line range and a full/partial flag, which files were classified security-relevant and whether they were read whole, the greps/tools run, and checks run vs skipped. For inspecting skill behaviour; independent of report mode. See [Execution Log](#execution-log---debug). |
@@ -128,6 +129,12 @@ Standard tier:
 > for this workload. Re-add Fable 5 to the top of the chain only after confirming
 > its security-analysis output is not degraded.
 
+> **Vendor mode (`--vendor`) overrides tier resolution.** When `--vendor` is set,
+> both tiers are pinned to `claude-sonnet-4-6` for every phase — no Opus, no
+> Haiku, no chain-walking. If `claude-sonnet-4-6` is not available on the active
+> API tier, abort with a clear error (the mode's contract is "Sonnet only" — do
+> not silently fall back). See [Vendor Mode](#vendor-mode---vendor).
+
 #### Thinking Rules (applied to the resolved model)
 
 | Resolved model | Tier | thinking param |
@@ -179,6 +186,7 @@ move to the next model in the chain, and retry once. Record the fallback in
 
 ```json
 {
+  "vendor_mode": false,
   "deep_tier_model":   "claude-opus-4-8",
   "standard_tier_model": "claude-sonnet-4-6",
   "deep_tier_thinking": true,
@@ -293,6 +301,54 @@ downstream phases skip all calibration logic.
 `{repo_path}/.security-review/threat-model.json` — present only when
 `--context` was supplied. See per-phase reference files for how each phase
 consumes it.
+
+## Vendor Mode (`--vendor`)
+
+`--vendor` switches the skill from its default posture — reviewing an
+internally-built repo so the owning **dev team** can fix findings — to auditing
+a **third-party / open-source repository** the company is considering adopting.
+The audience is the internal **security team**, and the deliverable is an
+**adoption risk judgment**: the findings are not expected to be fixed by the
+vendor, so the report is framed around risk and adopter-side compensating
+controls, not remediation tickets.
+
+When `--vendor` is set:
+
+**1. Forced phase skips** (additive to any explicit `--skip`; union the sets):
+- `secrets` (Phase 1) — a vendor repo leaking its own test creds is the vendor's
+  problem, not the adopter's; not the adoption question.
+- `dependencies` (Phase 3 + 3b) — CVE/patch tracking is the vendor's release
+  concern; the adopter's question is whether the *code* is safe to run.
+- `poc` — no PoC files are written. **Validation (Phase 5) still runs** so
+  findings are confirmed, not raw candidates. This is exactly the existing
+  `--skip poc` semantics (validation confirms/rejects; no `pocs/` output).
+
+Phases that still run: **Phase 2** (architecture — also produces the
+`project_overview` used for the "What This Tool Does" summary), **Phase 4**
+(OWASP / API Top 10), **Phase 4b** (LLM / AI security — if skill files are
+detected; vendor AI tools are a prime case), **Phase 5** (validation only), and
+**Phase 6** (vendor report). The skill-repo auto-skip cascade still applies.
+
+**2. Model pinned to Sonnet.** Every phase uses `claude-sonnet-4-6` regardless
+of the Deep/Standard fallback chains — no Opus, no Haiku, no chain-walking.
+Write every `*_model` field in `run-metadata.json` as `claude-sonnet-4-6`, set
+`deep_tier_thinking: false`, and set `vendor_mode: true`. If `claude-sonnet-4-6`
+is unavailable on the active API tier, abort with a clear error — do not fall
+back (the mode's contract is "Sonnet only").
+
+**3. Report format.** The orchestrator passes `--vendor` to Phase 6, which
+produces the vendor report (see `references/phase6-report.md` → Vendor Report).
+It leads with the adoption **verdict** (`ADOPT` / `ADOPT WITH CONDITIONS` /
+`DO NOT ADOPT`) + **overall risk level** + **conditions for safe internal use**,
+then a plain-English "What This Tool Does" section, then confirmed findings
+framed as adoption risk with adopter-side compensating controls.
+
+**4. `--runtime` is ignored** — there is no PoC to validate at runtime. If both
+flags are passed, print a one-line notice and continue without Docker.
+
+`--vendor` composes with `--verbose` (adds the Coverage & Tools appendix to the
+vendor report) and with multi-repo `--repos` (each vendor repo gets a vendor
+report; Phase 7 synthesis still runs, and its report is likewise vendor-framed).
 
 ## Phase Execution Order
 
@@ -432,6 +488,7 @@ a finding passes, so unvalidated findings can never get one.
    - The repo path and working directory path
    - Any flags relevant to it (`--runtime` for Phase 5, `--verbose` for
      Phase 6 **and** Phase 7 — both honor it to select lean vs. full report mode,
+     `--vendor` for Phase 6 **and** Phase 7 — selects the vendor report format,
      `--debug` for Phases 2, 4, and 5 — they append to the execution log)
 
 3. **The orchestrator's only job** is sequencing, path management, and

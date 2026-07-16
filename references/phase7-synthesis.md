@@ -41,6 +41,16 @@ same as it does to Phase 6. It controls the structure of `system-report.md`
 (see Output below). `system-findings.json` is unaffected — it is always written
 in full so downstream tooling has complete data regardless of report mode.
 
+**Vendor mode:** When `--vendor` is passed (multi-repo vendor audit), keep the
+cross-service analysis unchanged but frame `system-report.md` for a security
+team deciding on adoption: open with a one-paragraph **system-level adoption
+verdict** (does this set of vendor services, taken together, introduce risk that
+the per-repo reports miss — e.g. shared credentials, blind service-to-service
+trust?), and replace per-finding `Remediation:` with `Mitigation available to
+us:` (adopter-side compensating control, or `none — requires a vendor code
+change`), mirroring Phase 6's vendor report. Do not invent secret/CVE findings —
+those phases were skipped.
+
 ## Vulnerability Classes to Investigate
 
 These are the cross-repo issues that per-service analysis cannot see. Work

@@ -130,6 +130,9 @@ In any Claude Code session (CLI or Desktop), invoke the skill on a local reposit
 
 # Multi-repo — analyze three microservices and get a system-level report
 /repo-security-review --repos ~/svcs/auth,~/svcs/gateway,~/svcs/users --output ~/reports/my-system
+
+# Vendor audit — is this open-source/third-party tool safe to adopt internally?
+/repo-security-review /path/to/vendor-tool --vendor --output ~/reports/vendor-tool
 ```
 
 | Flag | Default | Effect |
@@ -142,6 +145,7 @@ In any Claude Code session (CLI or Desktop), invoke the skill on a local reposit
 | `--debug` | off | Write an execution log (`.security-review/execution-log.md`) showing how the file-reading phases (2, 4, 5) actually ran — every file read with its line range and a full/partial flag, which files were treated as security-relevant, the greps run, and checks run vs skipped. Independent of `--verbose`. See "Inspecting skill behaviour" below. |
 | `--verbose` | off | Generate the full detailed report. Default report omits the OWASP Checks Run inventory, standalone Remediation Priority section, and Appendix. Findings, evidence, and per-finding priority labels are present in both modes. |
 | `--context <pairs>` | none | Optional inline threat model (`key=value,key=value`) used to calibrate severity. See "Adding context" below |
+| `--vendor` | off | Vendor / open-source audit mode — for a security team deciding whether a third-party tool is safe to adopt. Forces skip of `secrets`, `dependencies`, and `poc`; pins all phases to `claude-sonnet-4-6`; and produces an adoption-risk report (verdict + conditions for safe internal use + "what it does" + findings framed as adopter-side risk). See "Vendor audit mode" below. |
 | `--help` | — | Show usage |
 
 **Cascade rules** (applied silently):
@@ -149,6 +153,34 @@ In any Claude Code session (CLI or Desktop), invoke the skill on a local reposit
 - `--skip validation` → also skips `poc` (PoC requires a validation verdict)
 - `--skip poc` → validation still runs; only PoC file generation is suppressed
 - `--skip architecture` → also skips `skill-security` (skill detection requires Phase 2 output)
+- `--vendor` → forces skip of `secrets`, `dependencies`, and `poc` (unioned with any explicit `--skip`)
+
+### Vendor audit mode (`--vendor`)
+
+By default the skill reviews an **internally-built** repo so the owning dev team
+can fix what it finds. `--vendor` flips the use case: you are a **security team**
+deciding whether a **third-party / open-source** tool is safe to adopt, and the
+vendor will not be fixing anything. The report changes accordingly.
+
+What the flag does:
+
+- **Skips** secret scanning, dependency/CVE scanning, and PoC generation
+  (validation still runs, so findings are confirmed rather than raw candidates).
+- **Pins every phase to `claude-sonnet-4-6`** — no Opus, no Haiku.
+- **Produces an adoption-risk report** instead of a remediation report. It leads
+  with a **verdict** (`ADOPT` / `ADOPT WITH CONDITIONS` / `DO NOT ADOPT`), an
+  **overall risk level**, and **conditions for safe internal use**; then a plain-
+  English **"What This Tool Does"** summary; then confirmed findings framed as
+  *adoption risk* with **adopter-side compensating controls** ("run it network-
+  isolated", "don't give it prod secrets") rather than "fix" instructions the
+  vendor would have to action.
+- **`--runtime` is ignored** (no PoC to run). Composes with `--verbose` (adds the
+  Coverage & Tools appendix) and with `--repos` (each vendor repo is assessed).
+
+```text
+/repo-security-review /path/to/vendor-tool --vendor --output ~/reports/vendor-tool
+/repo-security-review /path/to/vendor-tool --vendor --verbose   # + coverage appendix
+```
 
 ### Phase 4b — LLM / AI Skill Security (`skill-security`)
 

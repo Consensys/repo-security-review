@@ -481,6 +481,13 @@ Write to `{repo_path}/.security-review/phase2-architecture.json`:
 ```json
 {
   "phase": "architecture",
+  "project_overview": {
+    "purpose": "Plain-English description of what this repo/tool does, drawn from the README and code — one short paragraph.",
+    "key_components": ["main modules / services / entry points"],
+    "external_interfaces": ["how the outside world reaches it and how it reaches out: network endpoints, CLI, outbound HTTP calls, file/FS access, IPC, spawned subprocesses"],
+    "data_handled": ["what data it touches: secrets/credentials, PII, source code, filesystem, tokens"],
+    "trust_posture": "Where untrusted input enters and how (or whether) it is validated — one or two sentences."
+  },
   "coverage": {
     "security_relevant_files": ["src/router.go", "src/auth/mw.go", "..."],
     "read_full": ["src/router.go", "src/auth/mw.go"],
@@ -518,6 +525,10 @@ Write to `{repo_path}/.security-review/phase2-architecture.json`:
 ```
 
 ## Notes
+- `project_overview` is always produced — it feeds the report's project summary
+  and is the headline "What This Tool Does" section in `--vendor` (vendor-audit)
+  mode. Keep it factual and grounded in the README + code; do not speculate about
+  purpose or interfaces you did not observe.
 - `poc_needed` is always `false` for architectural findings
 - Reference specific files and line numbers as evidence
 - Be concrete about impact — avoid vague "could lead to security issues"
