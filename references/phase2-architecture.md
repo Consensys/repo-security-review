@@ -356,6 +356,16 @@ find {repo_path} -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" \
   -not -path "*/.git/*" -not -path "*/node_modules/*" -not -path "*/vendor/*" \
   -not -path "*/target/*" -not -path "*/dist/*" -not -path "*/build/*" \
   | xargs wc -l 2>/dev/null | sort -rn
+
+# Same set, collapsed to a per-directory file count. This is the roster you will
+# reconcile the read-list against — every directory here must be accounted for.
+find {repo_path} -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" \
+  -o -name "*.tsx" -o -name "*.go" -o -name "*.rs" -o -name "*.java" \
+  -o -name "*.rb" -o -name "*.php" -o -name "*.cs" -o -name "*.kt" \
+  -o -name "*.scala" \) \
+  -not -path "*/.git/*" -not -path "*/node_modules/*" -not -path "*/vendor/*" \
+  -not -path "*/target/*" -not -path "*/dist/*" -not -path "*/build/*" \
+  | sed 's:/[^/]*$::' | sort | uniq -c | sort -rn
 ```
 
 From that inventory, classify each file as **security-relevant** or not. A file is
@@ -364,7 +374,7 @@ permissions, trust, command/process construction, network/HTTP, secrets/credenti
 serialization/parsing of untrusted input, configuration loading, or persistence.
 When unsure, treat it as security-relevant.
 
-**Read every security-relevant file — completely.** Two rules that override the
+**Read every security-relevant file — completely.** Three rules that override the
 model's default token-frugality:
 
 1. **Size is never a reason to skip or downgrade to grep-only.** A large file is
@@ -374,18 +384,44 @@ model's default token-frugality:
    codebase is often its dispatch table, rule registry, or config surface.)
 2. **Account for what you skip.** Every security-relevant file you do **not** read
    in full must be listed with a concrete reason (e.g. "pure output formatter, no
-   trust decision"). "Didn't reach it" is not a reason.
+   trust decision"). "Didn't reach it" is not a reason. Do not let one directory's
+   early files satisfy you: if you read some files in a module, account for **all**
+   non-trivial files in that same module — the risky one may be the sibling you
+   didn't open (data persistence, credential handling, and trust logic frequently
+   live one file over from where you started).
+3. **Reconcile per directory — no directory disappears silently.** The failure
+this guards against is not a large file read shallowly; it is a whole directory
+that never enters the read-list at all. Small files — middleware, constants,
+validation/schema definitions, request/response DTOs, error filters, boundary
+transformers — are individually a few lines and *look* like boilerplate, so they
+get dropped as a group, and a summary sentence ("read all source files") then
+hides the omission. To prevent that, walk the **per-directory count** from the
+inventory above and, for every directory that contains security-relevant files,
+confirm at least one of:
+- one or more of its files appear in `read_full` / `read_chunked`, **and** any
+  unread siblings are listed in `not_read` with reasons; or
+- the entire directory is listed in `not_read` (as a directory entry) with a
+  concrete reason (e.g. "generated API client — wrappers that call it were read",
+  "DB migrations — runtime entities and query services were read").
 
-Do not let one directory's early files satisfy you: if you read some files in a
-module, account for **all** non-trivial files in that same module — the risky one
-may be the sibling you didn't open (data persistence, credential handling, and
-trust logic frequently live one file over from where you started).
+A directory that appears in the inventory but has **zero** files in the read-list
+and **no** skip reason is an unaccounted gap: read its files or record the reason.
+**Blanket claims such as "read all X files" are not permitted** — coverage is
+asserted per directory, so an entirely-dropped `validation/`, `auth/`, or
+`middleware/` surfaces explicitly instead of being absorbed into a summary. This
+is not a size judgment: a 5-line schema that defines the input contract is
+security-relevant even though it is tiny.
 
 Record the accounting:
 - In `phase2-architecture.json`, add a `coverage` block:
-  `{ "security_relevant_files": [...], "read_full": [...], "read_chunked": [...], "not_read": [{"file": "...", "reason": "..."}] }`
+  `{ "security_relevant_files": [...], "read_full": [...], "read_chunked": [...], "not_read": [{"file": "...", "reason": "..."}], "directories": [{"dir": "...", "files": N, "read": N, "reason_if_unread": "..."}] }`.
+  Include one `directories` entry per directory that contains security-relevant
+  files; `reason_if_unread` is required (non-empty) whenever `read` is `0`.
 - If `--debug` is set, this is the roster the execution log's "Security-relevant
-  files" section must reflect — including the `not_read` entries with reasons.
+  files" section must reflect — including the `not_read` entries with reasons and
+  the per-directory accounting (every directory with `read: 0` named with its
+  reason). Do not write a summary line that implies fuller coverage than the
+  per-directory roster shows.
 
 ---
 
@@ -451,6 +487,11 @@ Write to `{repo_path}/.security-review/phase2-architecture.json`:
     "read_chunked": ["src/handlers.go (large — read in 2 chunks)"],
     "not_read": [
       {"file": "src/format/pretty.go", "reason": "pure output formatter, no trust decision"}
+    ],
+    "directories": [
+      {"dir": "src/auth", "files": 5, "read": 5, "reason_if_unread": ""},
+      {"dir": "src/validation", "files": 12, "read": 12, "reason_if_unread": ""},
+      {"dir": "src/db/migrations", "files": 9, "read": 0, "reason_if_unread": "schema/data migrations — runtime entities and query services read instead"}
     ]
   },
   "summary": {

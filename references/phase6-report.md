@@ -472,7 +472,11 @@ State these plainly so a clean result is not over-interpreted:
 - **File coverage.** {Read `phase2-architecture.json → coverage`. If `not_read`
   is non-empty, note how many security-relevant files were not fully read and
   why, so the reader knows the review's breadth. If `read_chunked` shows large
-  files were split, that is fine — full coverage — and needs no caveat.}
+  files were split, that is fine — full coverage — and needs no caveat. Also
+  scan `coverage.directories`: for every entry with `read: 0`, name the directory
+  and its `reason_if_unread` — an entire un-read directory (e.g. validation
+  schemas, middleware, error filters) is a broader gap than a single skipped file
+  and must be stated explicitly, not summarized away.}
 - **Runtime PoCs** (if `--runtime` ran with `--network none`) cannot validate
   SSRF or any network-dependent exploit — those remain statically assessed only.
 

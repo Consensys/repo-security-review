@@ -608,6 +608,16 @@ middleware, or the locus of a candidate finding) and whether each was read whole
 - src/controllers/OrdersController.ts — FULL ✓
 - src/controllers/UsersController.ts — NOT READ ⚠️ (no grep hit pointed here)
 
+### Directory coverage   (Phase 2 only)
+One row per directory containing security-relevant files, reconciled against the
+per-directory inventory count. A directory with `read: 0` must carry a reason —
+never omit it or fold it into a summary line. (See Phase 2 Step 0.5.)
+| Directory | Files | Read | Reason if unread |
+|-----------|-------|------|------------------|
+| src/auth | 5 | 5 | |
+| src/validation | 12 | 12 | |
+| src/db/migrations | 9 | 0 | schema migrations; runtime entities + query services read instead |
+
 ### Tools / greps run
 - `grep -rnE "app\.(get|post)" ...` → 12 hits
 - `semgrep p/owasp-top-ten,p/security-audit,...` → 6 seed findings   (Phase 4 only)
