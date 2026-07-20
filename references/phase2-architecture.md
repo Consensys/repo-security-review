@@ -427,6 +427,47 @@ Record the accounting:
 
 ## Security Analysis
 
+### 0. Data-Flow & Trust Model  ← internal repos only; **skip entirely if `--vendor` is set**
+
+Before the checklist analysis below, build an explicit **data-flow model** of the
+system and use it to ground every subsequent judgment. This is produced only for
+company-built repos (default and `--verbose` modes). In `--vendor` mode, do **not**
+build this model or emit the `data_flow_model` block — the vendor audit is
+deliberately lean and Sonnet-pinned, and the adopting team does not own the
+architecture.
+
+Enumerate, from the code and README you already read:
+- **External entities** — who/what talks to the system from outside (end users,
+  third-party APIs, CI runners, other internal services).
+- **Processes** — the running components (services, workers, CLIs, lambdas).
+- **Data stores** — databases, caches, queues, object storage, config/secret stores.
+- **Trust boundaries** — the lines input crosses from less-trusted to more-trusted
+  (internet → edge, edge → internal service, service → data store, tenant → tenant).
+- **Entry points** — the concrete places untrusted input enters (routes, queue
+  consumers, webhooks, CLI args, file ingest).
+- **Flows** — for each boundary-crossing flow, what data moves and which controls
+  guard it (or are absent).
+
+**Use STRIDE only as a coverage lens — never as a finding generator.** Do not
+enumerate Spoofing/Tampering/Repudiation/Info-disclosure/DoS/Elevation per element;
+that produces checklist theater and duplicates the analysis below. Instead, after
+you have the model, sweep the six categories once as a *completeness check* on the
+findings you are already producing, paying particular attention to the two this
+phase covers thinly by default:
+- **Repudiation** — is there audit logging for sensitive/privileged operations?
+- **Denial of Service** — are there rate limits, request-size limits, and
+  unbounded-work guards on reachable entry points?
+
+Any gap a STRIDE sweep surfaces becomes a normal finding in the existing schema
+(`missing_control`, `trust_boundary`, etc.) — not a separate STRIDE entry. Record
+only a short `stride_lens_notes` string tying the two thin categories to finding
+IDs (or noting they are clean); do not restate all six categories per element.
+
+The structured model is written to the `data_flow_model` block (see Output Format).
+It is a persisted artifact — its purpose is to force systematic boundary/flow
+enumeration (so the risky sibling file is not missed) and to be available to
+downstream analysis; it is **not** rendered into the final report.
+
 ### 1. Trust Boundaries
 - Are there clear boundaries between public/private/internal services?
 - Does the app trust input from external sources without validation?
@@ -488,6 +529,21 @@ Write to `{repo_path}/.security-review/phase2-architecture.json`:
     "data_handled": ["what data it touches: secrets/credentials, PII, source code, filesystem, tokens"],
     "trust_posture": "Where untrusted input enters and how (or whether) it is validated — one or two sentences."
   },
+  "data_flow_model": {
+    "_comment": "Internal repos only. OMIT this whole block when --vendor is set.",
+    "external_entities": ["end user (browser)", "stripe API", "ci runner"],
+    "processes": ["api-gateway", "auth-service", "queue-worker"],
+    "data_stores": ["postgres (users, tokens)", "redis (sessions)", "s3 (uploads)"],
+    "trust_boundaries": [
+      {"name": "internet → api-gateway", "description": "public edge; requests here are fully untrusted"},
+      {"name": "api-gateway → internal services", "description": "no inter-service auth (see A-003)"}
+    ],
+    "entry_points": ["POST /login", "GET /admin/*", "webhook POST /stripe", "sqs consumer: uploads"],
+    "flows": [
+      {"from": "end user", "to": "api-gateway", "data": "credentials, JWT", "crosses_boundary": "internet → api-gateway", "controls": "TLS; rate limit ABSENT on /login (see A-002)"}
+    ],
+    "stride_lens_notes": "Repudiation: no audit log on role changes (A-004). DoS: no rate limit on /login (A-002). Remaining categories covered by findings above."
+  },
   "coverage": {
     "security_relevant_files": ["src/router.go", "src/auth/mw.go", "..."],
     "read_full": ["src/router.go", "src/auth/mw.go"],
@@ -529,6 +585,13 @@ Write to `{repo_path}/.security-review/phase2-architecture.json`:
   and is the headline "What This Tool Does" section in `--vendor` (vendor-audit)
   mode. Keep it factual and grounded in the README + code; do not speculate about
   purpose or interfaces you did not observe.
+- `data_flow_model` is produced for **internal repos only** (default and
+  `--verbose`). **Omit the block entirely when `--vendor` is set.** It is the
+  structured elaboration of `project_overview` (which stays the prose summary):
+  its job is to force systematic trust-boundary/flow enumeration and to persist a
+  model for downstream use. It is **not** rendered into the report. STRIDE is a
+  one-pass coverage lens here, never a per-element checklist — see Security
+  Analysis §0.
 - `poc_needed` is always `false` for architectural findings
 - Reference specific files and line numbers as evidence
 - Be concrete about impact — avoid vague "could lead to security issues"

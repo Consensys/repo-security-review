@@ -323,8 +323,10 @@ When `--vendor` is set:
   findings are confirmed, not raw candidates. This is exactly the existing
   `--skip poc` semantics (validation confirms/rejects; no `pocs/` output).
 
-Phases that still run: **Phase 2** (architecture — also produces the
-`project_overview` used for the "What This Tool Does" summary), **Phase 4**
+Phases that still run: **Phase 2** (architecture — still produces the
+`project_overview` used for the "What This Tool Does" summary, but **suppresses**
+the internal-only `data_flow_model` / threat-model block, which is for
+company-built repos the adopting team owns), **Phase 4**
 (OWASP / API Top 10), **Phase 4b** (LLM / AI security — if skill files are
 detected; vendor AI tools are a prime case), **Phase 5** (validation only), and
 **Phase 6** (vendor report). The skill-repo auto-skip cascade still applies.
@@ -488,8 +490,9 @@ a finding passes, so unvalidated findings can never get one.
    - The repo path and working directory path
    - Any flags relevant to it (`--runtime` for Phase 5, `--verbose` for
      Phase 6 **and** Phase 7 — both honor it to select lean vs. full report mode,
-     `--vendor` for Phase 6 **and** Phase 7 — selects the vendor report format,
-     `--debug` for Phases 2, 4, and 5 — they append to the execution log)
+     `--vendor` for Phase 2, Phase 6 **and** Phase 7 — Phase 6/7 select the vendor
+     report format; Phase 2 uses it to suppress the internal-only `data_flow_model`
+     block, `--debug` for Phases 2, 4, and 5 — they append to the execution log)
 
 3. **The orchestrator's only job** is sequencing, path management, and
    printing progress summaries. It must not accumulate findings across phases.
