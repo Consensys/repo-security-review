@@ -427,14 +427,16 @@ Record the accounting:
 
 ## Security Analysis
 
-### 0. Data-Flow & Trust Model  ← internal repos only; **skip entirely if `--vendor` is set**
+### 0. Data-Flow & Trust Model  ← **opt-in: only if `--stride` is set** (and never in `--vendor`)
 
-Before the checklist analysis below, build an explicit **data-flow model** of the
-system and use it to ground every subsequent judgment. This is produced only for
-company-built repos (default and `--verbose` modes). In `--vendor` mode, do **not**
-build this model or emit the `data_flow_model` block — the vendor audit is
-deliberately lean and Sonnet-pinned, and the adopting team does not own the
-architecture.
+**Skip this entire section unless `--stride` was passed.** It is off by default;
+when `--stride` is absent, do not build the model or emit the `data_flow_model`
+block, and proceed straight to §1. When `--vendor` is set, `--stride` is ignored
+and this section is likewise skipped — the vendor audit is deliberately lean and
+Sonnet-pinned, and the adopting team does not own the architecture.
+
+When `--stride` is set (and not `--vendor`), build an explicit **data-flow model**
+of the system and use it to ground every subsequent judgment.
 
 Enumerate, from the code and README you already read:
 - **External entities** — who/what talks to the system from outside (end users,
@@ -530,7 +532,7 @@ Write to `{repo_path}/.security-review/phase2-architecture.json`:
     "trust_posture": "Where untrusted input enters and how (or whether) it is validated — one or two sentences."
   },
   "data_flow_model": {
-    "_comment": "Internal repos only. OMIT this whole block when --vendor is set.",
+    "_comment": "Opt-in: emit ONLY when --stride is set. OMIT this whole block by default, and always when --vendor is set.",
     "external_entities": ["end user (browser)", "stripe API", "ci runner"],
     "processes": ["api-gateway", "auth-service", "queue-worker"],
     "data_stores": ["postgres (users, tokens)", "redis (sessions)", "s3 (uploads)"],
@@ -585,13 +587,13 @@ Write to `{repo_path}/.security-review/phase2-architecture.json`:
   and is the headline "What This Tool Does" section in `--vendor` (vendor-audit)
   mode. Keep it factual and grounded in the README + code; do not speculate about
   purpose or interfaces you did not observe.
-- `data_flow_model` is produced for **internal repos only** (default and
-  `--verbose`). **Omit the block entirely when `--vendor` is set.** It is the
-  structured elaboration of `project_overview` (which stays the prose summary):
-  its job is to force systematic trust-boundary/flow enumeration and to persist a
-  model for downstream use. It is **not** rendered into the report. STRIDE is a
-  one-pass coverage lens here, never a per-element checklist — see Security
-  Analysis §0.
+- `data_flow_model` is **opt-in via `--stride`** — off by default. Emit the block
+  only when `--stride` is set; omit it entirely otherwise, and always when
+  `--vendor` is set (`--stride` is ignored there). It is the structured elaboration
+  of `project_overview` (which stays the prose summary): its job is to force
+  systematic trust-boundary/flow enumeration and to persist a model for downstream
+  use. It is **not** rendered into the report. STRIDE is a one-pass coverage lens
+  here, never a per-element checklist — see Security Analysis §0.
 - `poc_needed` is always `false` for architectural findings
 - Reference specific files and line numbers as evidence
 - Be concrete about impact — avoid vague "could lead to security issues"

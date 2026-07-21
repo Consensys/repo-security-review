@@ -146,6 +146,7 @@ In any Claude Code session (CLI or Desktop), invoke the skill on a local reposit
 | `--verbose` | off | Generate the full detailed report. Default report omits the OWASP Checks Run inventory, standalone Remediation Priority section, and Appendix. Findings, evidence, and per-finding priority labels are present in both modes. |
 | `--context <pairs>` | none | Optional inline threat model (`key=value,key=value`) used to calibrate severity. See "Adding context" below |
 | `--vendor` | off | Vendor / open-source audit mode — for a security team deciding whether a third-party tool is safe to adopt. Forces skip of `secrets`, `dependencies`, and `poc`; pins all phases to `claude-sonnet-4-6`; and produces an adoption-risk report (verdict + conditions for safe internal use + "what it does" + findings framed as adopter-side risk). See "Vendor audit mode" below. |
+| `--stride` | off | Opt-in threat modeling in Phase 2. Builds an explicit data-flow & trust model (trust boundaries, entry points, boundary-crossing flows) plus a one-pass STRIDE coverage sweep, persisted in `phase2-architecture.json`. For company-built repos; ignored in `--vendor` mode. Not rendered into the report — it sharpens the architectural findings. |
 | `--help` | — | Show usage |
 
 **Cascade rules** (applied silently):
@@ -154,6 +155,7 @@ In any Claude Code session (CLI or Desktop), invoke the skill on a local reposit
 - `--skip poc` → validation still runs; only PoC file generation is suppressed
 - `--skip architecture` → also skips `skill-security` (skill detection requires Phase 2 output)
 - `--vendor` → forces skip of `secrets`, `dependencies`, and `poc` (unioned with any explicit `--skip`)
+- `--vendor` + `--stride` → `--stride` is ignored (threat modeling is for company-built repos, not vendor audits)
 
 ### Vendor audit mode (`--vendor`)
 
