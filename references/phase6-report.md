@@ -13,6 +13,7 @@ Read all that exist (some may be absent if a phase was skipped):
 {repo_path}/.security-review/threat-model.json       ← present only if --context was used
 {repo_path}/.security-review/phase1-secrets.json
 {repo_path}/.security-review/phase2-architecture.json
+{repo_path}/.security-review/phase2b-arch-validated.json ← present only if Phase 2 had in-scope findings
 {repo_path}/.security-review/phase3-cves.json
 {repo_path}/.security-review/phase3b-reachability.json
 {repo_path}/.security-review/phase4-owasp.json
@@ -73,6 +74,38 @@ Apply softeners:
   with the softeners listed in Section 5b. Drift findings appear as normal findings.
 
 ---
+
+## Architectural Validation Step (only when `phase2b-arch-validated.json` exists)
+
+Phase 2b independently validated the high-false-positive architectural findings
+(`trust_boundary`, `auth_model`, `missing_control`) by refutation. Apply its
+verdicts to the Phase 2 findings **before** deduplication:
+
+- **REFUTED** — a compensating control was found. **Remove the finding from the
+  unified Findings list** (it is a false positive) and list it in the **False
+  Positives** table in **all modes**, with the refuting evidence (`file:line`)
+  from `phase2b-arch-validated.json` as the reason.
+- **UNDETERMINED** — the control lives in runtime/infra not in the repo. **Keep
+  the finding** in all modes, and add a validation caveat line so it is never
+  read as fact:
+  `- **Validation**: undetermined — requires operational check: {needs_operational_check}`.
+  Do not drop it and do not present it as confirmed.
+- **CONFIRMED** — keep the finding. In **verbose** and **vendor** modes set its
+  validation line to
+  `- **Validation**: confirmed (architectural — control absent in {searched})`.
+  In default mode add no extra line (keep the dev-team view lean).
+- Apply any `severity_assessment` downgrade Phase 2b proposed (it never raises
+  severity). This adjusts the base severity before calibration.
+
+Findings **not in scope** for Phase 2b (`data_exposure`, `infra_misconfiguration`,
+`session_management`, `third_party`, `threat_model_drift`) carry no Phase 2b
+verdict — leave them unchanged, with `Validation: not applicable (architectural)`.
+
+**Conflict rule:** if Phase 2b marked a finding REFUTED but Phase 4/Phase 5
+independently **confirmed** the same underlying issue (they dedup-match in the
+next step), the Phase 5 CONFIRMED verdict wins — the exploit-level confirmation
+outranks the refutation. Keep the canonical Phase 4/5 finding; the refuted Phase 2
+entry is dropped as usual (it would have merged away regardless).
 
 ## Deduplication Step
 

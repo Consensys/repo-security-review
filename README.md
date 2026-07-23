@@ -13,6 +13,7 @@ Seven sequential phases (single-repo), plus Phase 0 and Phase 7 for multi-repo r
 0. **Service topology mapping** *(multi-repo only)* — reads docker-compose, k8s manifests, OpenAPI specs, and .proto files across all repos; produces a shared `service-topology.json` passed to each service's Phase 2
 1. **Secret scanning** — `gitleaks` across full git history
 2. **Architectural analysis** — trust boundaries, auth model, infra config; produces a tech-stack profile that gates downstream phases; also detects AI skill files for Phase 4b
+2b. **Architectural validation** — a judgment-layer agent, isolated from the Phase 2 finder, re-validates the highest-false-positive architectural findings (`trust_boundary`, `auth_model`, `missing_control`) by **refutation** — hunting for the compensating control the finding claims is missing. Verdicts are CONFIRMED / REFUTED / UNDETERMINED (the last for controls that live in runtime/infra outside the repo). No PoC. Auto-skipped when Phase 2 produced no in-scope findings
 3. **Dependency CVE scanning** (+ 3b reachability) — `osv-scanner` against ecosystems detected in Phase 2; auto-skipped for pure skill repos
 4. **Code-level OWASP analysis** — Top 10 + API Top 10, pruned by tech stack (no DB → skip SQLi, etc.); auto-skipped for pure skill repos
 4b. **LLM / AI skill security** *(auto-activated when skill files detected)* — analyses agent instruction files against OWASP LLM Top 10: prompt injection, insecure output handling, excessive agency, insecure plugin design, sensitive data disclosure, and supply chain risks. Runs after Phase 2 for pure skill repos; after Phase 4 for mixed repos
@@ -282,13 +283,16 @@ flowchart TD
     end
 
     P4b -. file path only .-> P5
+    P2 -. file path only .-> P2b
 
     subgraph JUDGMENT["JUDGMENT LAYER (isolated context)"]
+        P2b[Phase 2b · Architectural Validation<br/>re-validates trust_boundary / auth_model / missing_control<br/>by refutation · CONFIRMED / REFUTED / UNDETERMINED · no PoC]
         P5[Phase 5 · Validate + PoC<br/>re-validates Phase 4 findings only<br/>PoCs only for confirmed findings<br/>optional Docker runtime]
     end
 
     P1 --> R[Phase 6 · Report Builder]
     P2 --> R
+    P2b --> R
     P3b --> R
     P4b --> R
     P5 --> R
@@ -299,7 +303,7 @@ flowchart TD
     classDef report fill:#e8f5e9,stroke:#5a9a5a,color:#1a1a1a
     classDef store fill:#f5f5f5,stroke:#888,color:#1a1a1a,stroke-dasharray: 3 3
     class P1,P2,P3,P3b,P4,P4b finder
-    class P5 judgment
+    class P2b,P5 judgment
     class R report
     class TS store
 ```
