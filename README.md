@@ -35,8 +35,6 @@ In any Claude Code session (CLI or Desktop), point the skill at a local repo pat
 /repo-security-review /path/to/repo
 ```
 
-It also responds to natural-language requests like *"run a security review on ~/repos/my-service"*.
-
 ### Sample commands
 
 ```text
