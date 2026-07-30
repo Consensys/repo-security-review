@@ -34,7 +34,7 @@ and spawns this phase only when it is set.
 
 ## Model Guidance
 
-**Use the resolved Deep tier model (`{deep_tier_model}`, normally `claude-opus-4-8`)
+**Use the resolved Deep tier model (`{deep_tier_model}`, normally `claude-opus-5`)
 with `thinking: {type: "adaptive"}`.**
 
 This phase requires deep multi-hop reasoning: following data flows through

@@ -62,7 +62,7 @@ Parse these from `$ARGUMENTS` using the format:
 | `--output` | none — all artifacts stay at `{repo_path}/.security-review/` (single-repo) or `./system-security-review/` (multi-repo) | Directory to copy the final report and PoC scripts into after the run. Created if it doesn't exist. **Strongly recommended in multi-repo mode.** |
 | `--runtime` | false | Enable Docker-based runtime PoC validation |
 | `--verbose` | false | Generate the full detailed report. Default report (for dev teams) omits the OWASP Checks Run inventory, the standalone Remediation Priority section, and the Appendix. All findings, evidence, and per-finding priority labels are included in both modes. In multi-repo mode the flag applies to both the per-service reports (Phase 6) and the system-level synthesis report (Phase 7). |
-| `--vendor` | false | Vendor / open-source audit mode. Audits a third-party repo the company is considering adopting; audience is the internal security team, deliverable is an adoption risk judgment (not a fix-list for the vendor). Forces skip of `secrets`, `dependencies`, and `poc`; pins every phase to `claude-sonnet-4-6`; and switches Phase 6 to the vendor report format. See [Vendor Mode](#vendor-mode---vendor) below. |
+| `--vendor` | false | Vendor / open-source audit mode. Audits a third-party repo the company is considering adopting; audience is the internal security team, deliverable is an adoption risk judgment (not a fix-list for the vendor). Forces skip of `secrets`, `dependencies`, and `poc`; pins every phase to the resolved Standard tier model (never Opus); and switches Phase 6 to the vendor report format. See [Vendor Mode](#vendor-mode---vendor) below. |
 | `--context` | none | Inline `key=value,key=value` threat model used to calibrate severity. Optional — omit for default behavior. See [`--context`](#--context-threat-model-calibration) below. |
 | `--yes` | false | Non-interactive mode. Auto-confirms all user-facing prompts: the `--output` copy confirmation, the Docker runtime gate (`--runtime`), and the pure-skill-repo auto-skip cascade. Path-validation safety checks (rejecting sensitive `--output` destinations) are never bypassed. Use in CI or scripted runs. |
 | `--debug` | false | Write a paste-friendly execution log to `{repo_path}/.security-review/execution-log.md` recording how the file-reading phases actually ran — every file read with its line range and a full/partial flag, which files were classified security-relevant and whether they were read whole, the greps/tools run, and checks run vs skipped. For inspecting skill behaviour; independent of report mode. See [Execution Log](#execution-log---debug). |
@@ -114,37 +114,73 @@ API key / account tier.
 
 ```
 Deep tier:
-  1. claude-opus-4-8         ← preferred; adaptive thinking supported
-  2. claude-sonnet-4-6       ← fallback; no thinking for deep tier
+  1. claude-opus-5           ← preferred; most capable, adaptive thinking supported
+  2. claude-opus-4-8         ← fallback if Opus 5 is unavailable on this account
+  3. claude-sonnet-5         ← fallback if no Opus generation is available at all
+  4. claude-sonnet-4-6       ← last-resort fallback; no thinking for deep tier
 
 Standard tier:
-  1. claude-sonnet-4-6       ← preferred
-  2. claude-haiku-4-5        ← fallback; reduced analysis depth
+  1. claude-sonnet-5         ← preferred
+  2. claude-sonnet-4-6       ← fallback
+  3. claude-haiku-4-5        ← fallback; reduced analysis depth
+     (also try the dated form claude-haiku-4-5-20251001 if the bare alias
+     doesn't match — some accounts list only the dated snapshot ID)
 ```
 
-> **Note on `claude-fable-5`:** Fable 5 is intentionally *not* in the Deep chain.
-> Although it is nominally the most capable tier, its post-release guardrails can
-> cause over-cautious hedging or refusal on the concrete attack-path and
-> injection-vector reasoning that Phases 2 and 4b depend on. Opus 4.8 is preferred
-> for this workload. Re-add Fable 5 to the top of the chain only after confirming
-> its security-analysis output is not degraded.
+`claude-fable-5` is **never** in either chain, at any position — see the note
+below. If literally nothing in a chain is available (not even the bottom rung),
+abort with a clear error rather than substitute a Fable-generation model or a
+model from a completely different chain.
 
-> **Vendor mode (`--vendor`) overrides tier resolution.** When `--vendor` is set,
-> both tiers are pinned to `claude-sonnet-4-6` for every phase — no Opus, no
-> Haiku, no chain-walking. If `claude-sonnet-4-6` is not available on the active
-> API tier, abort with a clear error (the mode's contract is "Sonnet only" — do
-> not silently fall back). See [Vendor Mode](#vendor-mode---vendor).
+> **Note on `claude-fable-5`:** Fable 5 is categorically excluded from every
+> chain, permanently, regardless of what else is or isn't available. Its
+> post-release guardrails can cause over-cautious hedging or refusal on the
+> concrete attack-path and injection-vector reasoning that Phases 2 and 4b
+> depend on — this has independent confirmation outside this project (the
+> official Claude Security plugin's own troubleshooting docs note Fable 5
+> activities getting blocked and auto-downgraded to Opus for the same reason).
+> Do not re-add it without the user explicitly confirming the guardrail concern
+> is resolved for that specific model.
+
+> **Note on Sonnet 5 / Opus 5 (2026-07-30):** Earlier revisions of this chain
+> excluded the whole Claude 5 family, including Sonnet 5 and Opus 5, over an
+> *unverified* version of the same guardrail concern. The user has since
+> explicitly confirmed Opus 5 and Sonnet 5 are acceptable — prioritize them as
+> the most capable available model in each tier. This confirmation covers only
+> Opus 5 and Sonnet 5 by name; it does not extend to Fable 5, which remains
+> excluded per the note above.
+
+> **Vendor mode (`--vendor`) overrides tier resolution.** When `--vendor` is
+> set, every phase uses the **resolved Standard tier model** (whatever that
+> chain resolved to — `claude-sonnet-5`, `claude-sonnet-4-6`, or `claude-haiku-4-5`)
+> — no Opus, no chain-walking beyond the Standard chain itself. If the entire
+> Standard chain is unavailable, abort with a clear error (the mode's contract
+> is "Standard tier only, never Deep" — do not silently borrow a Deep-tier
+> model). See [Vendor Mode](#vendor-mode---vendor).
+
+> **Dispatch reality inside an interactive Claude Code session:** when phases
+> are spawned via the session's own subagent-dispatch tool rather than a raw
+> Anthropic API call, model selection is exposed only as a small set of generic
+> family aliases (e.g. `opus` / `sonnet` / `haiku`) plus a reasoning-effort tier
+> — never an exact dated model ID, and never an explicit `thinking` parameter.
+> In that case: resolve the tier as above to know *which family* to request,
+> dispatch with the matching alias (never the alias that maps to Fable),
+> and use effort `"high"` to approximate `thinking: {type: "adaptive"}` for
+> Deep-tier phases. Record what was actually resolved and dispatched in
+> `run-metadata.json → fallback_notes` regardless of which path was used, so a
+> reader can always tell which concrete model produced a given phase's output.
 
 #### Thinking Rules (applied to the resolved model)
 
-| Resolved model | Tier | thinking param |
-|---|---|---|
-| `claude-opus-4-8` | Deep | `thinking: {type: "adaptive"}` |
-| `claude-sonnet-4-6` | Deep (fallback) | omit `thinking` param |
-| `claude-sonnet-4-6` | Standard | omit `thinking` param |
-| `claude-haiku-4-5` | Standard | omit `thinking` param |
+| Resolved model | Tier | thinking param | Agent-tool effort (if no `thinking` param available) |
+|---|---|---|---|
+| `claude-opus-5` | Deep | `thinking: {type: "adaptive"}` | `"high"` |
+| `claude-opus-4-8` | Deep (fallback) | `thinking: {type: "adaptive"}` | `"high"` |
+| `claude-sonnet-5` | Deep (fallback) / Standard | omit `thinking` param | `"medium"` |
+| `claude-sonnet-4-6` | Deep (fallback) / Standard | omit `thinking` param | `"medium"` |
+| `claude-haiku-4-5` | Standard (fallback) | omit `thinking` param | `"medium"` |
 
-> **Never pass `thinking: {type: "disabled"}`** — this returns a 400 on Opus 4.8.
+> **Never pass `thinking: {type: "disabled"}`** — this returns a 400 on Opus.
 > Omit the param entirely when thinking is not wanted.
 
 #### Model Resolution Step
@@ -174,7 +210,7 @@ Standard tier:
 ```
 
 If `claude models list` or the Models API is unavailable, attempt to use
-`claude-opus-4-8` directly. If the first agent call fails with a
+`claude-opus-5` directly. If the first agent call fails with a
 model-not-found error (HTTP 404 / "model not available"), catch the error,
 move to the next model in the chain, and retry once. Record the fallback in
 `run-metadata.json → fallback_notes`.
@@ -187,25 +223,29 @@ move to the next model in the chain, and retry once. Record the fallback in
 ```json
 {
   "vendor_mode": false,
-  "deep_tier_model":   "claude-opus-4-8",
-  "standard_tier_model": "claude-sonnet-4-6",
+  "deep_tier_model":   "claude-opus-5",
+  "standard_tier_model": "claude-sonnet-5",
   "deep_tier_thinking": true,
-  "phase0_model":  "claude-opus-4-8 (only present in multi-repo mode)",
-  "phase1_model":  "claude-sonnet-4-6",
-  "phase2_model":  "claude-opus-4-8",
-  "phase2b_model": "claude-opus-4-8 (only present when Phase 2 had in-scope findings)",
-  "phase3_model":  "claude-sonnet-4-6",
-  "phase4_model":  "claude-sonnet-4-6",
-  "phase4b_model": "claude-opus-4-8 (only present when has_skill_files: true)",
-  "phase5_model":  "claude-sonnet-4-6",
-  "phase6_model":  "claude-sonnet-4-6",
-  "phase7_model":  "claude-opus-4-8 (only present in multi-repo mode)",
-  "fallback_notes": "Deep tier: claude-opus-4-8 not available, using claude-sonnet-4-6"
+  "phase0_model":  "claude-opus-5 (only present in multi-repo mode)",
+  "phase1_model":  "claude-sonnet-5",
+  "phase2_model":  "claude-opus-5",
+  "phase2b_model": "claude-opus-5 (only present when Phase 2 had in-scope findings)",
+  "phase3_model":  "claude-sonnet-5",
+  "phase4_model":  "claude-sonnet-5",
+  "phase4b_model": "claude-opus-5 (only present when has_skill_files: true)",
+  "phase5_model":  "claude-sonnet-5",
+  "phase6_model":  "claude-sonnet-5",
+  "phase7_model":  "claude-opus-5 (only present in multi-repo mode)",
+  "fallback_notes": "Deep tier: claude-opus-5 not available on this account, using claude-opus-4-8"
 }
 ```
 
 `fallback_notes` is omitted when no fallback was needed. Phase 6 reads it and
 includes a one-line notice in the verbose report header when it is present.
+When phases are dispatched via the session's own subagent tool rather than a
+raw API call (see "Dispatch reality" note above), also record in
+`fallback_notes` which generic alias and effort tier were actually used, so the
+resolved model name and the dispatch mechanism are never in question together.
 
 **When spawning each phase subagent**, use the resolved model ID from
 `run-metadata.json` in the agent description:
@@ -331,12 +371,13 @@ Phases that still run: **Phase 2** (architecture — still produces the
 detected; vendor AI tools are a prime case), **Phase 5** (validation only), and
 **Phase 6** (vendor report). The skill-repo auto-skip cascade still applies.
 
-**2. Model pinned to Sonnet.** Every phase uses `claude-sonnet-4-6` regardless
-of the Deep/Standard fallback chains — no Opus, no Haiku, no chain-walking.
-Write every `*_model` field in `run-metadata.json` as `claude-sonnet-4-6`, set
-`deep_tier_thinking: false`, and set `vendor_mode: true`. If `claude-sonnet-4-6`
-is unavailable on the active API tier, abort with a clear error — do not fall
-back (the mode's contract is "Sonnet only").
+**2. Model pinned to the Standard tier.** Every phase uses the **resolved
+Standard tier model** (walk only the Standard chain — `claude-sonnet-5` →
+`claude-sonnet-4-6` → `claude-haiku-4-5`; never the Deep chain, no Opus). Write
+every `*_model` field in `run-metadata.json` as that resolved model, set
+`deep_tier_thinking: false`, and set `vendor_mode: true`. If the entire Standard
+chain is unavailable, abort with a clear error — do not fall back to Deep (the
+mode's contract is "Standard tier only, never Opus").
 
 **3. Report format.** The orchestrator passes `--vendor` to Phase 6, which
 produces the vendor report (see `references/phase6-report.md` → Vendor Report).

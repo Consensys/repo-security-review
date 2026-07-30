@@ -672,7 +672,8 @@ Investigated and ruled out — included so the assessment's rigor is visible:
 - **File coverage.** {Read `phase2-architecture.json → coverage`. If `not_read`
   is non-empty or any `coverage.directories` entry has `read: 0`, name what was
   not fully read and why — an un-read directory is a broader gap than one file.}
-- **Model**: `claude-sonnet-4-6` (vendor mode pins all phases to Sonnet).
+- **Model**: `{standard_tier_model}` (vendor mode pins all phases to the
+  resolved Standard tier model — never Opus).
 
 {If `--verbose` is also set, append the `## Coverage & Tools` appendix from the
 verbose structure here, including its Coverage limitations bullets.}

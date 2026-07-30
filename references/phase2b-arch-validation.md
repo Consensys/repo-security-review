@@ -64,10 +64,10 @@ scratch for every finding.** Do not assume Phase 2 was correct.
 ## Model
 
 Use the resolved Deep tier model (`{deep_tier_model}`, normally
-`claude-opus-4-8`) with `thinking: {type: "adaptive"}` — refutation requires
+`claude-opus-5`) with `thinking: {type: "adaptive"}` — refutation requires
 reasoning about where a control *would* live and confirming it is absent
-everywhere it could be. In `--vendor` mode the model is pinned to
-`claude-sonnet-4-6` like every other phase.
+everywhere it could be. In `--vendor` mode the model is pinned to the resolved
+Standard tier model like every other phase.
 
 > `claude-fable-5` is intentionally excluded from the Deep chain — see SKILL.md →
 > Fallback Chains.
