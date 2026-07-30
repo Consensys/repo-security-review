@@ -72,7 +72,6 @@ It also responds to natural-language requests like *"run a security review on ~/
 | `--verbose` | off | Full detailed report (OWASP checks inventory, remediation-priority section, appendix). |
 | `--runtime` | off | Stand the app up in Docker and run each confirmed PoC against it. |
 | `--vendor` | off | Third-party adoption audit. Skips secrets/dependencies/PoC, pins all phases to Sonnet, and produces an adoption-risk report (verdict + conditions + "what it does" + adopter-side controls). |
-| `--stride` | off | Opt-in threat modeling in Phase 2 (data-flow & trust model + STRIDE sweep). For your own repos; ignored with `--vendor`. |
 | `--context <pairs>` | none | Inline threat model to calibrate severity: `deployment_target=local\|public`, `auth_required_to_reach=true\|false`. Softens only — never sharpens. |
 | `--yes` | off | Non-interactive / CI mode — auto-confirms prompts (safety path checks still apply). |
 | `--debug` | off | Write `.security-review/execution-log.md` showing how the file-reading phases actually ran. |

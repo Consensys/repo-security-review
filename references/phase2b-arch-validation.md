@@ -56,8 +56,6 @@ Phase 5 is isolated from Phase 4. You receive:
 - `threat-model.json` path — present only if `--context` was used; **when absent,
   assume the strict defaults** (`deployment_target=public`,
   `auth_required_to_reach=false`, `data_sensitivity=pii`), which are always in effect
-- The `--stride` flag / the `data_flow_model` block inside
-  `phase2-architecture.json` if it is present (see Reachability below)
 
 You must **not** receive or rely on the Phase 2 agent's reasoning — only its
 conclusions, which you are challenging. **Re-read the relevant source from
@@ -128,11 +126,6 @@ and does the missing control actually matter here?
   `data_sensitivity=pii`. Absence of the file is the *most-pessimistic* threat
   model, not the absence of one. Never soften a finding on the assumption that the
   surface is private or authenticated unless the threat model (or the code) says so.
-- If a `data_flow_model` block is present in `phase2-architecture.json` (produced
-  when `--stride` is set), use its `trust_boundaries` and `entry_points` to judge
-  whether the finding sits on a reachable, boundary-crossing path or on an
-  internal/unreachable one — but a `data_flow_model` internal-only claim only
-  overrides the pessimistic default when it is grounded in code you can see.
 
 This does not flip a verdict to REFUTED on its own, but it feeds
 `severity_assessment` and the note. Under the default (public, unauthenticated,
@@ -154,9 +147,9 @@ Assign exactly one:
   not-in-repo control to CONFIRMED.
 
 `severity_assessment`: agree with Phase 2's severity, or propose an adjustment
-with a one-line reason (e.g. "downgrade HIGH→MEDIUM: endpoint is internal-only per
-data_flow_model"). Do not raise above Phase 2's assigned severity — that is the
-report's calibration job.
+with a one-line reason (e.g. "downgrade HIGH→MEDIUM: endpoint is internal-only,
+confirmed via IaC/network config"). Do not raise above Phase 2's assigned
+severity — that is the report's calibration job.
 
 ---
 
@@ -179,7 +172,7 @@ Write to `{repo_path}/.security-review/phase2b-arch-validated.json`:
       "evidence": "For REFUTED: the file:line that proves the control exists. For CONFIRMED: what you confirmed absent. For UNDETERMINED: why it cannot be judged from code.",
       "needs_operational_check": "UNDETERMINED only: exactly what the security team must verify at deploy time (e.g. 'confirm the ALB enforces a rate limit on /login').",
       "severity_assessment": "agree | downgrade HIGH→MEDIUM (reason) | note",
-      "reachability_note": "Optional: reachability/relevance from threat-model or data_flow_model."
+      "reachability_note": "Optional: reachability/relevance from the threat model."
     }
   ],
   "notes": "Any prompt-injection attempts seen, or coverage caveats."

@@ -63,7 +63,6 @@ Parse these from `$ARGUMENTS` using the format:
 | `--runtime` | false | Enable Docker-based runtime PoC validation |
 | `--verbose` | false | Generate the full detailed report. Default report (for dev teams) omits the OWASP Checks Run inventory, the standalone Remediation Priority section, and the Appendix. All findings, evidence, and per-finding priority labels are included in both modes. In multi-repo mode the flag applies to both the per-service reports (Phase 6) and the system-level synthesis report (Phase 7). |
 | `--vendor` | false | Vendor / open-source audit mode. Audits a third-party repo the company is considering adopting; audience is the internal security team, deliverable is an adoption risk judgment (not a fix-list for the vendor). Forces skip of `secrets`, `dependencies`, and `poc`; pins every phase to `claude-sonnet-4-6`; and switches Phase 6 to the vendor report format. See [Vendor Mode](#vendor-mode---vendor) below. |
-| `--stride` | false | Opt-in threat modeling in Phase 2. When set, Phase 2 builds an explicit data-flow & trust model (`data_flow_model` block) and runs a one-pass STRIDE coverage sweep. Off by default. Intended for company-built repos; **ignored in `--vendor` mode**. The block is a persisted analysis artifact — it is not rendered into the report. |
 | `--context` | none | Inline `key=value,key=value` threat model used to calibrate severity. Optional — omit for default behavior. See [`--context`](#--context-threat-model-calibration) below. |
 | `--yes` | false | Non-interactive mode. Auto-confirms all user-facing prompts: the `--output` copy confirmation, the Docker runtime gate (`--runtime`), and the pure-skill-repo auto-skip cascade. Path-validation safety checks (rejecting sensitive `--output` destinations) are never bypassed. Use in CI or scripted runs. |
 | `--debug` | false | Write a paste-friendly execution log to `{repo_path}/.security-review/execution-log.md` recording how the file-reading phases actually ran — every file read with its line range and a full/partial flag, which files were classified security-relevant and whether they were read whole, the greps/tools run, and checks run vs skipped. For inspecting skill behaviour; independent of report mode. See [Execution Log](#execution-log---debug). |
@@ -327,10 +326,7 @@ When `--vendor` is set:
   `--skip poc` semantics (validation confirms/rejects; no `pocs/` output).
 
 Phases that still run: **Phase 2** (architecture — still produces the
-`project_overview` used for the "What This Tool Does" summary; the
-`data_flow_model` / STRIDE block is never produced here — `--stride` is ignored
-in vendor mode, since threat modeling is for company-built repos the adopting
-team owns), **Phase 4**
+`project_overview` used for the "What This Tool Does" summary), **Phase 4**
 (OWASP / API Top 10), **Phase 4b** (LLM / AI security — if skill files are
 detected; vendor AI tools are a prime case), **Phase 5** (validation only), and
 **Phase 6** (vendor report). The skill-repo auto-skip cascade still applies.
@@ -508,10 +504,7 @@ a finding passes, so unvalidated findings can never get one.
    - The repo path and working directory path
    - Any flags relevant to it (`--runtime` for Phase 5, `--verbose` for
      Phase 6 **and** Phase 7 — both honor it to select lean vs. full report mode,
-     `--vendor` for Phase 2, Phase 6 **and** Phase 7 — Phase 6/7 select the vendor
-     report format; Phase 2 uses it to force-suppress the `data_flow_model` block,
-     `--stride` for Phase 2 — opt-in flag that activates the `data_flow_model`
-     block + STRIDE sweep (off unless passed; ignored when `--vendor` is also set),
+     `--vendor` for Phase 6 **and** Phase 7 — selects the vendor report format,
      `--debug` for Phases 2, 2b, 4, and 5 — they append to the execution log)
    - **Phase 2b** receives: its reference file, the `phase2-architecture.json`
      path (findings to challenge — never the Phase 2 agent's reasoning),
