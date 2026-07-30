@@ -38,8 +38,21 @@ set, and never let logging change which files you read or checks you run.
 - If absent (Phase 2 was skipped), run the lightweight detection from
   `phase2-architecture.md` Step 0 to reconstruct it before continuing.
 
-**phase2-architecture.json** (optional — improves prioritization):
-- Read if present: used for auth model context and known weak areas.
+**phase2-architecture.json** (optional — improves prioritization and cuts
+re-derivation cost):
+- Read if present: used for auth model context and known weak areas, **and**
+  reuse `project_overview` (`trust_posture`, `external_interfaces`,
+  `data_handled`) and `coverage.security_relevant_files` as established facts.
+  Don't re-derive "what's the auth mechanism here" or "is this file
+  security-relevant" per category/per match when Phase 2 already answered it —
+  apply that context directly. This is reuse of **facts Phase 2 already spent
+  tokens establishing**, not its findings or conclusions: still independently
+  analyze every match under each OWASP category from scratch, and still run
+  Semgrep and every category's greps across the whole repo regardless — this
+  is a context shortcut and a triage-ordering aid, never a scope restriction.
+  If a match falls outside Phase 2's `security_relevant_files` list, that is
+  not a reason to skip it; Phase 2's inventory is a prioritization head start,
+  not a ceiling (it can itself under-count — see its own `not_read` field).
 - If absent (Phase 2 was skipped), continue without it. Note in output:
   `"architecture_context": "unavailable — Phase 2 was skipped"`.
   All OWASP checks still run; the analysis loses Phase 2's signal on
@@ -185,6 +198,28 @@ Log the outcome:
 | `ALL_FINDING_KEYS` | empty set | Dedup keys: `(file, line_start, vulnerability_type)` |
 | `NEW_THIS_ROUND` | 0 | New findings added in the current round |
 
+**Durability — persist this state to disk, don't rely on conversational
+memory across rounds.** A multi-pass run (up to 3 rounds, potentially hundreds
+of files) is exactly the kind of long-running work a context-compaction event
+can hit mid-loop; a compacted summary is unlikely to precisely reconstruct
+"which exact files were covered" or the finding objects already accumulated.
+Write `{repo_path}/.security-review/.phase4-multipass-state.json` after every
+round:
+```json
+{
+  "round": 2,
+  "dry_rounds": 0,
+  "covered_files": ["src/a.go", "src/b.go"],
+  "finding_keys": ["src/a.go:42:sql-injection"],
+  "findings_so_far": [ /* full finding objects accumulated across all rounds so far */ ]
+}
+```
+At the start of **every** round (including round 1, in case a prior attempt at
+this phase left state behind), read this file if it exists and resume from its
+values instead of trusting only what's in context. This makes each round begin
+from a disk-verified state regardless of whether compaction touched the
+conversation in between.
+
 **Each round:**
 
 1. Run Steps 2 and 3.
@@ -197,7 +232,10 @@ Log the outcome:
 2. Count findings whose `(file, line_start, vulnerability_type)` key is not
    already in `ALL_FINDING_KEYS` → set `NEW_THIS_ROUND`.
 
-3. Update `COVERED_FILES` and `ALL_FINDING_KEYS` with this round's results.
+3. Update `COVERED_FILES`, `ALL_FINDING_KEYS`, and `findings_so_far` with this
+   round's results, then **immediately overwrite
+   `.phase4-multipass-state.json` with the updated state** — do not defer this
+   write until the loop ends.
 
 4. Log the round outcome:
    ```
@@ -214,9 +252,13 @@ Log the outcome:
 
 7. Otherwise increment `ROUND` and repeat from step 1.
 
-Merge all rounds into a single `findings` array. Deduplicate by
-`(file, line_start, vulnerability_type)` — keep the entry with the higher severity
-if the same location appears in multiple rounds.
+Build the final `findings` array from `.phase4-multipass-state.json →
+findings_so_far` (its content already reflects every round, deduplicated as
+each round updated it) — not from an in-context recollection of all rounds.
+Deduplicate by `(file, line_start, vulnerability_type)` — keep the entry with
+the higher severity if the same location appears more than once. Delete
+`.phase4-multipass-state.json` after `phase4-owasp.json` is written
+successfully; it is working state, not a report artifact.
 
 ## Step 2: Run Semgrep (scoped to relevant rules)
 

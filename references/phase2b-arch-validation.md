@@ -61,6 +61,18 @@ You must **not** receive or rely on the Phase 2 agent's reasoning — only its
 conclusions, which you are challenging. **Re-read the relevant source from
 scratch for every finding.** Do not assume Phase 2 was correct.
 
+**Token-efficiency note — this is validation, not discovery.** Phase 2's "read
+every security-relevant file in full" rule exists because *discovery* doesn't
+yet know where risk lives. You don't have that problem: Phase 2 already gave
+you a specific finding to challenge. Read the code the finding cites and its
+neighbourhood in the targeted, bounded sense the compensating-control hunt
+below actually needs (the module, its base classes, the router/bootstrap
+file) — not an entire large file top-to-bottom when only a bounded region is
+relevant. This does **not** bound where you *search* for a compensating
+control (§2 below still means searching middleware, IaC, gateway config,
+wherever the control could plausibly live) — it bounds exhaustive reading of
+one large file end-to-end once you're actually looking at it.
+
 ## Model
 
 Use the resolved Deep tier model (`{deep_tier_model}`, normally
@@ -85,6 +97,18 @@ searched for the compensating control, the verdict, and the one-line reason. If
 ## Validation Protocol (per in-scope finding)
 
 Run all four steps in order. Do not short-circuit.
+
+**Durability — write each finding's verdict to disk as soon as you reach it,
+don't hold the set in memory for a single terminal write.** A repo with many
+in-scope findings makes this loop exactly the kind of long-running work a
+context-compaction event can hit mid-way through; a compacted summary is
+unlikely to precisely reconstruct a verdict, its `searched` list, and its
+evidence from several findings ago. Before processing the first finding,
+initialize `phase2b-arch-validated.json` with an empty `validations` array and
+a zeroed `summary`. After **every** finding's verdict (step 4 complete for
+it), immediately read-modify-write the file: append that finding's full
+record to `validations` and update the running `summary` counts. Do this
+before moving to the next finding.
 
 ### 1. Independent re-derivation
 
@@ -155,7 +179,9 @@ severity — that is the report's calibration job.
 
 ## Output Format
 
-Write to `{repo_path}/.security-review/phase2b-arch-validated.json`:
+Built incrementally during the validation loop (see "Durability" above) — by
+the time the loop ends, `phase2b-arch-validated.json` is already complete.
+This section documents its final shape, not a new write step.
 
 ```json
 {

@@ -104,8 +104,14 @@ Two tiers are used across all phases:
 
 | Tier | Used by | Purpose |
 |------|---------|---------|
-| **Deep** | Phase 0, 2, 4b, 7 | Extended reasoning: architecture, LLM security, cross-repo synthesis |
-| **Standard** | Phase 1, 3, 4, 5, 6 | Focused analysis: secrets, CVEs, OWASP, validation, report |
+| **Deep** | Phase 2, 4b, 7 | Extended reasoning: architecture, LLM security, cross-repo synthesis |
+| **Standard** | Phase 0, 1, 3, 4, 5, 6 | Focused analysis: topology extraction, secrets, CVEs, OWASP, validation, report |
+
+> **Phase 0 uses Standard, not Deep.** Topology mapping is structural extraction
+> (parsing docker-compose/k8s/OpenAPI/proto files into a service graph), not
+> security judgment — the judgment happens downstream in Phase 7, which stays
+> on Deep tier. Moved off Deep tier (2026-07-30) as a token-efficiency measure;
+> revisit if multi-repo topology quality regresses.
 
 #### Fallback Chains
 
@@ -226,7 +232,7 @@ move to the next model in the chain, and retry once. Record the fallback in
   "deep_tier_model":   "claude-opus-5",
   "standard_tier_model": "claude-sonnet-5",
   "deep_tier_thinking": true,
-  "phase0_model":  "claude-opus-5 (only present in multi-repo mode)",
+  "phase0_model":  "claude-sonnet-5 (only present in multi-repo mode)",
   "phase1_model":  "claude-sonnet-5",
   "phase2_model":  "claude-opus-5",
   "phase2b_model": "claude-opus-5 (only present when Phase 2 had in-scope findings)",
@@ -606,6 +612,10 @@ Each phase writes its findings to a working directory inside the repo:
 ├── phase3-cves.json
 ├── phase3b-reachability.json
 ├── phase4-owasp.json
+├── .phase4-multipass-state.json ← transient; only exists mid-run if multi-pass
+│                                   was triggered, deleted once phase4-owasp.json
+│                                   is written. Present only if a run was
+│                                   interrupted mid-multi-pass.
 ├── phase-llm-security.json   ← only if has_skill_files: true
 ├── phase5-validated.json
 ├── phase5-pocs.json

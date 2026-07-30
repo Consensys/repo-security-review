@@ -34,6 +34,18 @@ You must be isolated from Phase 2 and Phase 4's agent context. You receive:
 Re-read the relevant source code from scratch for each finding. Do not
 assume Phase 4 was correct. Your validation must be independent.
 
+**Token-efficiency note — this is validation, not discovery.** Phase 2's
+"read every security-relevant file in full" rule exists because *discovery*
+doesn't yet know where risk lives — skipping a file there can mean missing it
+entirely. You don't have that problem: Phase 4 already gave you a specific
+file:line target. Read the **targeted scope** — the function/handler, its
+direct callers and callees, and any middleware/config that could plausibly
+apply — not an entire large file top-to-bottom when only a bounded region is
+relevant to this finding. This does **not** relax Step 2's mitigation hunt below:
+searching broadly (grepping other files, tracing into shared middleware) for a
+compensating control is still required. The bound is on exhaustively reading
+one large file end-to-end, not on how far you search for a mitigation.
+
 **The PoC gate is structural**: you only write a PoC immediately after a
 finding passes validation within the same reasoning chain. A finding that
 fails validation gets no PoC — ever. There is no separate step where PoCs
@@ -74,6 +86,21 @@ Step 4 is evaluated independently for each finding — Docker is only started if
 at least one confirmed finding actually warrants runtime validation. See
 "Runtime Value Assessment" below. Steps 3 and 4 are both suppressed when
 `--skip poc` is set.
+
+**Step 5, "WRITE OUTPUTS," means write to disk now, not hold in memory for a
+single terminal write.** A repo with many candidate findings makes this loop
+exactly the kind of long-running work a context-compaction event can hit
+mid-way through; a compacted summary is unlikely to precisely reconstruct a
+finding's full validated record (data flow, mitigations checked, PoC content)
+established several findings ago. Before processing the first finding,
+initialize `phase5-validated.json` with an empty `findings` array and a
+zeroed `summary`, and `phase5-pocs.json` with an empty `pocs` array. After
+**every** finding's decision (steps 1–4 complete for it), immediately
+read-modify-write both files: append that finding's full record (schema
+below) to `findings`, update the running `summary` counts, and — if a PoC was
+generated — append its entry to `phase5-pocs.json → pocs`. Do this before
+moving to the next finding, not deferred to a final pass at the end of the
+loop.
 
 ---
 
@@ -756,6 +783,11 @@ other two fields are absent.
 ---
 
 ## Output
+
+Both files below are built **incrementally** during the per-finding loop (see
+"Step 5, WRITE OUTPUTS" above), not assembled in memory and written once here.
+By the time the loop ends, both are already complete — this section documents
+their final shape, not a new write step.
 
 ### phase5-validated.json
 ```json
