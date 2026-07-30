@@ -109,16 +109,13 @@ flowchart TD
     end
 
     P4b -. file path only .-> P5
-    P2 -. file path only .-> P2b
 
     subgraph JUDGMENT["JUDGMENT LAYER (isolated context)"]
-        P2b[Phase 2b · Architectural Validation<br/>re-validates trust_boundary / auth_model / missing_control<br/>by refutation · CONFIRMED / REFUTED / UNDETERMINED · no PoC]
         P5[Phase 5 · Validate + PoC<br/>re-validates Phase 4 findings only<br/>PoCs only for confirmed findings<br/>optional Docker runtime]
     end
 
     P1 --> R[Phase 6 · Report Builder]
     P2 --> R
-    P2b --> R
     P3b --> R
     P4b --> R
     P5 --> R
@@ -129,7 +126,7 @@ flowchart TD
     classDef report fill:#e8f5e9,stroke:#5a9a5a,color:#1a1a1a
     classDef store fill:#f5f5f5,stroke:#888,color:#1a1a1a,stroke-dasharray: 3 3
     class P1,P2,P3,P3b,P4,P4b finder
-    class P2b,P5 judgment
+    class P5 judgment
     class R report
     class TS store
 ```

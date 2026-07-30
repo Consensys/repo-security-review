@@ -235,7 +235,6 @@ move to the next model in the chain, and retry once. Record the fallback in
   "phase0_model":  "claude-sonnet-5 (only present in multi-repo mode)",
   "phase1_model":  "claude-sonnet-5",
   "phase2_model":  "claude-opus-5",
-  "phase2b_model": "claude-opus-5 (only present when Phase 2 had in-scope findings)",
   "phase3_model":  "claude-sonnet-5",
   "phase4_model":  "claude-sonnet-5",
   "phase4b_model": "claude-opus-5 (only present when has_skill_files: true)",
@@ -256,7 +255,6 @@ resolved model name and the dispatch mechanism are never in question together.
 **When spawning each phase subagent**, use the resolved model ID from
 `run-metadata.json` in the agent description:
 - Phase 2: `"Phase 2: Architectural analysis ({deep_tier_model} + extended thinking)"`
-- Phase 2b: `"Phase 2b: Architectural validation ({deep_tier_model} + extended thinking)"`
 - Other phases: `"Phase N: {phase name} ({standard_tier_model})"`
 
 ### --context: Threat-Model Calibration
@@ -412,13 +410,6 @@ Phase 1  → Secret Scanning              [skippable: --skip secrets]
 Phase 2  → Architectural Analysis       [skippable: --skip architecture]
            └─ Produces: tech_stack profile used by Phase 3 and Phase 4
            └─ Sets has_skill_files and is_skill_repo in tech-stack.json
-Phase 2b → Architectural Validation     [runs after Phase 2, not separately skippable]
-           └─ Judgment-layer agent, isolated from the Phase 2 finder
-           └─ Validates by refutation (compensating-control hunt), no PoC
-           └─ Scope: ONLY trust_boundary, auth_model, missing_control findings
-           └─ Verdicts: CONFIRMED / REFUTED / UNDETERMINED → phase2b-arch-validated.json
-           └─ AUTO-SKIPPED when Phase 2 produced no in-scope findings
-           └─ Skipped when --skip architecture (no Phase 2 output to validate)
 Phase 3  → Dependency CVE Scanning      [skippable: --skip dependencies]
            └─ Uses tech_stack from Phase 2 to select correct package ecosystems
            └─ AUTO-SKIPPED when is_skill_repo: true (no package deps in skill repos)
@@ -482,8 +473,6 @@ For each repo in --repos (run all phases for repo N before starting repo N+1):
   Phase 1  → Secret Scanning            [skippable: --skip secrets]
   Phase 2  → Architectural Analysis     [skippable: --skip architecture]
              └─ Receives service-topology.json for system-level context
-  Phase 2b → Architectural Validation   [runs after Phase 2, not separately skippable]
-             └─ Validates trust_boundary/auth_model/missing_control by refutation
   Phase 3  → Dependency CVE Scanning    [skippable: --skip dependencies]
   Phase 3b → Reachability Validation
   Phase 4  → Code-Level OWASP Analysis  [skippable: --skip owasp]
@@ -516,17 +505,12 @@ output manipulation, and excessive agency triggered by hostile repo content.
 
 **Boundary 2 — Finder agents → judgment layer (inter-agent context boundary)**
 The finder layer (Phase 2, Phase 4) is isolated from the judgment layer
-(Phase 2b, Phase 5) by passing only file paths between them. Each judgment agent
-reads its inputs as "untrusted data from a potentially overly-confident finder"
-and re-validates from scratch. **Phase 5** validates Phase 4's code-level findings
-by attempting to disprove then exploit them (PoC). **Phase 2b** validates Phase 2's
-high-false-positive architectural findings (`trust_boundary`, `auth_model`,
-`missing_control`) by refutation — hunting for the compensating control the
-finding claims is absent — with no PoC and a three-state verdict (CONFIRMED /
-REFUTED / UNDETERMINED). This boundary defends against a confident but wrong
-finder contaminating the report. For Phase 5, the PoC gate is additionally
-structural: a PoC is written immediately after a finding passes validation, so
-unvalidated findings can never get one.
+(Phase 5) by passing only file paths between them. Phase 5 reads its inputs
+as "untrusted data from a potentially overly-confident finder" and re-validates
+from scratch. This boundary defends against a confident but wrong finder
+contaminating the PoC gate. PoC generation is structural: a PoC is written
+immediately after a finding passes validation, so unvalidated findings can
+never get one.
 
 > ⚠️ **Important**: Boundary 2 does **not** protect against Boundary 1 attacks.
 > Phase 5 still directly reads target-repo source files for independent
@@ -552,17 +536,12 @@ a finding passes, so unvalidated findings can never get one.
    - Any flags relevant to it (`--runtime` for Phase 5, `--verbose` for
      Phase 6 **and** Phase 7 — both honor it to select lean vs. full report mode,
      `--vendor` for Phase 6 **and** Phase 7 — selects the vendor report format,
-     `--debug` for Phases 2, 2b, 4, and 5 — they append to the execution log)
-   - **Phase 2b** receives: its reference file, the `phase2-architecture.json`
-     path (findings to challenge — never the Phase 2 agent's reasoning),
-     `tech-stack.json`, `threat-model.json` (if `--context` was used), and the
-     repo path. It re-reads code independently.
+     `--debug` for Phases 2, 4, and 5 — they append to the execution log)
 
 3. **The orchestrator's only job** is sequencing, path management, and
    printing progress summaries. It must not accumulate findings across phases.
 
-4. **The mandatory isolation boundary is between finders and the judgment layer
-   (Phase 4→5, and Phase 2→2b):**
+4. **The mandatory isolation boundary is between Phase 4 and Phase 5:**
 
    ```
    ┌─ FINDER LAYER (independent from judgment layer) ──────────────────┐
@@ -571,9 +550,6 @@ a finding passes, so unvalidated findings can never get one.
    └────────────────────────────────────────────────────────────────────┘
                               ↓ file path only
    ┌─ JUDGMENT LAYER (isolated from finder context) ───────────────────┐
-   │  Phase 2b agent: reads phase2-architecture.json as untrusted input│
-   │                  refutes in-scope arch findings from scratch       │
-   │                  → writes phase2b-arch-validated.json     → CLOSES │
    │  Phase 5 agent:  reads phase4-owasp.json as untrusted input       │
    │                  validates each finding from scratch               │
    │                  writes PoC immediately on CONFIRMED               │
@@ -588,7 +564,6 @@ Read the agent instructions for each phase from `references/` before spawning:
 | 0 (Topology) | `references/phase0-topology.md` | multi-repo only |
 | 1 | `references/phase1-secrets.md` | always |
 | 2 | `references/phase2-architecture.md` | always |
-| 2b (Arch Validation) | `references/phase2b-arch-validation.md` | when Phase 2 has in-scope findings |
 | 3 + 3b | `references/phase3-dependencies.md` | always |
 | 4 | `references/phase4-owasp.md` | always |
 | 4b (LLM Security) | `references/phase-llm-security.md` | when `has_skill_files: true` |
@@ -608,7 +583,6 @@ Each phase writes its findings to a working directory inside the repo:
 ├── threat-model.json         ← only if --context was provided
 ├── phase1-secrets.json
 ├── phase2-architecture.json
-├── phase2b-arch-validated.json ← only if Phase 2 had in-scope arch findings
 ├── phase3-cves.json
 ├── phase3b-reachability.json
 ├── phase4-owasp.json
