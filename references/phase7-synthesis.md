@@ -11,7 +11,7 @@ completed for every repo in `--repos`.**
 
 ## Model
 
-Use the resolved Deep tier model (`{deep_tier_model}`, normally `claude-opus-5`)
+Use the resolved Deep tier model (`{deep_tier_model}`, normally `claude-opus-4-8`)
 with `thinking: {type: "adaptive"}`. This phase requires multi-document,
 cross-hypothesis reasoning: connecting separate per-service findings to identify
 emergent vulnerabilities. Adaptive thinking is essential.

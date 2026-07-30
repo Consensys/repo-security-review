@@ -120,59 +120,59 @@ API key / account tier.
 
 ```
 Deep tier:
-  1. claude-opus-5           ← preferred; most capable, adaptive thinking supported
-  2. claude-opus-4-8         ← fallback if Opus 5 is unavailable on this account
-  3. claude-sonnet-5         ← fallback if no Opus generation is available at all
-  4. claude-sonnet-4-6       ← last-resort fallback; no thinking for deep tier
+  1. claude-opus-4-8         ← preferred; adaptive thinking supported
+  2. claude-sonnet-4-6       ← fallback; no thinking for deep tier
 
 Standard tier:
-  1. claude-sonnet-5         ← preferred
-  2. claude-sonnet-4-6       ← fallback
-  3. claude-haiku-4-5        ← fallback; reduced analysis depth
-     (also try the dated form claude-haiku-4-5-20251001 if the bare alias
-     doesn't match — some accounts list only the dated snapshot ID)
+  1. claude-sonnet-4-6       ← preferred
+  2. claude-haiku-4-5        ← fallback; reduced analysis depth
 ```
 
-`claude-fable-5` is **never** in either chain, at any position — see the note
-below. If literally nothing in a chain is available (not even the bottom rung),
-abort with a clear error rather than substitute a Fable-generation model or a
-model from a completely different chain.
+Neither `claude-fable-5` nor any other Claude 5-generation model
+(`claude-sonnet-5`, `claude-opus-5`) is in either chain, at any position — see
+the note below. **If literally nothing in a chain is available (not even the
+bottom rung), abort with a clear error.** Do not substitute a model from a
+different generation or a different chain, and do not silently fall through to
+Claude 5 — this is a deliberate, explicit choice (2026-07-30): the chain ends
+at 4.x/Haiku, full stop. In an account/environment where none of these IDs are
+listed, the correct behavior is to abort, not to keep the skill running on a
+substitute the chain doesn't name.
 
-> **Note on `claude-fable-5`:** Fable 5 is categorically excluded from every
-> chain, permanently, regardless of what else is or isn't available. Its
+> **Note on Claude 5 (`claude-sonnet-5`, `claude-opus-5`, `claude-fable-5`):**
+> Excluded from both chains, no fallback rung, by explicit user decision. This
+> reverses an brief same-day experiment (2026-07-30) that had prioritized
+> Sonnet 5 / Opus 5 as "most capable" — the user reconsidered and asked for a
+> literal reversion to the 4.x/Haiku-only chain, explicitly accepting that this
+> means the skill aborts in any account/environment where 4.x isn't available
+> (confirmed to be the case in at least one real account that same day). Fable
+> 5 specifically also carries an independent, stronger guardrail concern: its
 > post-release guardrails can cause over-cautious hedging or refusal on the
-> concrete attack-path and injection-vector reasoning that Phases 2 and 4b
-> depend on — this has independent confirmation outside this project (the
-> official Claude Security plugin's own troubleshooting docs note Fable 5
-> activities getting blocked and auto-downgraded to Opus for the same reason).
-> Do not re-add it without the user explicitly confirming the guardrail concern
-> is resolved for that specific model.
-
-> **Note on Sonnet 5 / Opus 5 (2026-07-30):** Earlier revisions of this chain
-> excluded the whole Claude 5 family, including Sonnet 5 and Opus 5, over an
-> *unverified* version of the same guardrail concern. The user has since
-> explicitly confirmed Opus 5 and Sonnet 5 are acceptable — prioritize them as
-> the most capable available model in each tier. This confirmation covers only
-> Opus 5 and Sonnet 5 by name; it does not extend to Fable 5, which remains
-> excluded per the note above.
+> concrete attack-path and injection-vector reasoning Phases 2 and 4b depend
+> on — corroborated outside this project by the official Claude Security
+> plugin's own troubleshooting docs, which note Fable 5 activities getting
+> blocked and auto-downgraded to Opus for the same reason.
+> **Do not re-add any Claude 5-generation model to either chain without the
+> user explicitly asking again.**
 
 > **Vendor mode (`--vendor`) overrides tier resolution.** When `--vendor` is
 > set, every phase uses the **resolved Standard tier model** (whatever that
-> chain resolved to — `claude-sonnet-5`, `claude-sonnet-4-6`, or `claude-haiku-4-5`)
-> — no Opus, no chain-walking beyond the Standard chain itself. If the entire
-> Standard chain is unavailable, abort with a clear error (the mode's contract
-> is "Standard tier only, never Deep" — do not silently borrow a Deep-tier
-> model). See [Vendor Mode](#vendor-mode---vendor).
+> chain resolved to — `claude-sonnet-4-6` or `claude-haiku-4-5`) — no Opus, no
+> chain-walking beyond the Standard chain itself. If the entire Standard chain
+> is unavailable, abort with a clear error (the mode's contract is "Standard
+> tier only, never Deep" — do not silently borrow a Deep-tier model). See
+> [Vendor Mode](#vendor-mode---vendor).
 
 > **Dispatch reality inside an interactive Claude Code session:** when phases
 > are spawned via the session's own subagent-dispatch tool rather than a raw
 > Anthropic API call, model selection is exposed only as a small set of generic
 > family aliases (e.g. `opus` / `sonnet` / `haiku`) plus a reasoning-effort tier
 > — never an exact dated model ID, and never an explicit `thinking` parameter.
-> In that case: resolve the tier as above to know *which family* to request,
-> dispatch with the matching alias (never the alias that maps to Fable),
-> and use effort `"high"` to approximate `thinking: {type: "adaptive"}` for
-> Deep-tier phases. Record what was actually resolved and dispatched in
+> Note that these generic aliases resolve to whichever model is *currently*
+> canonical for that family on the active account — which may not be the 4.x
+> snapshot this chain names. If the alias-resolved model is Claude 5-generation
+> and the account has no way to pin the 4.x snapshot directly, that is the
+> "nothing in the chain is available" case above: abort rather than proceed on
+> a substitute. Record what was actually resolved and dispatched in
 > `run-metadata.json → fallback_notes` regardless of which path was used, so a
 > reader can always tell which concrete model produced a given phase's output.
 
@@ -180,13 +180,11 @@ model from a completely different chain.
 
 | Resolved model | Tier | thinking param | Agent-tool effort (if no `thinking` param available) |
 |---|---|---|---|
-| `claude-opus-5` | Deep | `thinking: {type: "adaptive"}` | `"high"` |
-| `claude-opus-4-8` | Deep (fallback) | `thinking: {type: "adaptive"}` | `"high"` |
-| `claude-sonnet-5` | Deep (fallback) / Standard | omit `thinking` param | `"medium"` |
+| `claude-opus-4-8` | Deep | `thinking: {type: "adaptive"}` | `"high"` |
 | `claude-sonnet-4-6` | Deep (fallback) / Standard | omit `thinking` param | `"medium"` |
 | `claude-haiku-4-5` | Standard (fallback) | omit `thinking` param | `"medium"` |
 
-> **Never pass `thinking: {type: "disabled"}`** — this returns a 400 on Opus.
+> **Never pass `thinking: {type: "disabled"}`** — this returns a 400 on Opus 4.8.
 > Omit the param entirely when thinking is not wanted.
 
 #### Model Resolution Step
@@ -216,7 +214,7 @@ model from a completely different chain.
 ```
 
 If `claude models list` or the Models API is unavailable, attempt to use
-`claude-opus-5` directly. If the first agent call fails with a
+`claude-opus-4-8` directly. If the first agent call fails with a
 model-not-found error (HTTP 404 / "model not available"), catch the error,
 move to the next model in the chain, and retry once. Record the fallback in
 `run-metadata.json → fallback_notes`.
@@ -229,19 +227,19 @@ move to the next model in the chain, and retry once. Record the fallback in
 ```json
 {
   "vendor_mode": false,
-  "deep_tier_model":   "claude-opus-5",
-  "standard_tier_model": "claude-sonnet-5",
+  "deep_tier_model":   "claude-opus-4-8",
+  "standard_tier_model": "claude-sonnet-4-6",
   "deep_tier_thinking": true,
-  "phase0_model":  "claude-sonnet-5 (only present in multi-repo mode)",
-  "phase1_model":  "claude-sonnet-5",
-  "phase2_model":  "claude-opus-5",
-  "phase3_model":  "claude-sonnet-5",
-  "phase4_model":  "claude-sonnet-5",
-  "phase4b_model": "claude-opus-5 (only present when has_skill_files: true)",
-  "phase5_model":  "claude-sonnet-5",
-  "phase6_model":  "claude-sonnet-5",
-  "phase7_model":  "claude-opus-5 (only present in multi-repo mode)",
-  "fallback_notes": "Deep tier: claude-opus-5 not available on this account, using claude-opus-4-8"
+  "phase0_model":  "claude-sonnet-4-6 (only present in multi-repo mode)",
+  "phase1_model":  "claude-sonnet-4-6",
+  "phase2_model":  "claude-opus-4-8",
+  "phase3_model":  "claude-sonnet-4-6",
+  "phase4_model":  "claude-sonnet-4-6",
+  "phase4b_model": "claude-opus-4-8 (only present when has_skill_files: true)",
+  "phase5_model":  "claude-sonnet-4-6",
+  "phase6_model":  "claude-sonnet-4-6",
+  "phase7_model":  "claude-opus-4-8 (only present in multi-repo mode)",
+  "fallback_notes": "Deep tier: claude-opus-4-8 not available, using claude-sonnet-4-6"
 }
 ```
 
@@ -376,8 +374,8 @@ detected; vendor AI tools are a prime case), **Phase 5** (validation only), and
 **Phase 6** (vendor report). The skill-repo auto-skip cascade still applies.
 
 **2. Model pinned to the Standard tier.** Every phase uses the **resolved
-Standard tier model** (walk only the Standard chain — `claude-sonnet-5` →
-`claude-sonnet-4-6` → `claude-haiku-4-5`; never the Deep chain, no Opus). Write
+Standard tier model** (walk only the Standard chain — `claude-sonnet-4-6` →
+`claude-haiku-4-5`; never the Deep chain, no Opus). Write
 every `*_model` field in `run-metadata.json` as that resolved model, set
 `deep_tier_thinking: false`, and set `vendor_mode: true`. If the entire Standard
 chain is unavailable, abort with a clear error — do not fall back to Deep (the
