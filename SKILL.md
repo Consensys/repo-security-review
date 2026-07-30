@@ -192,32 +192,27 @@ substitute the chain doesn't name.
 **Before spawning Phase 1** (or Phase 0 in multi-repo mode):
 
 ```
-1. List available models:
-   Run: claude models list
-   OR query the Anthropic Models API: GET /v1/models
-   The query uses whatever API key is active in the session (ANTHROPIC_API_KEY
-   env var if set, otherwise the default Claude Code credentials). Different
-   subscription tiers and API keys expose different model sets — the resolution
-   step handles this automatically by walking the fallback chain.
+1. Resolve each tier via probe-by-attempt:
+   - Attempt a minimal agent call with the first model in the Deep chain
+     (claude-opus-4-8). If it succeeds, that is the resolved Deep model.
+     If it fails with a model-not-found / model-unavailable error, try
+     the next model in the chain (claude-sonnet-4-6). If that also fails,
+     abort with a clear error — do not substitute a model outside the chain.
+   - Repeat the same walk for the Standard chain (claude-sonnet-4-6 →
+     claude-haiku-4-5).
+   - Note: do NOT run `claude models list` as a Bash command. Inside an
+     interactive Claude Code session that string is routed to the conversational
+     interface, not the CLI binary, and produces a clarification reply rather
+     than a model list.
 
-2. Resolve each tier to the highest available model from its chain:
-   - Walk the Deep chain top-to-bottom; pick the first model ID that appears
-     in the available-models list.
-   - Walk the Standard chain top-to-bottom; same rule.
-   - If no model in a chain is available: abort with a clear error.
+2. Determine the thinking param for the resolved Deep model (table above).
 
-3. Determine the thinking param for the resolved Deep model (table above).
-
-4. Write run-metadata.json with the resolved IDs and a fallback_notes field.
+3. Write run-metadata.json with the resolved IDs and a fallback_notes field.
    Include fallback_notes whenever the top of a chain was unavailable, so
    Phase 6 can surface a one-line notice in the verbose report header.
 ```
 
-If `claude models list` or the Models API is unavailable, attempt to use
-`claude-opus-4-8` directly. If the first agent call fails with a
-model-not-found error (HTTP 404 / "model not available"), catch the error,
-move to the next model in the chain, and retry once. Record the fallback in
-`run-metadata.json → fallback_notes`.
+Record each fallback in `run-metadata.json → fallback_notes`.
 
 #### run-metadata.json
 
