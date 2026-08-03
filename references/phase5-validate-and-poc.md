@@ -67,8 +67,14 @@ If `--debug` is set, append a `## Phase 5` section to
 SKILL.md → Execution Log. Since you re-read source independently per finding,
 record each file you open with its line range and a `FULL`/`PARTIAL` flag — this
 is the clearest signal of whether validation re-read the whole implementation or
-only a window. Write rows as you go. Skip entirely if `--debug` is not set, and
-never let logging change your validation reads or verdicts.
+only a window. Write rows as you go.
+
+At the end of your phase, **before finishing**, append a `### Token consumption`
+section with input tokens, output tokens, and total. Track tokens across all
+validation and PoC generation runs.
+
+Skip entirely if `--debug` is not set, and never let logging change your
+validation reads or verdicts.
 
 ## Workflow Per Finding
 

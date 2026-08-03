@@ -32,6 +32,11 @@ If `--debug` is set, append a `## Phase 2` section to
 SKILL.md → Execution Log. Record **every file you read** with its line range and
 a `FULL`/`PARTIAL` flag, write each row at the moment you read the file, and list
 which files you classified as security-relevant and whether each was read whole.
+
+At the end of your phase, **before finishing**, append a `### Token consumption`
+section with input tokens, output tokens, and total. Track tokens across all
+API calls and multi-turn interactions this phase makes.
+
 If `--debug` is not set, skip this entirely. Do not let logging alter your
 analysis — read whatever you would have read regardless.
 

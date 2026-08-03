@@ -28,8 +28,14 @@ SKILL.md → Execution Log. Record every file read (line range + `FULL`/`PARTIAL
 the security-relevant files and whether each was read whole, the greps/semgrep
 config run, and — in the **Checks run / skipped** subsection — every check with
 its decision and the confidence behind each skip (confident negative vs
-reduced-confidence run). Write rows as you go. Skip entirely if `--debug` is not
-set, and never let logging change which files you read or checks you run.
+reduced-confidence run). Write rows as you go.
+
+At the end of your phase, **before finishing**, append a `### Token consumption`
+section with input tokens, output tokens, and total. Track tokens across all
+API calls and tool runs.
+
+Skip entirely if `--debug` is not set, and never let logging change which files
+you read or checks you run.
 
 ## Step 0: Load Context
 

@@ -727,10 +727,43 @@ never omit it or fold it into a summary line. (See Phase 2 Step 0.5.)
 - SQLi: RUN (has_database=true)
 - Command Injection: SKIP (confident negative)
 - Deserialization: RUN (reduced-confidence — manifest-only signal)
+
+### Token consumption
+| Metric | Value |
+|--------|-------|
+| Input tokens | 45,230 |
+| Output tokens | 8,920 |
+| Total tokens | 54,150 |
+| Cost (est.) | $0.32 |
 ```
 
 Keep it factual and terse — this is instrumentation, not narrative. If `--debug`
 is not set, write nothing and do not create the file.
+
+**Token consumption reporting**: Each phase tracks its own token usage across all
+API calls it makes (all agent/subagent calls, all tool calls, everything that
+touches the Claude API). Input and output tokens are reported separately. The
+`Cost (est.)` is optional — if you have the resolved model's pricing from the
+claude-api skill or SKILL.md model table, include it; otherwise omit that row.
+
+After all phases complete, the orchestrator **must append a final section** to
+`execution-log.md`:
+
+```markdown
+## Total Token Consumption
+
+| Phase | Input tokens | Output tokens | Total tokens |
+|-------|--------------|---------------|--------------|
+| Phase 1 | 5,200 | 1,100 | 6,300 |
+| Phase 2 | 45,230 | 8,920 | 54,150 |
+| Phase 3 | 12,500 | 2,300 | 14,800 |
+| Phase 4 | 38,100 | 7,800 | 45,900 |
+| Phase 5 | 22,400 | 4,200 | 26,600 |
+| **TOTAL** | **123,430** | **24,320** | **147,750** |
+```
+
+Sum each column across all reported phases (skip any that didn't run or didn't
+write to the log). The `TOTAL` row is bold and locked at the bottom.
 
 ## Progress Updates
 
