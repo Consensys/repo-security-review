@@ -71,6 +71,7 @@ In any Claude Code session (CLI or Desktop), point the skill at a local repo pat
 | `--runtime` | off | Stand the app up in Docker and run each confirmed PoC against it. |
 | `--vendor` | off | Third-party adoption audit. Skips secrets/dependencies/PoC, pins all phases to Sonnet, and produces an adoption-risk report (verdict + conditions + "what it does" + adopter-side controls). |
 | `--context <pairs>` | none | Inline threat model to calibrate severity: `deployment_target=local\|public`, `auth_required_to_reach=true\|false`. Softens only — never sharpens. |
+| `--claude5` | off | Opt into Claude 5 generation models (with 4.x fallback). By default uses pinned 4.x versions. |
 | `--yes` | off | Non-interactive / CI mode — auto-confirms prompts (safety path checks still apply). |
 | `--debug` | off | Write `.security-review/execution-log.md` showing how the file-reading phases actually ran. |
 | `--help` | — | Show usage. |

@@ -65,6 +65,7 @@ Parse these from `$ARGUMENTS` using the format:
 | `--vendor` | false | Vendor / open-source audit mode. Audits a third-party repo the company is considering adopting; audience is the internal security team, deliverable is an adoption risk judgment (not a fix-list for the vendor). Forces skip of `secrets`, `dependencies`, and `poc`; pins every phase to the resolved Standard tier model (never Opus); and switches Phase 6 to the vendor report format. See [Vendor Mode](#vendor-mode---vendor) below. |
 | `--context` | none | Inline `key=value,key=value` threat model used to calibrate severity. Optional — omit for default behavior. See [`--context`](#--context-threat-model-calibration) below. |
 | `--yes` | false | Non-interactive mode. Auto-confirms all user-facing prompts: the `--output` copy confirmation, the Docker runtime gate (`--runtime`), and the pure-skill-repo auto-skip cascade. Path-validation safety checks (rejecting sensitive `--output` destinations) are never bypassed. Use in CI or scripted runs. |
+| `--claude5` | false | Opt into Claude 5 generation models (claude-opus-5, claude-sonnet-5) with fallback to 4.x versions if unavailable. By default the skill uses pinned 4.x versions (claude-opus-4-8, claude-sonnet-4-6, claude-haiku-4-5). Set this flag to prioritize the latest Claude models. |
 | `--debug` | false | Write a paste-friendly execution log to `{repo_path}/.security-review/execution-log.md` recording how the file-reading phases actually ran — every file read with its line range and a full/partial flag, which files were classified security-relevant and whether they were read whole, the greps/tools run, and checks run vs skipped. For inspecting skill behaviour; independent of report mode. See [Execution Log](#execution-log---debug). |
 
 If no repo path is provided and `--repos` is not set, ask the user before proceeding.
@@ -116,7 +117,9 @@ Two tiers are used across all phases:
 #### Fallback Chains
 
 Try each model in order. Use the first one that is available on the current
-API key / account tier.
+API key / account tier. The chain used depends on whether `--claude5` is set.
+
+**Default (no `--claude5` flag):**
 
 ```
 Deep tier:
@@ -128,31 +131,35 @@ Standard tier:
   2. claude-haiku-4-5        ← fallback; reduced analysis depth
 ```
 
-Neither `claude-fable-5` nor any other Claude 5-generation model
-(`claude-sonnet-5`, `claude-opus-5`) is in either chain, at any position — see
-the note below. **If literally nothing in a chain is available (not even the
-bottom rung), abort with a clear error.** Do not substitute a model from a
-different generation or a different chain, and do not silently fall through to
-Claude 5 — this is a deliberate, explicit choice (2026-07-30): the chain ends
-at 4.x/Haiku, full stop. In an account/environment where none of these IDs are
-listed, the correct behavior is to abort, not to keep the skill running on a
-substitute the chain doesn't name.
+**With `--claude5` flag (opt-in to Claude 5 generation):**
 
-> **Note on Claude 5 (`claude-sonnet-5`, `claude-opus-5`, `claude-fable-5`):**
-> Excluded from both chains, no fallback rung, by explicit user decision. This
-> reverses an brief same-day experiment (2026-07-30) that had prioritized
-> Sonnet 5 / Opus 5 as "most capable" — the user reconsidered and asked for a
-> literal reversion to the 4.x/Haiku-only chain, explicitly accepting that this
-> means the skill aborts in any account/environment where 4.x isn't available
-> (confirmed to be the case in at least one real account that same day). Fable
-> 5 specifically also carries an independent, stronger guardrail concern: its
-> post-release guardrails can cause over-cautious hedging or refusal on the
-> concrete attack-path and injection-vector reasoning Phases 2 and 4b depend
-> on — corroborated outside this project by the official Claude Security
-> plugin's own troubleshooting docs, which note Fable 5 activities getting
-> blocked and auto-downgraded to Opus for the same reason.
-> **Do not re-add any Claude 5-generation model to either chain without the
-> user explicitly asking again.**
+```
+Deep tier:
+  1. claude-opus-5           ← preferred Claude 5
+  2. claude-opus-4-8         ← fallback to 4.x
+  3. claude-sonnet-4-6       ← final fallback
+
+Standard tier:
+  1. claude-sonnet-5         ← preferred Claude 5
+  2. claude-sonnet-4-6       ← fallback to 4.x
+  3. claude-haiku-4-5        ← final fallback
+```
+
+`claude-fable-5` is never in either chain, at any position — its
+post-release guardrails can cause over-cautious refusal on the
+attack-path and injection-vector reasoning Phases 2 and 4b depend on.
+
+**If literally nothing in the selected chain is available (not even the
+bottom rung), abort with a clear error.** Do not substitute a model from a
+different generation or a different chain.
+
+> **Note on Claude 5 (`claude-sonnet-5`, `claude-opus-5`):**
+> By default, both chains use pinned 4.x models (as of 2026-07-30 — an explicit
+> user choice accepting that the skill aborts if 4.x versions are unavailable).
+> Set the `--claude5` flag to opt into Claude 5 generation models with 4.x
+> fallback. `claude-fable-5` is permanently excluded — its post-release
+> guardrails can cause over-cautious refusal on the concrete attack-path and
+> injection-vector reasoning Phases 2 and 4b depend on.
 
 > **Vendor mode (`--vendor`) overrides tier resolution.** When `--vendor` is
 > set, every phase uses the **resolved Standard tier model** (whatever that
@@ -192,27 +199,31 @@ substitute the chain doesn't name.
 **Before spawning Phase 1** (or Phase 0 in multi-repo mode):
 
 ```
-1. Resolve each tier via probe-by-attempt:
-   - Attempt a minimal agent call with the first model in the Deep chain
-     (claude-opus-4-8). If it succeeds, that is the resolved Deep model.
+1. Select the appropriate model chains based on the --claude5 flag:
+   - If --claude5 is NOT set: use the default chains (4.x-pinned)
+   - If --claude5 IS set: use the Claude 5 chains (with 4.x fallback)
+
+2. Resolve each tier via probe-by-attempt:
+   - Attempt a minimal agent call with the first model in the Deep chain.
+     If it succeeds, that is the resolved Deep model.
      If it fails with a model-not-found / model-unavailable error, try
-     the next model in the chain (claude-sonnet-4-6). If that also fails,
-     abort with a clear error — do not substitute a model outside the chain.
-   - Repeat the same walk for the Standard chain (claude-sonnet-4-6 →
-     claude-haiku-4-5).
+     the next model in the chain. If the entire chain fails, abort with
+     a clear error — do not substitute a model outside the chain.
+   - Repeat the same walk for the Standard chain.
    - Note: do NOT run `claude models list` as a Bash command. Inside an
      interactive Claude Code session that string is routed to the conversational
      interface, not the CLI binary, and produces a clarification reply rather
      than a model list.
 
-2. Determine the thinking param for the resolved Deep model (table above).
+3. Determine the thinking param for the resolved Deep model (table above).
 
-3. Write run-metadata.json with the resolved IDs and a fallback_notes field.
-   Include fallback_notes whenever the top of a chain was unavailable, so
+4. Write run-metadata.json with the resolved IDs, a fallback_notes field,
+   and a `claude5_opt_in` field set to true/false based on the --claude5 flag.
+   Include fallback_notes whenever a model lower in the chain was used, so
    Phase 6 can surface a one-line notice in the verbose report header.
 ```
 
-Record each fallback in `run-metadata.json → fallback_notes`.
+Record each fallback and the opt-in status in `run-metadata.json`.
 
 #### run-metadata.json
 
@@ -222,6 +233,7 @@ Record each fallback in `run-metadata.json → fallback_notes`.
 ```json
 {
   "vendor_mode": false,
+  "claude5_opt_in": false,
   "deep_tier_model":   "claude-opus-4-8",
   "standard_tier_model": "claude-sonnet-4-6",
   "deep_tier_thinking": true,
@@ -237,6 +249,9 @@ Record each fallback in `run-metadata.json → fallback_notes`.
   "fallback_notes": "Deep tier: claude-opus-4-8 not available, using claude-sonnet-4-6"
 }
 ```
+
+`claude5_opt_in` is always present and records whether `--claude5` was set on the
+run. `fallback_notes` is omitted when no fallback was needed.
 
 `fallback_notes` is omitted when no fallback was needed. Phase 6 reads it and
 includes a one-line notice in the verbose report header when it is present.
@@ -369,12 +384,16 @@ detected; vendor AI tools are a prime case), **Phase 5** (validation only), and
 **Phase 6** (vendor report). The skill-repo auto-skip cascade still applies.
 
 **2. Model pinned to the Standard tier.** Every phase uses the **resolved
-Standard tier model** (walk only the Standard chain — `claude-sonnet-4-6` →
-`claude-haiku-4-5`; never the Deep chain, no Opus). Write
-every `*_model` field in `run-metadata.json` as that resolved model, set
-`deep_tier_thinking: false`, and set `vendor_mode: true`. If the entire Standard
-chain is unavailable, abort with a clear error — do not fall back to Deep (the
-mode's contract is "Standard tier only, never Opus").
+Standard tier model** (walk only the Standard chain; never the Deep chain,
+no Opus). Which Standard chain is used depends on the `--claude5` flag:
+- Without `--claude5`: walk `claude-sonnet-4-6` → `claude-haiku-4-5`
+- With `--claude5`: walk `claude-sonnet-5` → `claude-sonnet-4-6` → `claude-haiku-4-5`
+
+Write every `*_model` field in `run-metadata.json` as that resolved model,
+set `deep_tier_thinking: false`, `vendor_mode: true`, and `claude5_opt_in` to
+the flag's value. If the entire Standard chain is unavailable, abort with a
+clear error — do not fall back to Deep (the mode's contract is "Standard tier
+only, never Opus").
 
 **3. Report format.** The orchestrator passes `--vendor` to Phase 6, which
 produces the vendor report (see `references/phase6-report.md` → Vendor Report).
