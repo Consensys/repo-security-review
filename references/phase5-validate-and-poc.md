@@ -82,7 +82,7 @@ For each finding in `phase4-owasp.json`, execute this sequence in full
 before moving to the next finding:
 
 ```
-1. VALIDATE (Steps 1–4) → 2. BOUNDARY GATE (Step 5, only if threat-model.json present with auth_required_to_reach=true) → 3. DECISION → 4. POC (only if confirmed AND NOT --skip poc) → 5. RUNTIME? (per-finding, only if --runtime AND NOT --skip poc) → 6. WRITE OUTPUTS
+0. SURFACE GATE (Step 0 — skip full validation for high-confidence non-production surfaces) → 1. VALIDATE (Steps 1–4) → 2. BOUNDARY GATE (Step 5, only if threat-model.json present with auth_required_to_reach=true) → 3. DECISION → 4. POC (only if confirmed AND NOT --skip poc) → 5. RUNTIME? (per-finding, only if --runtime AND NOT --skip poc) → 6. WRITE OUTPUTS
 ```
 
 Never batch-validate all findings first and then batch-write PoCs. Process
@@ -107,6 +107,65 @@ below) to `findings`, update the running `summary` counts, and — if a PoC was
 generated — append its entry to `phase5-pocs.json → pocs`. Do this before
 moving to the next finding, not deferred to a final pass at the end of the
 loop.
+
+---
+
+## Step 0: Surface Gate
+
+**Run this step for every finding before starting Part 1 (Validation).**
+
+This gate checks whether the finding lives in a non-production surface — test code, fixtures,
+example applications, or demo code. A vulnerability in test-only code is not exploitable from a
+shipped deployment. Unlike `FALSE_POSITIVE` (code is not actually vulnerable),
+`SURFACE_NOT_PRODUCTION` means the code IS vulnerable but is not part of the deployed product.
+
+The gate fires early — before spending tokens on full validation — because confirmed non-production
+findings need no PoC, no runtime probe, and no data flow trace.
+
+```
+1. Read the finding's `surface_type` and `surface_confidence` from the Phase 4 finding.
+
+   If both are "unknown" (or absent): load `phase2-architecture.json → surface_map` and
+   classify the finding's `file` path by matching against `non_production[].pattern`
+   (glob matching). Set surface_type and surface_confidence from the first matching entry.
+   If no entry matches and `surface_map.classification_confidence` is "high", the file is
+   confidently production — set surface_type: "production", surface_confidence: "high".
+   If surface_map is absent or classification_confidence is "low": set both to "unknown".
+
+2. Apply the gate:
+
+   surface_type ∈ {test, fixture} AND surface_confidence = "high":
+     → SURFACE_NOT_PRODUCTION immediately. Skip Steps 1–4 entirely.
+     → Record: matched pattern, file path, category, and one-line reason.
+
+   surface_type ∈ {example, demo} AND surface_confidence = "high":
+     → SURFACE_NOT_PRODUCTION immediately. Skip Steps 1–4 entirely.
+     → Record: same as above. Note: "Example/demo code — not deployed in a standard
+       production installation."
+
+   surface_type ∈ {test, fixture, example, demo} AND surface_confidence = "medium":
+     → Proceed with Steps 1–4 (full validation).
+     → Cap the final verdict at CONFIRMED_LOW_CONFIDENCE regardless of what Steps 1–4 produce.
+     → Annotate: "File is in a likely non-production surface (medium confidence) — exploitability
+       depends on whether this code is deployed or reachable in the target environment."
+
+   surface_type = "tool" OR surface_type = "unknown" OR surface_confidence = "low":
+     → No gate change. Proceed with Steps 1–4 normally.
+     → If surface_type = "tool": annotate "File is in a tool/script directory — surface
+       classification is ambiguous. Treating as production until confirmed otherwise."
+
+   surface_type = "production":
+     → No gate. Proceed with Steps 1–4 normally.
+```
+
+> **Never skip the surface gate because the finding is severe.** A critical SQLi in a test
+> fixture is still `SURFACE_NOT_PRODUCTION` — it is real code but not reachable from a shipped
+> deployment. It is still recorded (in a separate report section) because test environments with
+> live credentials, or demo deployments, would make it immediately exploitable.
+
+> **The surface gate is not a false positive judgment.** Do not set `FALSE_POSITIVE` solely
+> because a finding is in test or example code. Use `SURFACE_NOT_PRODUCTION` so the distinction
+> is preserved: the code is vulnerable, just not in the production surface.
 
 ---
 
@@ -248,6 +307,7 @@ After the above steps (including the boundary gate if it ran), assign one of:
 | `FALSE_POSITIVE` | Not exploitable or mitigated | Record reason, no PoC |
 | `NEEDS_RUNTIME` | Cannot confirm statically | Attempt runtime probe if `--runtime`, else no PoC |
 | `BOUNDARY_NOT_CROSSED` | Vulnerability exists in code but entry point is behind a high-confidence auth gate with no bypass | No PoC; record in output with boundary evidence |
+| `SURFACE_NOT_PRODUCTION` | Vulnerability exists in code but the file is in a non-production surface (test/fixture/example/demo) with high-confidence classification | No PoC; record in output with surface evidence |
 
 ### Runtime Value Assessment
 
@@ -900,6 +960,7 @@ their final shape, not a new write step.
     "false_positives": 0,
     "needs_runtime": 0,
     "boundary_not_crossed": 0,
+    "surface_not_production": 0,
     "pocs_generated": 0,
     "runtime_confirmed": 0,
     "runtime_not_needed": 0,
@@ -992,6 +1053,31 @@ their final shape, not a new write step.
       },
       "false_positive_reason": null,
       "exploitability_notes": "Post-auth vulnerability; exploitable only by admin-role users. Consider filing as a separate post-auth privilege concern.",
+      "poc_generated": false,
+      "poc_file": null,
+      "runtime_status": null,
+      "runtime_notes": null
+    },
+    {
+      "original_id": "O-007",
+      "validation_status": "SURFACE_NOT_PRODUCTION",
+      "confidence": "HIGH",
+      "data_flow": null,
+      "mitigations_checked": [],
+      "surface_gate": {
+        "ran": true,
+        "surface_type": "test",
+        "surface_confidence": "high",
+        "matched_pattern": "**/*_test.go",
+        "file": "test/helpers/db_test.go",
+        "category": "test",
+        "outcome": "SURFACE_NOT_PRODUCTION",
+        "reason": "File is a Go test file (*_test.go convention) — excluded from production builds by the Go toolchain. Vulnerability is real in code but not reachable from a deployed instance.",
+        "validation_skipped": true
+      },
+      "boundary_gate": null,
+      "false_positive_reason": null,
+      "exploitability_notes": "Exploitable if this test code is run in a CI/CD environment with real database credentials. Review CI pipeline for live credential exposure.",
       "poc_generated": false,
       "poc_file": null,
       "runtime_status": null,

@@ -46,9 +46,18 @@ you read or checks you run.
 
 **phase2-architecture.json** (optional — improves prioritization and cuts
 re-derivation cost):
-- Read if present: used for auth model context and known weak areas, **and**
-  reuse `project_overview` (`trust_posture`, `external_interfaces`,
+- Read if present: used for auth model context, known weak areas, **and** surface
+  classification. Reuse `project_overview` (`trust_posture`, `external_interfaces`,
   `data_handled`) and `coverage.security_relevant_files` as established facts.
+- **Surface annotation**: also read `surface_map` from this file. For each finding
+  you emit, match its `file` path against `surface_map.non_production[].pattern`
+  (glob matching). Set `surface_type` to the matching category (`test`, `fixture`,
+  `example`, `demo`), or `"production"` if no pattern matches. Set
+  `surface_confidence` to the matched entry's `confidence`, or — when no pattern
+  matches and `surface_map.classification_confidence` is `"high"` — to `"high"`
+  (meaning it is confidently production). When `surface_map` is absent or
+  `classification_confidence` is `"low"`, set both fields to `"unknown"`. Phase 5
+  reads these fields to run the Surface Gate without re-doing pattern matching.
   Don't re-derive "what's the auth mechanism here" or "is this file
   security-relevant" per category/per match when Phase 2 already answered it —
   apply that context directly. This is reuse of **facts Phase 2 already spent
@@ -883,6 +892,8 @@ Write to `{repo_path}/.security-review/phase4-owasp.json`:
       "remediation": "Specific fix with code example if possible",
       "poc_needed": true,
       "validation_notes": "What the validator should check",
+      "surface_type": "production | test | fixture | example | demo | unknown",
+      "surface_confidence": "high | medium | low | unknown",
       "family_swept": "src/cmds/*/  (pattern: timer.track(format!(...)))",
       "family_matches": ["src/cmds/cloud/curl_cmd.rs", "src/cmds/cloud/wget_cmd.rs"]
     }
@@ -894,6 +905,11 @@ Write to `{repo_path}/.security-review/phase4-owasp.json`:
 family (omit for standalone findings). `class_negatives` lists every check class
 marked negative at **reduced** confidence with the files that were not examined —
 this is the honest-negative record from the Finalization step.
+
+`surface_type` and `surface_confidence` are always present. When `phase2-architecture.json`
+is absent or its `surface_map.classification_confidence` is `"low"`, set both to `"unknown"`.
+Do not skip findings in non-production surfaces here — Phase 5's Surface Gate owns that
+decision. Phase 4's role is annotation only.
 
 `data_flow` is required for injection-class findings (SQLi, XSS, SSRF, command
 injection, template injection, deserialization). Omit it for non-injection classes

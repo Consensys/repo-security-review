@@ -70,7 +70,7 @@ Apply softeners:
   of why a finding is Medium vs High. Drift findings (`category: threat_model_drift`)
   are silently excluded from the default report.
 - **Verbose report**: both `base_severity` and `contextual_severity` are shown,
-  with the softeners listed in Section 5b. Drift findings appear as normal findings.
+  with the softeners listed in Section 5c. Drift findings appear as normal findings.
 
 ---
 
@@ -141,7 +141,9 @@ Includes everything in the default report, structured by phase, plus:
 - B/C dual-severity columns in the summary table
 - Phase-divided findings (Section 2: Architecture, Section 3: CVEs,
   Section 4: OWASP with Checks Run subsection)
-- Section 5b: Context-Driven Adjustments (softeners per finding)
+- Section 5a: Non-Production Surface Findings (omit if none)
+- Section 5b: Post-Auth Code Vulnerabilities (omit if none)
+- Section 5c: Context-Driven Adjustments (softeners per finding)
 - Drift findings visible as regular findings in Section 2
 - Standalone Remediation Priority section
 - Appendix: Coverage & Tools
@@ -260,6 +262,37 @@ Investigated and ruled out:
 | ID | Type | File | Reason |
 |----|------|------|--------|
 | O-003 | XSS | templates/user.html | Output encoded by Jinja2 autoescape globally |
+
+---
+
+## Non-Production Surface Findings
+{Include only if one or more findings have `validation_status: SURFACE_NOT_PRODUCTION`.
+Omit entirely if none exist.}
+
+Vulnerabilities confirmed in code but located in non-production surfaces (test fixtures,
+example applications, demo code). Not exploitable from a standard deployed instance,
+but real code defects. If this code is ever executed in a production context — a CI/CD
+pipeline with live credentials, a deployed demo environment — these become immediately
+exploitable.
+
+| ID | Type | File | Surface | Risk if Deployed |
+|----|------|------|---------|-----------------|
+| O-007 | SQLi | test/helpers/db_test.go:L45 | test (high confidence) | CI pipeline with live DB credentials would expose the injection |
+
+---
+
+## Post-Auth Code Vulnerabilities
+{Include only if one or more findings have `validation_status: BOUNDARY_NOT_CROSSED`.
+Omit entirely if none exist.}
+
+Vulnerabilities confirmed in code but not reachable by unauthenticated actors per Phase 2
+boundary analysis. Real code defects — excluded from the main findings list because the
+effective threat model (`auth_required_to_reach=true`) places them behind a verified auth
+gate. If that auth gate is ever bypassed, these become immediately exploitable.
+
+| ID | Type | File | Auth Gate | Action |
+|----|------|------|-----------|--------|
+| O-005 | SQLi | api/admin/search.ts:L34 | `authMiddleware + requireAdminRole` (high confidence) | Fix proactively — one auth bypass away from critical |
 
 ---
 
@@ -423,7 +456,31 @@ Merged findings include Arch confirmed field.}
 
 ---
 
-## Section 5b: Context-Driven Adjustments
+## Section 5a: Non-Production Surface Findings
+{Include only if one or more findings have `validation_status: SURFACE_NOT_PRODUCTION`.
+Omit entirely if none exist.}
+
+Vulnerabilities confirmed in code but located in non-production surfaces. Not exploitable
+from a standard deployed instance. Recorded here because test environments with live
+credentials or deployed demo environments would make them immediately exploitable.
+
+| ID | Type | File | Surface | Pattern Matched | Risk if Deployed |
+|----|------|------|---------|-----------------|-----------------|
+| O-007 | SQLi | test/helpers/db_test.go:L45 | test (high confidence) | `**/*_test.go` | CI pipeline with live DB credentials would expose the injection |
+
+---
+
+## Section 5b: Post-Auth Code Vulnerabilities
+{Include only if one or more findings have `validation_status: BOUNDARY_NOT_CROSSED`.
+Omit entirely if none exist. (Previously unnumbered — now 5b to keep numbering consistent.)}
+
+| ID | Type | File | Auth Gate | Action |
+|----|------|------|-----------|--------|
+| O-005 | SQLi | api/admin/search.ts:L34 | `authMiddleware + requireAdminRole` (high confidence) | Fix proactively — one auth bypass away from critical |
+
+---
+
+## Section 5c: Context-Driven Adjustments
 {Include ONLY if threat-model.json exists.}
 
 | ID | Title | Base | Contextual | Softeners Applied |
@@ -625,9 +682,26 @@ Investigated and ruled out — included so the assessment's rigor is visible:
 
 ---
 
+## Non-Production Surface Findings
+
+{Include only if one or more findings have `validation_status: SURFACE_NOT_PRODUCTION`.
+Omit entirely if none exist.}
+
+Vulnerabilities confirmed in code but located in non-production surfaces (test fixtures,
+example applications, demo code). Not exploitable from a standard deployed instance.
+Included here because test environments with live credentials or deployed demo environments
+would make them immediately exploitable — the adopting team should verify these surfaces
+are never deployed.
+
+| ID | Type | File | Surface | Risk if Deployed |
+|----|------|------|---------|-----------------|
+| O-007 | SQLi | test/helpers/db_test.go:L45 | test (high confidence) | CI pipeline with live DB credentials would expose the injection |
+
+---
+
 ## Post-Auth Code Vulnerabilities
 
-{Include this section only if one or more findings have `validation_status: BOUNDARY_NOT_CROSSED`.
+{Include only if one or more findings have `validation_status: BOUNDARY_NOT_CROSSED`.
 Omit entirely if none exist.}
 
 Vulnerabilities confirmed in code but not reachable by unauthenticated actors per Phase 2 boundary analysis.

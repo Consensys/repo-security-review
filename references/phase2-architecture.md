@@ -177,7 +177,51 @@ grep -rln "^func main()" {repo_path} --include="*.go" --exclude-dir="vendor" | h
 grep -rnE "app\.listen\(|\.listen\([0-9]|PORT *= *[0-9]|port *= *[0-9]|listen *:[0-9]|bind.*0\.0\.0\.0:" \
   {repo_path} --include="*.py" --include="*.js" --include="*.ts" --include="*.go" \
   --exclude-dir="node_modules" --exclude-dir="vendor" | head -10
+
+# --- Surface classification (used by Phase 4 and Phase 5 to gate production vs. non-production) ---
+
+# Non-production directory names
+find {repo_path} -maxdepth 4 -type d \( \
+  -name "test" -o -name "tests" -o -name "__tests__" \
+  -o -name "spec" -o -name "specs" -o -name "e2e" \
+  -o -name "fixtures" -o -name "testdata" -o -name "test_data" \
+  -o -name "mocks" -o -name "mock" -o -name "stubs" -o -name "stub" \
+  -o -name "examples" -o -name "example" \
+  -o -name "demo" -o -name "demos" -o -name "samples" -o -name "sample" \
+  -o -name "scripts" -o -name "tools" -o -name "hack" \
+\) -not -path "*/.git/*" -not -path "*/node_modules/*" -not -path "*/vendor/*"
+
+# Language-convention test files (confirms directories contain real test code, not coincidental naming)
+find {repo_path} -maxdepth 6 -type f \( \
+  -name "*_test.go" -o -name "*.test.ts" -o -name "*.spec.ts" \
+  -o -name "*.test.tsx" -o -name "*.spec.tsx" \
+  -o -name "*.test.js" -o -name "*.spec.js" \
+  -o -name "test_*.py" -o -name "*_test.py" -o -name "*_spec.rb" \
+\) -not -path "*/.git/*" -not -path "*/node_modules/*" | head -30
 ```
+
+### Surface classification rules
+
+From the directory and file scan above, build a `surface_map` for `phase2-architecture.json`.
+This map is read by Phase 4 (to annotate findings) and Phase 5 (to gate non-production surfaces
+before running full validation).
+
+**Classify non-production patterns by confidence:**
+
+| Category | Confidence | Patterns |
+|----------|-----------|---------|
+| `test` | `high` | `**/*_test.go`, `**/*.test.ts`, `**/*.spec.ts`, `**/*.test.js`, `**/*.spec.js`, `**/test_*.py`, `**/*_test.py`, `**/*_spec.rb`; directories `test/`, `tests/`, `__tests__`, `spec/`, `specs/`, `e2e/` |
+| `fixture` | `high` | Directories `fixtures/`, `testdata/`, `test_data/`, `mocks/`, `mock/`, `stubs/`, `stub/` |
+| `example` | `medium` | Directories `examples/`, `example/`, `samples/`, `sample/` |
+| `demo` | `medium` | Directories `demo/`, `demos/` |
+| `ambiguous` | — | `scripts/`, `tools/`, `hack/` — may contain production deployment or build tooling; record as ambiguous with a reason |
+
+**Overall `classification_confidence`:**
+- **`high`**: project has a clear production/test separation with standard naming — test file conventions confirmed (e.g. `*_test.go` files found, or `__tests__/` directory with `.spec.ts` files)
+- **`medium`**: some non-production directories found but structure is partially flat, or only directory-name evidence without language-convention file confirmation
+- **`low`**: flat project structure with no clear separation, or all source files appear to be production code
+
+**`scripts/` and `tools/` are ambiguous by default.** Check whether they contain deployment manifests, CI/CD orchestration, or `Makefile`-style build helpers that run in production pipelines. List them as `ambiguous` with a note; do not auto-classify as non-production.
 
 ### Detection reliability — read before setting gating booleans
 
@@ -561,6 +605,36 @@ Write to `{repo_path}/.security-review/phase2-architecture.json`:
     "unknown_patterns": ["/api/webhook"],
     "coverage_confidence_reason": "e.g. 'All routes pass through authMiddleware registered globally in app.ts:L12; only /health and /login are explicitly excluded'"
   },
+  "surface_map": {
+    "classification_confidence": "high | medium | low",
+    "classification_confidence_reason": "e.g. 'Standard Go project layout — *_test.go convention confirmed; examples/ directory present'",
+    "non_production": [
+      {
+        "pattern": "**/*_test.go",
+        "category": "test",
+        "confidence": "high",
+        "basis": "Go test file convention — files with this suffix are excluded from production builds by the Go toolchain"
+      },
+      {
+        "pattern": "tests/**",
+        "category": "test",
+        "confidence": "high",
+        "basis": "tests/ directory with *.spec.ts files — standard Jest/Vitest test layout"
+      },
+      {
+        "pattern": "examples/**",
+        "category": "example",
+        "confidence": "medium",
+        "basis": "examples/ directory present — typically demo code not deployed to production; not confirmed by file convention"
+      }
+    ],
+    "ambiguous": [
+      {
+        "pattern": "scripts/**",
+        "note": "Contains deployment scripts — some invoke production infrastructure. Not classified as non-production."
+      }
+    ]
+  },
   "findings": [
     {
       "id": "A-001",
@@ -596,6 +670,17 @@ Write to `{repo_path}/.security-review/phase2-architecture.json`:
   Use exact paths when a route is a single endpoint (e.g. `"/login"`).
   When centralized middleware covers everything except explicit exclusions,
   list the exclusions in `public_patterns` and set everything else as `protected_patterns: ["/*"]`.
+- `surface_map` is **always produced**, even when no non-production directories are found.
+  Emit `non_production: []` and `classification_confidence: "low"` when the structure is flat
+  or unrecognized. Phase 5's surface gate skips suppression when `classification_confidence`
+  is `"low"` — an empty or low-confidence map never causes false negatives.
+- `surface_map` patterns use glob matching: `**/*_test.go` matches at any depth; `tests/**`
+  matches everything under `tests/`. Do not include `node_modules/`, `vendor/`, `dist/`, or
+  `build/` — these are excluded from analysis globally.
+- `scripts/` and `tools/` are **ambiguous by default** — they often contain deployment tooling
+  that executes in production CI/CD pipelines. List them under `ambiguous`, not `non_production`,
+  unless file contents confirm they are dev-only (e.g., a `scripts/` directory that contains only
+  `lint.sh` and `format.sh` with no production infrastructure calls).
 
 ---
 
