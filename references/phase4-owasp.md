@@ -345,6 +345,39 @@ Parse semgrep output as seed findings, then validate each one manually.
 
 Only run checks from your check plan above.
 
+### Source → Sink Tracing (required for every injection-class finding)
+
+For every finding in an injection-class check (SQLi, XSS, command injection, SSRF,
+template injection, deserialization), you must establish a complete, located data flow
+before reporting it. The `data_flow` field in the output is **not optional** for these
+classes — a finding without it cannot be independently verified by Phase 5.
+
+**Trace model:**
+
+1. **Entrypoint** — the network route or external input source where untrusted data
+   first enters the application. Record the HTTP method + path (or "CLI arg", "env var",
+   "file read", etc.), the file, and the line where it is first read/extracted.
+
+2. **Hops** — each intermediate step that carries the tainted value. A hop is required
+   for every **file boundary** the value crosses. If the route handler reads the value
+   and passes it directly to an inline query in the same function, there are zero hops.
+   If it calls a service, which calls a repository, which runs the query, there are two
+   hops (route→service boundary, service→repository boundary). Record a description,
+   file, and line for each.
+
+3. **Sink** — the dangerous call (e.g. `db.raw(query)`, `exec(cmd)`, `innerHTML = val`).
+   Record the exact expression, file, and line.
+
+**Cross-file tracing rule:** When the entrypoint and the sink are in different files,
+every intermediate function call that carries the tainted value across a file boundary
+must appear as a hop. A source→sink claim that skips file boundaries is unverifiable
+by Phase 5 — Phase 5 must be able to reproduce the same path independently using only
+`data_flow.hops` as a roadmap. If you cannot close a gap in the chain, mark the finding
+`validation_notes: "cross-file hop unresolved: [description]"` and Phase 5 will pick it up.
+
+**For non-injection classes** (A01, A02, A04, A05, A07, A09, etc.) the `data_flow`
+field can be omitted — record `input_source` and `sink` as text descriptors instead.
+
 ---
 
 ### A01 - Broken Access Control / IDOR
@@ -835,8 +868,18 @@ Write to `{repo_path}/.security-review/phase4-owasp.json`:
       "vulnerable_code_snippet": "// 3-5 lines of the actual vulnerable code",
       "description": "Why this is vulnerable",
       "attack_vector": "How an attacker would exploit this",
-      "input_source": "HTTP parameter | Header | Body field | Path param | ...",
-      "sink": "SQL query | HTML output | shell command | ...",
+      "data_flow": {
+        "entrypoint": "GET /api/users/:id",
+        "entrypoint_file": "src/routes/users.ts",
+        "entrypoint_line": 23,
+        "hops": [
+          {"description": "userId passed to getUser(id)", "file": "src/services/userService.ts", "line": 45}
+        ],
+        "sink": "db.query(`SELECT * FROM users WHERE id = ${userId}`)",
+        "sink_file": "src/repositories/userRepository.ts",
+        "sink_line": 12,
+        "cross_file": true
+      },
       "remediation": "Specific fix with code example if possible",
       "poc_needed": true,
       "validation_notes": "What the validator should check",
@@ -851,6 +894,13 @@ Write to `{repo_path}/.security-review/phase4-owasp.json`:
 family (omit for standalone findings). `class_negatives` lists every check class
 marked negative at **reduced** confidence with the files that were not examined —
 this is the honest-negative record from the Finalization step.
+
+`data_flow` is required for injection-class findings (SQLi, XSS, SSRF, command
+injection, template injection, deserialization). Omit it for non-injection classes
+(A01, A02, A04, A05, A07, A09) and use `attack_vector` as the narrative instead.
+`cross_file: true` when any hop crosses a file boundary; `hops: []` when source and
+sink are in the same function. A finding with `data_flow: null` and an injection-class
+OWASP category will be flagged by Phase 5 as unverifiable.
 
 ## Quality Bar
 

@@ -82,7 +82,7 @@ For each finding in `phase4-owasp.json`, execute this sequence in full
 before moving to the next finding:
 
 ```
-1. VALIDATE → 2. DECISION → 3. POC (only if confirmed AND NOT --skip poc) → 4. RUNTIME? (per-finding, only if --runtime AND NOT --skip poc) → 5. WRITE OUTPUTS
+1. VALIDATE (Steps 1–4) → 2. BOUNDARY GATE (Step 5, only if threat-model.json present with auth_required_to_reach=true) → 3. DECISION → 4. POC (only if confirmed AND NOT --skip poc) → 5. RUNTIME? (per-finding, only if --runtime AND NOT --skip poc) → 6. WRITE OUTPUTS
 ```
 
 Never batch-validate all findings first and then batch-write PoCs. Process
@@ -114,13 +114,26 @@ loop.
 
 ### Step 1: Reproduce the data flow independently
 
-Re-read the source file(s) referenced in the Phase 4 finding. Trace from
-scratch:
-- Where does untrusted input enter the application?
-- What transformations happen along the path?
-- Does it reach the sink without sufficient sanitization?
+Re-read the source file(s) referenced in the Phase 4 finding. Trace from scratch,
+establishing the same four nodes that Phase 4 should have recorded in `data_flow`:
 
-If you cannot trace a complete, unbroken source → sink path: **FALSE_POSITIVE**.
+1. **Entrypoint** — the HTTP route/handler or external input point (file:line) where
+   untrusted data first enters. Confirm the HTTP method, path, and the exact
+   variable or parameter that carries the tainted value.
+
+2. **Hops** — each intermediate function call that carries the tainted value across a
+   file boundary (file:line per hop). Re-read each intermediate file independently.
+   If Phase 4 recorded a hop but you cannot find the call at the stated line, that
+   is a Phase 4 inaccuracy — record it and attempt to resolve the correct location.
+
+3. **Sink** — the dangerous call (file:line). Confirm the exact expression.
+
+If `data_flow` is absent or null for an injection-class finding, build it from scratch
+using the `file`, `line_start`, and `attack_vector` fields from Phase 4 as starting
+points. A finding where you cannot establish an unbroken entrypoint → sink chain
+with file:line at each boundary is **FALSE_POSITIVE** — the claimed path is
+unverifiable. If the chain exists but a hop is in an unread file, read that file
+before deciding.
 
 ### Step 2: Hunt for mitigations Phase 4 may have missed
 
@@ -155,9 +168,78 @@ paths. Note which paths are unprotected.
 - WAF or infra controls present? (Flag but do not use as mitigation — code
   is the required control)
 
+### Step 5: Boundary Gate
+
+**Only run this step when `threat-model.json` exists AND `auth_required_to_reach`
+is `true` after applying any `drift_overrides`.** Otherwise skip directly to the
+Validation Decision.
+
+This gate checks whether the finding's entry point crosses an intended
+security boundary (i.e. is reachable by an unauthenticated actor). A vulnerability
+that only reachable behind a functioning auth gate is not a boundary violation for
+unauthenticated actors — it may still be a privilege-escalation or post-auth finding,
+but it should not be reported as a pre-auth issue.
+
+```
+1. Load threat-model.json. Apply drift_overrides if present:
+     effective_auth_required = drift_overrides.auth_required_to_reach
+                               ?? threat-model.json.auth_required_to_reach
+   If effective_auth_required is false: SKIP this step entirely.
+
+2. Read phase2-architecture.json → auth_coverage.
+   If absent or coverage_confidence is "none": SKIP (annotate finding with
+   "boundary status unknown — auth_coverage absent or not applicable").
+
+3. Identify the finding's entry point: use `data_flow.entrypoint` (the HTTP
+   method + path, or equivalent external input surface) as established in
+   Step 1's trace. If `data_flow.entrypoint` is absent, derive it from Phase 4's
+   `file`/`line_start` by reading the surrounding route registration. Record the
+   confirmed entry point as `entry_point` in `boundary_gate`.
+
+4. Classify the entry point against auth_coverage:
+     a. Matches public_patterns   → PUBLIC   (no gate change)
+     b. Matches protected_patterns → PROTECTED (gate applies)
+     c. Matches unknown_patterns or no match → UNKNOWN
+
+5. Apply the gate:
+
+   PROTECTED + coverage_confidence = "high":
+     - If Step 2 (mitigation hunt) found NO auth bypass on this path:
+         → override verdict to BOUNDARY_NOT_CROSSED (reject the pre-auth claim)
+         → record why: which protected_pattern matched, which middleware/decorator
+           enforces it, and that no bypass was found
+     - If Step 2 found an auth BYPASS on this path:
+         → finding stands as-is; the gate does not apply when bypass is present
+         → annotate: "bypass found — boundary gate did not suppress"
+
+   PROTECTED + coverage_confidence = "medium":
+     - Cap the verdict at CONFIRMED_LOW_CONFIDENCE (cannot confirm pre-auth)
+     - Annotate: "Entry point appears protected per Phase 2 (medium confidence) —
+       boundary not confirmed reachable by unauthenticated actors"
+
+   PUBLIC or coverage_confidence = "low":
+     - No gate change. Annotate if coverage was low: "auth_coverage low-confidence
+       — boundary gate skipped"
+
+   UNKNOWN:
+     - No gate change. Annotate: "Entry point not in Phase 2 auth_coverage map —
+       boundary status unknown; treat as pre-auth until proven otherwise"
+```
+
+> **The boundary gate is about pre-auth reachability only.** A finding that is
+> behind authentication but exploitable by any authenticated user (e.g. IDOR,
+> horizontal privilege escalation) is NOT suppressed by this gate — those are
+> post-auth boundary violations and must still be confirmed normally. The gate
+> only suppresses or downgrades the *unauthenticated reach* claim.
+
+> **Never skip the boundary gate because the finding seems severe.** Gate
+> logic is applied uniformly. If a critical finding turns out to be
+> `BOUNDARY_NOT_CROSSED`, record it faithfully — it is still evidence of a
+> code-level vulnerability, just not exploitable from outside the auth boundary.
+
 ### Validation Decision
 
-After the above steps, assign one of:
+After the above steps (including the boundary gate if it ran), assign one of:
 
 | Status | Meaning | Next step |
 |--------|---------|-----------|
@@ -165,6 +247,7 @@ After the above steps, assign one of:
 | `CONFIRMED_LOW_CONFIDENCE` | Real but exploitability uncertain | Write PoC, flag confidence |
 | `FALSE_POSITIVE` | Not exploitable or mitigated | Record reason, no PoC |
 | `NEEDS_RUNTIME` | Cannot confirm statically | Attempt runtime probe if `--runtime`, else no PoC |
+| `BOUNDARY_NOT_CROSSED` | Vulnerability exists in code but entry point is behind a high-confidence auth gate with no bypass | No PoC; record in output with boundary evidence |
 
 ### Runtime Value Assessment
 
@@ -206,9 +289,15 @@ this run is in the "earns its cost" list. If every confirmed finding is in the
 ## Part 2: PoC Generation (CONFIRMED and CONFIRMED_LOW_CONFIDENCE only)
 
 Write the PoC immediately after the validation decision, while you still
-have the full data flow context in mind. Use real values from the codebase —
-actual endpoint paths, parameter names, HTTP methods, field names. No
-unfilled placeholders.
+have the full data flow context in mind. Derive all endpoint values from
+`data_flow` established in Step 1:
+
+- `BASE_URL + data_flow.entrypoint` → the exact URL to call (HTTP method from entrypoint, path filled in)
+- `data_flow.sink_file:data_flow.sink_line` → the exact line the PoC is targeting (include in the script comment)
+- Parameter names come from the variable at `data_flow.entrypoint_line`, not from generic placeholders
+
+Use real values from the codebase — actual endpoint paths, parameter names,
+HTTP methods, field names. No unfilled placeholders.
 
 > **Credential sanitization (mandatory)**: Never embed real secret values,
 > API keys, tokens, passwords, or credentials discovered during Phase 1 or
@@ -810,6 +899,7 @@ their final shape, not a new write step.
     "confirmed_low_confidence": 0,
     "false_positives": 0,
     "needs_runtime": 0,
+    "boundary_not_crossed": 0,
     "pocs_generated": 0,
     "runtime_confirmed": 0,
     "runtime_not_needed": 0,
@@ -822,15 +912,23 @@ their final shape, not a new write step.
       "validation_status": "CONFIRMED",
       "confidence": "HIGH",
       "data_flow": {
-        "source": "req.params.userId (GET /api/users/:id)",
-        "transformations": ["none"],
-        "sink": "db.query(`SELECT * FROM users WHERE id = ${userId}`)"
+        "entrypoint": "GET /api/users/:id",
+        "entrypoint_file": "src/routes/users.ts",
+        "entrypoint_line": 23,
+        "hops": [
+          {"description": "userId passed to getUser(id)", "file": "src/services/userService.ts", "line": 45}
+        ],
+        "sink": "db.query(`SELECT * FROM users WHERE id = ${userId}`)",
+        "sink_file": "src/repositories/userRepository.ts",
+        "sink_line": 12,
+        "cross_file": true
       },
       "mitigations_checked": [
         "No parameterization found",
         "No input validation middleware on this route",
         "ORM not used for this query"
       ],
+      "boundary_gate": null,
       "false_positive_reason": null,
       "exploitability_notes": "Exploitable by any authenticated user",
       "poc_generated": true,
@@ -843,10 +941,57 @@ their final shape, not a new write step.
       "original_id": "O-003",
       "validation_status": "FALSE_POSITIVE",
       "confidence": "HIGH",
-      "data_flow": null,
+      "data_flow": {
+        "entrypoint": "GET /search",
+        "entrypoint_file": "src/views/search.py",
+        "entrypoint_line": 18,
+        "hops": [],
+        "sink": "render_template('search.html', query=query)",
+        "sink_file": "src/views/search.py",
+        "sink_line": 22,
+        "cross_file": false
+      },
       "mitigations_checked": ["Jinja2 autoescape=True applies globally"],
       "false_positive_reason": "Template engine auto-escapes all output; no XSS possible via this path",
+      "boundary_gate": null,
       "exploitability_notes": null,
+      "poc_generated": false,
+      "poc_file": null,
+      "runtime_status": null,
+      "runtime_notes": null
+    },
+    {
+      "original_id": "O-005",
+      "validation_status": "BOUNDARY_NOT_CROSSED",
+      "confidence": "HIGH",
+      "data_flow": {
+        "entrypoint": "POST /api/admin/search",
+        "entrypoint_file": "src/routes/admin.ts",
+        "entrypoint_line": 15,
+        "hops": [],
+        "sink": "db.raw(query)",
+        "sink_file": "src/routes/admin.ts",
+        "sink_line": 34,
+        "cross_file": false
+      },
+      "mitigations_checked": [
+        "No parameterization found",
+        "Route is behind authMiddleware (app.ts:L12) + requireAdminRole (admin-router.ts:L8)",
+        "No bypass of authMiddleware found on this path"
+      ],
+      "boundary_gate": {
+        "ran": true,
+        "effective_auth_required": true,
+        "entry_point": "POST /api/admin/search",
+        "entry_point_classification": "protected",
+        "matched_pattern": "/api/admin/*",
+        "coverage_confidence": "high",
+        "bypass_found": false,
+        "outcome": "BOUNDARY_NOT_CROSSED",
+        "reason": "Entry point is behind high-confidence auth gate (authMiddleware + requireAdminRole). Vulnerability is real in code but not reachable by unauthenticated actors."
+      },
+      "false_positive_reason": null,
+      "exploitability_notes": "Post-auth vulnerability; exploitable only by admin-role users. Consider filing as a separate post-auth privilege concern.",
       "poc_generated": false,
       "poc_file": null,
       "runtime_status": null,
@@ -871,6 +1016,11 @@ where `{type}` is a short lowercase slug matching the vulnerability type:
       "vulnerability_type": "SQL_INJECTION",
       "poc_file": "poc_O-001_sqli.py",
       "poc_code": "#!/usr/bin/env python3\n...",
+      "entrypoint": "GET /api/users/:id",
+      "entrypoint_file": "src/routes/users.ts",
+      "entrypoint_line": 23,
+      "sink_file": "src/repositories/userRepository.ts",
+      "sink_line": 12,
       "curl_equivalent": "curl -X GET 'http://localhost:3000/api/users/1?id=...'",
       "setup_required": "Valid auth token for any user account",
       "success_indicator": "Response contains rows from other users",

@@ -446,6 +446,45 @@ Record the accounting:
 - Is authorization (not just authentication) checked? Who can do what?
 - Is there a clear RBAC/ABAC model? Is it consistently applied?
 
+While analyzing the auth model, **enumerate routes into an `auth_coverage` map** (used by Phase 5's boundary gate):
+
+```bash
+# Find all route/handler definitions
+grep -rniE "@app\.route\(|@router\.(get|post|put|delete|patch)\(|app\.(get|post|put|delete|patch)\(|\
+@(Get|Post|Put|Delete|Patch)\(|@RequestMapping\(|router\.Handle\(|mux\.Handle\(" \
+  {repo_path} \
+  --include="*.py" --include="*.js" --include="*.ts" \
+  --include="*.go" --include="*.java" --include="*.rb" \
+  --exclude-dir="node_modules" --exclude-dir=".git" | head -60
+
+# Find auth middleware / decorator definitions
+grep -rniE "@login_required|@require_auth|@authenticated|requireAuth|verifyToken|\
+@AuthGuard|@UseGuards|middleware.*auth|authMiddleware|JWTMiddleware|bearerAuth|\
+@jwt_required|authenticate\b|authorize\b" \
+  {repo_path} \
+  --include="*.py" --include="*.js" --include="*.ts" \
+  --include="*.go" --include="*.java" \
+  --exclude-dir="node_modules" --exclude-dir=".git" | head -40
+
+# Find centralized middleware registration (Express/Koa/FastAPI/Django/etc.)
+grep -rniE "app\.use\(|router\.use\(|middleware\s*=|MIDDLEWARE\s*=|\
+add_middleware\(|app\.before_request\|before_action\s" \
+  {repo_path} \
+  --include="*.py" --include="*.js" --include="*.ts" \
+  --exclude-dir="node_modules" | head -20
+```
+
+Classify each discovered route as `protected`, `public`, or `unknown`:
+- **protected**: has an auth decorator directly on the route/handler, OR the route lives in a router/controller that applies auth centrally, OR is covered by centralized middleware verified to apply globally
+- **public**: explicitly marked public, is a health/login/register/callback endpoint, or sits outside the auth middleware chain
+- **unknown**: cannot determine from static analysis (dynamic registration, generated routes, insufficient context)
+
+Assign `coverage_confidence`:
+- **`high`**: centralized middleware verified to cover all routes except a known explicit list, OR every route has an explicit auth decorator and none are ambiguous
+- **`medium`**: most routes classified but some `unknown`; OR auth is per-route decorator with a few routes too large/complex to inspect in this pass
+- **`low`**: auth is scattered, framework is unrecognized, or fewer than 60% of routes could be classified
+- **`none`**: no auth mechanism detected (`auth_mechanism: "none"`) or the codebase is a CLI/library with no network routes
+
 ### 3. Sensitive Data Flow
 - Where is PII, financial data, or health data stored?
 - Is sensitive data logged? (check logging setup, middleware)
@@ -513,6 +552,15 @@ Write to `{repo_path}/.security-review/phase2-architecture.json`:
     "medium": 0,
     "low": 0
   },
+  "auth_coverage": {
+    "coverage_confidence": "high | medium | low | none",
+    "model": "jwt | session | oauth | api_key | none | mixed",
+    "enforcement_style": "centralized_middleware | per_route_decorator | mixed | unknown",
+    "protected_patterns": ["/api/*", "/admin/*"],
+    "public_patterns": ["/health", "/login", "/register", "/api/public/*"],
+    "unknown_patterns": ["/api/webhook"],
+    "coverage_confidence_reason": "e.g. 'All routes pass through authMiddleware registered globally in app.ts:L12; only /health and /login are explicitly excluded'"
+  },
   "findings": [
     {
       "id": "A-001",
@@ -537,6 +585,17 @@ Write to `{repo_path}/.security-review/phase2-architecture.json`:
 - `poc_needed` is always `false` for architectural findings
 - Reference specific files and line numbers as evidence
 - Be concrete about impact — avoid vague "could lead to security issues"
+- `auth_coverage` is **always produced**, even when `--context` is not passed.
+  Phase 5's boundary gate reads it unconditionally — the gate only fires when
+  `threat-model.json → auth_required_to_reach` is `true`, but Phase 2 must
+  always produce the map so Phase 5 has the data if the flag is set.
+- When the repo has no network routes (CLI tool, library, pure batch job),
+  set `coverage_confidence: "none"` and leave all pattern lists empty.
+  Phase 5 will skip the boundary gate entirely when confidence is `none`.
+- Patterns use prefix matching (`/api/*` matches `/api/users`, `/api/users/123`).
+  Use exact paths when a route is a single endpoint (e.g. `"/login"`).
+  When centralized middleware covers everything except explicit exclusions,
+  list the exclusions in `public_patterns` and set everything else as `protected_patterns: ["/*"]`.
 
 ---
 

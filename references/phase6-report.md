@@ -62,7 +62,7 @@ Apply softeners:
 | Softener | Applies to |
 |----------|-----------|
 | `deployment_target: local` (−2 tiers) | all findings |
-| `auth_required_to_reach: true` (−1 tier) | pre-auth findings only |
+| `auth_required_to_reach: true` (−1 tier) | pre-auth findings only (findings that survived the Phase 5 boundary gate) |
 
 **How calibration surfaces in each mode:**
 - **Default report**: `contextual_severity` is the displayed severity with no
@@ -622,6 +622,24 @@ Investigated and ruled out — included so the assessment's rigor is visible:
 | O-003 | XSS | templates/user.html | Output encoded by framework autoescape |
 
 {If no candidates were ruled out, write: "None — no candidate findings were excluded during validation."}
+
+---
+
+## Post-Auth Code Vulnerabilities
+
+{Include this section only if one or more findings have `validation_status: BOUNDARY_NOT_CROSSED`.
+Omit entirely if none exist.}
+
+Vulnerabilities confirmed in code but not reachable by unauthenticated actors per Phase 2 boundary analysis.
+These are real code defects — they are excluded from the main findings list because the effective threat
+model (`auth_required_to_reach=true`) places them behind a verified auth gate. If that auth gate is ever
+bypassed, these become immediately exploitable.
+
+| ID | Type | File | Auth Gate | Action |
+|----|------|------|-----------|--------|
+| O-005 | SQLi | api/admin/search.ts:L34 | `authMiddleware + requireAdminRole` (high confidence) | Fix proactively — one auth bypass away from critical |
+
+{If `--context auth_required_to_reach` was not set, this section never appears.}
 
 ---
 
