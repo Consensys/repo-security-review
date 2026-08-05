@@ -280,11 +280,17 @@ successfully; it is working state, not a report artifact.
 Build the ruleset from three layers: always-on security rules, the detected
 language pack, and framework-specific packs. `--config=auto` is intentionally
 avoided (too noisy), but pinning to a single pack leaves most of Semgrep's signal
-unused — framework packs and the taint-aware `p/security-audit` pack are where the
-high-value interprocedural findings come from.
+unused. Framework packs and the taint-aware `p/security-audit` pack, when
+available, are where the high-value interprocedural findings come from.
 
 ```bash
 TECH={repo_path}/.security-review/tech-stack.json
+
+# Local rule cache written by setup.sh — immune to registry drift and 404s.
+# Phase 4 prefers these files; each pack falls back to its registry name only
+# when the local file is absent (e.g. setup.sh was never run, or the pack
+# wasn't available at setup time either).
+RULES_CACHE="$HOME/.config/repo-security-review/semgrep"
 
 # Primary language → Semgrep registry pack name.
 # Go's registry pack is p/golang, not p/go — all others match their language name.
@@ -296,59 +302,113 @@ case "$LANG" in
   *)  SEMGREP_LANG="$LANG" ;;
 esac
 
-# Always-on layers: OWASP Top 10 + the taint-aware security-audit pack.
-# p/security-audit includes interprocedural taint rules — the closest this
-# pipeline gets to cross-file source→sink tracing, so it is always included.
-CONFIGS="--config=p/owasp-top-ten --config=p/security-audit"
+# Always-on layers.
+CANDIDATE_CONFIGS="p/owasp-top-ten p/security-audit"
 
 # Language pack (if the language is known).
-[ -n "$SEMGREP_LANG" ] && CONFIGS="$CONFIGS --config=p/${SEMGREP_LANG}"
+[ -n "$SEMGREP_LANG" ] && CANDIDATE_CONFIGS="$CANDIDATE_CONFIGS p/${SEMGREP_LANG}"
 
 # Language-specific security pack, where a dedicated one exists.
 case "$SEMGREP_LANG" in
-  golang)     CONFIGS="$CONFIGS --config=p/gosec" ;;
-  python)     CONFIGS="$CONFIGS --config=p/python-security" ;;
+  golang)     CANDIDATE_CONFIGS="$CANDIDATE_CONFIGS p/gosec" ;;
   javascript|typescript)
-              CONFIGS="$CONFIGS --config=p/javascript --config=p/nodejs-scan" ;;
+              CANDIDATE_CONFIGS="$CANDIDATE_CONFIGS p/javascript p/nodejs-scan" ;;
 esac
 
 # Framework packs — map detected frameworks in tech-stack.json to Semgrep packs.
-# Only packs that exist in the registry are added; unknown frameworks are skipped.
 FRAMEWORKS=$(python3 -c \
   "import json; d=json.load(open('$TECH')); \
    print(' '.join(d.get('frameworks',[])))" 2>/dev/null)
 for fw in $FRAMEWORKS; do
   case "$fw" in
-    django)          CONFIGS="$CONFIGS --config=p/django" ;;
-    flask)           CONFIGS="$CONFIGS --config=p/flask" ;;
-    express|express.js) CONFIGS="$CONFIGS --config=p/express" ;;
-    react)           CONFIGS="$CONFIGS --config=p/react" ;;
-    gin|echo|fiber)  CONFIGS="$CONFIGS --config=p/gitlab-gosec" ;;
-    spring|springboot) CONFIGS="$CONFIGS --config=p/java" ;;
-    rails)           CONFIGS="$CONFIGS --config=p/ruby-security" ;;
+    django)          CANDIDATE_CONFIGS="$CANDIDATE_CONFIGS p/django" ;;
+    flask)           CANDIDATE_CONFIGS="$CANDIDATE_CONFIGS p/flask" ;;
+    express|express.js) CANDIDATE_CONFIGS="$CANDIDATE_CONFIGS p/express" ;;
+    react)           CANDIDATE_CONFIGS="$CANDIDATE_CONFIGS p/react" ;;
+    gin|echo|fiber)  CANDIDATE_CONFIGS="$CANDIDATE_CONFIGS p/gitlab-gosec" ;;
+    spring|springboot) CANDIDATE_CONFIGS="$CANDIDATE_CONFIGS p/java" ;;
+    rails)           CANDIDATE_CONFIGS="$CANDIDATE_CONFIGS p/ruby-security" ;;
   esac
 done
 
-# Run once with the assembled ruleset. Missing/unavailable packs are skipped by
-# Semgrep with a warning on stderr (discarded) — they do not abort the scan.
-semgrep $CONFIGS \
-  --json --output {repo_path}/.security-review/semgrep-raw.json \
-  {repo_path} 2>/dev/null
+# Remove duplicate packs while preserving order.
+CANDIDATE_CONFIGS=$(printf '%s\n' $CANDIDATE_CONFIGS | awk '!seen[$0]++')
 
-# Record which packs were requested so Phase 6 can report scan depth.
-echo "$CONFIGS" > {repo_path}/.security-review/semgrep-configs.txt
+# For each candidate pack, resolve to its effective config source:
+# local cache file if present, otherwise the registry pack name.
+# This means a 404 or renamed pack in the registry never blocks a scan when
+# setup.sh has already cached the rules.
+RESOLVED_CONFIGS=""
+for cfg in $CANDIDATE_CONFIGS; do
+  name="${cfg#p/}"
+  if [ -f "$RULES_CACHE/${name}.yaml" ]; then
+    RESOLVED_CONFIGS="$RESOLVED_CONFIGS $RULES_CACHE/${name}.yaml"
+  else
+    RESOLVED_CONFIGS="$RESOLVED_CONFIGS $cfg"
+  fi
+done
+
+# Probe each config independently. Some Semgrep packs return 404 or an
+# invalid-config error (version mismatch) even when the file exists locally —
+# local cache fixes 404/renamed-pack failures; the probe loop still catches
+# version-compatibility errors. A failed config is logged and skipped;
+# successful ones are merged into one raw result.
+OUT_DIR={repo_path}/.security-review
+: > "$OUT_DIR/semgrep-configs.txt"
+printf '{"results":[],"errors":[]}\n' > "$OUT_DIR/semgrep-raw.json"
+
+SUCCESS=0
+for cfg in $RESOLVED_CONFIGS; do
+  # Use the basename (without path or extension) as the label in log/tmp files.
+  label=$(basename "$cfg" .yaml)
+  TMP="$OUT_DIR/semgrep-${label}.json"
+  ERR="$OUT_DIR/semgrep-${label}.stderr"
+  # Log whether this came from the local cache or the registry.
+  if [[ "$cfg" == "$RULES_CACHE"* ]]; then
+    source_label="local cache"
+  else
+    source_label="registry"
+  fi
+  if semgrep --config="$cfg" --json --output "$TMP" {repo_path} 2>"$ERR"; then
+    echo "$cfg — succeeded (${source_label})" >> "$OUT_DIR/semgrep-configs.txt"
+    python3 - "$OUT_DIR/semgrep-raw.json" "$TMP" <<'PY'
+import json, sys
+merged_path, new_path = sys.argv[1:3]
+with open(merged_path, encoding="utf-8") as f:
+    merged = json.load(f)
+with open(new_path, encoding="utf-8") as f:
+    new = json.load(f)
+merged.setdefault("results", []).extend(new.get("results", []))
+merged.setdefault("errors", []).extend(new.get("errors", []))
+with open(merged_path, "w", encoding="utf-8") as f:
+    json.dump(merged, f, indent=2)
+PY
+    SUCCESS=$((SUCCESS + 1))
+  else
+    reason=$(head -5 "$ERR" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g')
+    echo "$cfg — failed (${source_label}): ${reason:-unknown error}" >> "$OUT_DIR/semgrep-configs.txt"
+  fi
+done
+
+if [ "$SUCCESS" -eq 0 ]; then
+  echo "No Semgrep configs succeeded; continue with manual OWASP analysis and record Semgrep as attempted but unavailable."
+fi
 ```
 
 Parse semgrep output as seed findings, then validate each one manually.
 
-> **Coverage note — interprocedural taint.** `p/security-audit` provides Semgrep's
-> taint-mode rules, but Semgrep's taint tracking is bounded (single-file / limited
-> cross-function, not whole-program interprocedural). This pipeline has **no
-> whole-program taint engine**: cross-file flows (source in one module → helper →
-> sink in another) are only caught when the deep-analysis LLM traces them by hand
-> or a taint rule happens to span the path. Treat a clean Semgrep result as
-> "no rule-matched sink," not "no injectable data flow." Phase 6 must surface this
-> as an explicit limitation in the report (see phase6 → Coverage limitations).
+> **Coverage note — interprocedural taint.** When `p/security-audit` succeeds
+> (from local cache or registry), it provides Semgrep's taint-mode rules, but
+> Semgrep's taint tracking is bounded (single-file / limited cross-function, not
+> whole-program interprocedural). This pipeline has **no whole-program taint
+> engine**: cross-file flows (source in one module → helper → sink in another)
+> are only caught when the deep-analysis LLM traces them by hand or a taint rule
+> happens to span the path. Treat a clean Semgrep result as "no rule-matched
+> sink," not "no injectable data flow." If `p/security-audit` fails even from
+> cache (e.g. rule syntax incompatible with the installed Semgrep version), Phase
+> 6 must explicitly say that Semgrep taint seeds were unavailable and that Phase 4
+> relied on manual source→sink tracing for injection classes (see phase6 →
+> Coverage limitations).
 
 ## Step 3: Deep Analysis by Category
 

@@ -165,6 +165,46 @@ else
   try_install poetry install_poetry
 fi
 
+# Semgrep rule cache — download registry packs so scans don't depend on registry availability
+# Packs are stored at $HOME/.config/repo-security-review/semgrep/<name>.yaml
+# Phase 4 prefers these local files; falls back to the registry if a file is absent.
+echo ""
+echo "=== Semgrep rule cache ==="
+SEMGREP_RULES_DIR="$HOME/.config/repo-security-review/semgrep"
+mkdir -p "$SEMGREP_RULES_DIR"
+echo "Cache directory: $SEMGREP_RULES_DIR"
+
+download_semgrep_pack() {
+  local pack=$1          # e.g. p/owasp-top-ten
+  local name="${pack#p/}" # e.g. owasp-top-ten
+  local dest="$SEMGREP_RULES_DIR/${name}.yaml"
+  printf "  %-30s" "$pack"
+  if curl -sSf "https://semgrep.dev/c/${pack}" -o "${dest}.tmp" 2>/dev/null \
+     && mv "${dest}.tmp" "$dest"; then
+    local count
+    count=$(grep -c "^- id:\|^  id:" "$dest" 2>/dev/null || echo "?")
+    echo "✅  cached (${count} rules)"
+  else
+    rm -f "${dest}.tmp"
+    echo "⚠️  unavailable in registry — Phase 4 will probe at scan time"
+  fi
+}
+
+echo "Core packs (always needed):"
+for pack in p/owasp-top-ten p/security-audit; do
+  download_semgrep_pack "$pack"
+done
+
+echo "Language packs:"
+for pack in p/python p/golang p/javascript p/java p/ruby; do
+  download_semgrep_pack "$pack"
+done
+
+echo "Security / framework packs:"
+for pack in p/gosec p/django p/flask p/express p/react p/nodejs-scan p/ruby-security; do
+  download_semgrep_pack "$pack"
+done
+
 # Optional: Docker (for runtime validation)
 echo ""
 echo "=== Optional: Docker (for --runtime mode) ==="
