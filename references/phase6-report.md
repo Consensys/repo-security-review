@@ -232,6 +232,26 @@ No mention of calibration or context.}
 {All confirmed findings from all phases (deduped), sorted by Priority then severity.
 Use a flat numbered list — no sub-sections by phase.}
 
+**Finding IDs — use the original phase-assigned ID, never renumber to F-NN:**
+
+| Source | ID prefix | Example |
+|--------|-----------|---------|
+| Phase 1 · Secret scanning | `S-` | `S-001` |
+| Phase 2 · Architecture | `A-` | `A-001` |
+| Phase 3 · Dependency CVEs | `C-` | `C-001` |
+| Phase 4 · OWASP code analysis | `O-` | `O-001` |
+| Phase 4b · LLM/AI security | `L-` | `L-001` |
+
+The ID comes directly from the phase JSON file that produced the finding. For Phase 5
+validated findings, use `original_id` from `phase5-validated.json` (which is the Phase 4
+`O-XXX` id). Never assign a new sequential `F-NN` identifier.
+
+**When a finding was confirmed by more than one phase** (e.g. an architecture weakness
+also caught as an OWASP code finding): use the canonical ID (Phase 4's `O-XXX` wins
+over Phase 2's `A-XXX` per the Deduplication Step above). In the **Description** field
+add one sentence: _"Also identified as A-XXX in architectural analysis."_ Do not add a
+separate `**Also identified as**` label — fold it into the description prose.
+
 ### 🟠 {ID} · {Title}
 - **Priority**: P{N}
 - **Category**: {e.g. Session Management / Missing Control / Dependency CVE / CI/CD / OWASP A07}
@@ -242,7 +262,9 @@ Use a flat numbered list — no sub-sections by phase.}
 {snippet — keep to ≤10 lines}
 ```
 - **Description**: {what the problem is and why it matters — include key architectural
-  context if this was a merged arch+code finding, without labeling it as such}
+  context if this was a merged arch+code finding, without labeling it as such. If a
+  secondary phase also identified this finding, end with: "Also identified as {ID} in
+  {phase name} analysis."}
 - **Impact**: {what an attacker can do}
 - **Remediation**: {specific, actionable fix}
 {If PoC file exists for this finding:}
@@ -649,7 +671,10 @@ change to reconsider. Controls the adopter can apply WITHOUT vendor changes.}
 ## Findings
 
 {All confirmed findings (Phase 2 arch + Phase 4 OWASP + Phase 4b LLM, deduped),
-sorted by severity — highest first. Flat list, no priority labels.}
+sorted by severity — highest first. Flat list, no priority labels.
+Use original phase-assigned IDs (A-XXX / O-XXX / L-XXX) — never renumber to F-NN.
+For multi-phase findings, use canonical ID and mention the secondary ID in the
+description: "Also identified as A-XXX in architectural analysis."}
 
 ### 🟠 {ID} · {Title}
 - **Severity**: {severity}
