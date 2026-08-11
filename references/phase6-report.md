@@ -210,6 +210,8 @@ No mention of calibration or context.}
 | 🟡 Medium | N |
 | 🟢 Low | N |
 
+**All four severity rows must always appear in the table, even when the count is 0. Never omit a row because its count is zero.**
+
 **Fix immediately**: {bullet list — P0 and P1 findings only, one line each}
 
 ---
@@ -371,6 +373,8 @@ in the tables below). Secrets are not calibrated.
 | 🟠 High | N | N / N | N / N | N / N | **N / N** |
 | 🟡 Medium | N | N / N | N / N | N / N | **N / N** |
 | 🟢 Low | N | N / N | N / N | N / N | **N / N** |
+
+**All four severity rows must always appear in the table, even when every count is 0. Never omit a row because its count is zero.**
 
 **Immediate Actions Required**:
 {P0 findings only}
