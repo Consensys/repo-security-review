@@ -180,7 +180,7 @@ different generation or a different chain.
 >   to proceed?"
 > - Options: **"Add --claude5"** (re-run with Claude 5 — uses significantly
 >   more tokens per phase) · **"I'll switch models"** (cancel — switch
->   this session to Sonnet 4.6 or Opus 4.8 and re-run for free)
+>   this session to Sonnet 4.6 or Opus 4.8 and re-run)
 >
 > If `AskUserQuestion` isn't available (e.g. non-interactive/CI), print one
 > short line instead:
