@@ -136,40 +136,8 @@ flowchart TD
     class TS store
 ```
 
-### PR review flow (`--pr`)
-
-A separate, single-agent mode — not a variant of the pipeline above. It never
-runs Phases 1–4 or 7; it runs `references/pr-review.md` directly, bounding
+PR review mode (`--pr`) is a separate, single-agent mode — not a variant of
+the pipeline above. It never runs Phases 1–4 or 7; it runs
+`references/pr-review.md` directly (Steps 0–5 gather diff-scoped context and
+scan, Step 6 validates in isolation, Step 7 writes `pr-report.md`), bounding
 file reads to the diff plus whatever a repo-wide grep specifically points to.
-
-```mermaid
-flowchart TD
-    Start([/repo-security-review &lt;repo&gt; --pr base...head/]) --> S0
-
-    subgraph AGENT["PR REVIEW AGENT (references/pr-review.md)"]
-        S0[Step 0 · Resolve diff<br/>git diff --name-status, merge-base range]
-        S1[Step 1 · Cheap structural context<br/>tech-stack + surface_map, reused from Phase 2 Step 0]
-        S2[Step 2 · Scoped auth/trust context<br/>grep repo-wide, read only diff files + grep hits]
-        S3[Step 3 · Diff-scoped secret scan<br/>gitleaks --log-opts, commit range]
-        S4[Step 4 · Diff-scoped OWASP + regression check<br/>semgrep on changed files + removed-control detection]
-        S5[Step 5 · Dependency check<br/>only if diff touches a manifest/lockfile]
-
-        S0 --> S1 --> S2 --> S3 --> S4 --> S5
-    end
-
-    S5 -. file path only .-> S6
-
-    subgraph JUDGMENT2["JUDGMENT LAYER (isolated context)"]
-        S6[Step 6 · Validate<br/>phase5-validate-and-poc.md, unmodified<br/>PoCs only for confirmed findings]
-    end
-
-    S6 --> S7[Step 7 · Report<br/>phase6-report.md → PR Review Report format]
-    S7 --> Out2([pr-report.md + pocs/])
-
-    classDef finder fill:#eef6ff,stroke:#5b8def,color:#1a1a1a
-    classDef judgment fill:#fff4e6,stroke:#e0883a,color:#1a1a1a
-    classDef report fill:#e8f5e9,stroke:#5a9a5a,color:#1a1a1a
-    class S0,S1,S2,S3,S4,S5 finder
-    class S6 judgment
-    class S7 report
-```
