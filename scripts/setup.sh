@@ -182,7 +182,13 @@ download_semgrep_pack() {
   if curl -sSf "https://semgrep.dev/c/${pack}" -o "${dest}.tmp" 2>/dev/null \
      && mv "${dest}.tmp" "$dest"; then
     local count
-    count=$(grep -c "^- id:\|^  id:" "$dest" 2>/dev/null || echo "?")
+    # Registry sometimes serves a pack as minified single-line JSON instead of
+    # multi-line YAML (e.g. p/owasp-top-ten) — grep -c counts matching LINES, so
+    # it undercounts (or misreports) when a whole pack is one line. grep -o emits
+    # one output line per match regardless of source line count, so piping to
+    # wc -l gives the correct occurrence count for both formats.
+    count=$(grep -oE '"id"[[:space:]]*:|^[[:space:]]*-?[[:space:]]*id:' "$dest" 2>/dev/null | wc -l | tr -d ' ')
+    [ -z "$count" ] && count="?"
     echo "✅  cached (${count} rules)"
   else
     rm -f "${dest}.tmp"
