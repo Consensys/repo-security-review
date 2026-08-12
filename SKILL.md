@@ -10,7 +10,11 @@ description: >
   on this". This skill orchestrates 7 sequential phases: secret scanning,
   architectural analysis, dependency CVE scanning with reachability validation,
   code-level OWASP analysis, finding validation, PoC generation (with optional
-  runtime validation via Docker), and final report generation.
+  runtime validation via Docker), and final report generation. Also handles
+  reviewing a single pull request's diff for security issues (`--pr` flag) —
+  trigger on phrasings like "review this PR for security issues" or "security
+  review this diff before merge" — a fast, diff-scoped mode that does not
+  require the repo to have been scanned before.
 maturity: experimental
 ---
 
@@ -63,6 +67,7 @@ Parse these from `$ARGUMENTS` using the format:
 | `--runtime` | false | Enable Docker-based runtime PoC validation |
 | `--verbose` | false | Generate the full detailed report. Default report (for dev teams) omits the OWASP Checks Run inventory, the standalone Remediation Priority section, and the Appendix. All findings, evidence, and per-finding priority labels are included in both modes. In multi-repo mode the flag applies to both the per-service reports (Phase 6) and the system-level synthesis report (Phase 7). |
 | `--vendor` | false | Vendor / open-source audit mode. Audits a third-party repo the company is considering adopting; audience is the internal security team, deliverable is an adoption risk judgment (not a fix-list for the vendor). Forces skip of `secrets`, `dependencies`, and `poc`; pins every phase to the resolved Standard tier model (never Opus); and switches Phase 6 to the vendor report format. See [Vendor Mode](#vendor-mode---vendor) below. |
+| `--pr` | none | PR Review mode. `--pr <base>...<head>` (or `--pr <base>` shorthand for `<base>...HEAD`) reviews only a pull request's diff instead of the whole repository — replaces the 6/7-phase pipeline with `references/pr-review.md`, pins to the resolved Standard tier model, and writes `pr-report.md` instead of `final-report.md`. Mutually exclusive with `--repos` and `--vendor`. See [PR Review Mode](#pr-review-mode---pr) below. |
 | `--context` | none | Inline `key=value,key=value` threat model used to calibrate severity. Optional — omit for default behavior. See [`--context`](#--context-threat-model-calibration) below. |
 | `--yes` | false | Non-interactive mode. Auto-confirms all user-facing prompts: the `--output` copy confirmation, the Docker runtime gate (`--runtime`), and the pure-skill-repo auto-skip cascade. Path-validation safety checks (rejecting sensitive `--output` destinations) are never bypassed. Use in CI or scripted runs. |
 | `--claude5` | false | Opt into Claude 5 generation models (claude-opus-5, claude-sonnet-5) with fallback to 4.x versions if unavailable. By default the skill uses pinned 4.x versions (claude-opus-4-8, claude-sonnet-4-6, claude-haiku-4-5). Set this flag to prioritize the latest Claude models. |
@@ -92,6 +97,14 @@ Exception: if `--yes` is set and no repo path is provided, abort with a clear er
 - `--skip owasp` → also skips `validation` and `poc` (Phase 5 has nothing to work from)
 - `--skip validation` → also skips `poc` (PoC requires a validation verdict)
 - `--skip poc` → validation runs normally; Phase 5 confirms/rejects findings but writes no PoC files
+
+**Skip aliases in PR mode (`--pr`)** reinterpret the same names against
+`references/pr-review.md`'s steps, not the numbered phases: `secrets` → Step
+3, `dependencies` → Step 5, `owasp` → Step 4, `validation`/`poc` → Step 6
+(same cascade rules as above). `architecture` is **not a valid skip target in
+PR mode** — Step 1/2's structural context is load-bearing for every other
+step and cannot be skipped; passing it aborts with a clear error.
+`skill-security` has no effect in PR mode (Phase 4b does not run).
 
 ### Model Configuration
 
@@ -233,6 +246,7 @@ Record each fallback and the opt-in status in `run-metadata.json`.
 ```json
 {
   "vendor_mode": false,
+  "pr_mode": false,
   "claude5_opt_in": false,
   "deep_tier_model":   "claude-opus-4-8",
   "standard_tier_model": "claude-sonnet-4-6",
@@ -249,6 +263,21 @@ Record each fallback and the opt-in status in `run-metadata.json`.
   "fallback_notes": "Deep tier: claude-opus-4-8 not available, using claude-sonnet-4-6"
 }
 ```
+
+When `--pr` is set, the file instead contains only:
+```json
+{
+  "vendor_mode": false,
+  "pr_mode": true,
+  "pr_diff_range": "main...feature/add-export",
+  "claude5_opt_in": false,
+  "standard_tier_model": "claude-sonnet-4-6",
+  "pr_phase_model": "claude-sonnet-4-6",
+  "fallback_notes": "omitted when no fallback was needed"
+}
+```
+No `deep_tier_model`, `deep_tier_thinking`, or per-numbered-phase fields —
+PR mode has no Deep tier and no numbered phases, only the one PR-review agent.
 
 `claude5_opt_in` is always present and records whether `--claude5` was set on the
 run. `fallback_notes` is omitted when no fallback was needed.
@@ -408,6 +437,89 @@ flags are passed, print a one-line notice and continue without Docker.
 `--vendor` composes with `--verbose` (adds the Coverage & Tools appendix to the
 vendor report) and with multi-repo `--repos` (each vendor repo gets a vendor
 report; Phase 7 synthesis still runs, and its report is likewise vendor-framed).
+
+## PR Review Mode (`--pr`)
+
+`--pr <base>...<head>` (or `--pr <base>` as shorthand for `<base>...HEAD`)
+switches the skill from a full-repository audit to a fast, diff-scoped review
+of a single pull request. **This is a distinct mode from the 6/7-phase
+pipeline**, not a variant of it — it runs one reference file,
+`references/pr-review.md`, end to end instead of Phases 1–6. That file reuses
+pieces of Phase 1/2/4/5 logic **by reference**, never duplicated, but bounds
+all full-file reads to the diff plus whatever a repo-wide grep specifically
+points to — see `pr-review.md` → "Confidence and Scope Disclaimers" for
+exactly what is and isn't covered by a PR review.
+
+**When to reach for this instead of a full scan**: reviewing a specific PR
+before merge, especially on a repo that has never been scanned and where
+running the full pipeline per-PR would be too slow or too expensive. It is
+**not** a substitute for periodically running the full pipeline — by
+construction it cannot see anything outside the diff, and it cannot build the
+repo-wide `auth_coverage` map a full Phase 2 run produces.
+
+**1. Mutual exclusivity.** `--pr` cannot be combined with `--repos`
+(multi-repo mode) or `--vendor` (third-party adoption audit) — both assume a
+full-repository review, which is exactly what `--pr` exists to avoid. If
+either is also passed, abort with a clear error naming the conflicting flags.
+`--pr` composes normally with `--skip` (reinterpreted against `pr-review.md`'s
+steps — see Argument Parsing Rules above), `--runtime`, `--context`, `--yes`,
+`--claude5`, and `--debug`.
+
+**2. Execution.**
+
+```
+PR Review Agent → runs references/pr-review.md
+  Step 0: Resolve diff (git diff --name-status, three-dot merge-base range)
+  Step 1: Cheap structural context (tech-stack + surface_map — reused from
+          Phase 2 Step 0 and its surface-classification rules, unmodified)
+  Step 2: Scoped auth/trust context (grep repo-wide for free; read only the
+          diff's files plus whatever those greps specifically point to)
+  Step 3: Diff-scoped secret scan             [skip alias: secrets]
+  Step 4: Diff-scoped OWASP + regression check [skip alias: owasp]
+  Step 5: Dependency check — only if the diff touches a manifest/lockfile
+                                               [skip alias: dependencies]
+  Step 6: Validation — delegates to phase5-validate-and-poc.md unmodified
+                                               [skip aliases: validation, poc]
+  Step 7: Report — delegates to phase6-report.md → PR Review Report format
+```
+
+This is conceptually one agent running one reference file, not seven
+sequential subagents — but the finder/judgment isolation boundary (see
+"Subagent Context Isolation" below) still applies at the Step 5→6 boundary.
+Dispatch Steps 0–5 and Step 6 as two subagents exactly like the full
+pipeline does for Phase 4 → Phase 5, passing only the `pr-findings.json` file
+path across the boundary, whenever the orchestration environment supports
+spawning a subagent for a sub-phase. If that overhead is impractical for a
+mode meant to be fast, a single agent may run both parts sequentially, but
+must still treat its own Step 0–5 output as unverified input when Step 6
+starts — re-reading source from scratch rather than reasoning from
+conclusions it already reached.
+
+**3. Model tier.** PR Review mode always uses the **resolved Standard tier
+model** — the same constraint as `--vendor` (never Deep/Opus, no
+chain-walking beyond the Standard chain). This mode is meant to run
+frequently (every PR, potentially in CI), where the full pipeline's
+Deep-tier reasoning cost isn't justified for a diff-scoped review. Which
+Standard chain is used depends on `--claude5`, identical to Vendor Mode's
+chain-selection rules. If the Standard chain is entirely unavailable, abort
+with a clear error — do not fall back to Deep.
+
+Write `run-metadata.json` with `pr_mode: true`, `pr_diff_range: "{base}...{head}"`,
+and `pr_phase_model` set to the resolved Standard tier model.
+
+**4. Output.** Writes to the same `{repo_path}/.security-review/` working
+directory as the full pipeline, but with `pr-`-prefixed filenames
+(`pr-findings.json`, `pr-validated.json`, `pr-pocs.json`,
+`pr-changed-files.txt`) and `pr-report.md` — **never** `phase4-owasp.json` /
+`phase5-validated.json` / `final-report.md`. This is deliberate: a repo may
+already have a full scan's `final-report.md`, and `--pr` may be run
+repeatedly for different PRs against the same repo — a shared filename would
+let one overwrite the other silently. Running `--pr` twice does overwrite
+the previous `pr-report.md`, the same "last run wins" semantics the full
+pipeline already has for `final-report.md`.
+
+**5. `--runtime`** is honored exactly as Phase 5 always honors it (per-finding
+Runtime Value Assessment) — nothing about PR mode changes that logic.
 
 ## Phase Execution Order
 
@@ -574,14 +686,15 @@ Read the agent instructions for each phase from `references/` before spawning:
 | Phase | Reference File | Mode |
 |-------|---------------|------|
 | 0 (Topology) | `references/phase0-topology.md` | multi-repo only |
-| 1 | `references/phase1-secrets.md` | always |
-| 2 | `references/phase2-architecture.md` | always |
-| 3 + 3b | `references/phase3-dependencies.md` | always |
-| 4 | `references/phase4-owasp.md` | always |
+| 1 | `references/phase1-secrets.md` | always (full pipeline) |
+| 2 | `references/phase2-architecture.md` | always (full pipeline) |
+| 3 + 3b | `references/phase3-dependencies.md` | always (full pipeline) |
+| 4 | `references/phase4-owasp.md` | always (full pipeline) |
 | 4b (LLM Security) | `references/phase-llm-security.md` | when `has_skill_files: true` |
-| 5 (Validation + PoC) | `references/phase5-validate-and-poc.md` | always |
-| 6 (Report) | `references/phase6-report.md` | always |
+| 5 (Validation + PoC) | `references/phase5-validate-and-poc.md` | always (full pipeline) — also reused unmodified by PR mode's Step 6 |
+| 6 (Report) | `references/phase6-report.md` | always (full pipeline) — also reused by PR mode's Step 7 for the PR Review Report format |
 | 7 (Synthesis) | `references/phase7-synthesis.md` | multi-repo only |
+| PR Review | `references/pr-review.md` | **only** when `--pr` is set — replaces phases 1–4 and 7 entirely; see [PR Review Mode](#pr-review-mode---pr) |
 
 ## Output Structure
 
@@ -640,6 +753,29 @@ PoCs are copied into per-service subdirectories under `{output_dir}`:
 ```
 
 Create `{output_dir}` and the working directory for each repo before spawning agents.
+
+### PR Review mode (`--pr`)
+
+Writes into the same working directory as single-repo mode, using
+`pr-`-prefixed filenames so a prior full scan's outputs (or a later one) are
+never overwritten:
+
+```
+{repo_path}/.security-review/
+├── pr-changed-files.txt      ← Step 0: git diff --name-status output
+├── tech-stack.json           ← Step 1: reused if already present from a prior scan
+├── pr-gitleaks-raw.json      ← Step 3: deleted after processing, same as Phase 1
+├── pr-findings.json          ← Steps 3-5: candidate findings (D-XXX ids)
+├── pr-validated.json         ← Step 6: phase5-validate-and-poc.md output, substituted filename
+├── pr-pocs.json              ← Step 6: substituted filename for phase5-pocs.json
+├── pocs/                     ← individual PoC scripts, same convention as full pipeline
+│   └── poc_D-001.py
+└── pr-report.md              ← Step 7: never final-report.md — see Output Path exception
+```
+
+If the repo already has `phase2-architecture.json` / `phase4-owasp.json` /
+`final-report.md` from a prior full scan, PR mode does not read, write, or
+delete them — the two file sets coexist without interaction.
 
 ## Tech Stack Profile (Phase 2 → downstream phases)
 

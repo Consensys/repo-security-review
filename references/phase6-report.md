@@ -31,17 +31,28 @@ Read all that exist (some may be absent if a phase was skipped):
 - LLM findings never have PoCs — omit the PoC line entirely.
 - LLM findings are never validated by Phase 5 — omit any validation status.
 
-Check the `--verbose` and `--vendor` flags (passed by the orchestrator). They
-control which report structure is produced — see Report Modes below.
-`--vendor` selects the vendor-audit report and takes precedence over the
-default/verbose structure; `--verbose` then only adds the Coverage & Tools
-appendix to it.
+Check the `--verbose`, `--vendor`, and `--pr` flags (passed by the
+orchestrator). They control which report structure is produced — see Report
+Modes below. `--pr` (PR Review mode) takes precedence over everything else —
+when set, ignore `--vendor` (the orchestrator does not allow both; see
+SKILL.md) and read `pr-findings.json` / `pr-validated.json` instead of the
+`phase4-owasp.json` / `phase5-validated.json` pair. Otherwise `--vendor`
+selects the vendor-audit report and takes precedence over the default/verbose
+structure; `--verbose` then only adds the Coverage & Tools appendix to it.
 
 ## Output Path
 
 ```
 {repo_path}/.security-review/final-report.md
 ```
+
+**Exception — PR Review mode (`--pr`)**: write to
+`{repo_path}/.security-review/pr-report.md` instead. This is deliberate, not
+an oversight: a repo may already have a `final-report.md` from a prior full
+scan, and `--pr` may be run repeatedly against the same repo for different
+PRs — a shared filename would let a diff-scoped review silently overwrite a
+full audit's report (or one PR's review overwrite another's). Never write
+`final-report.md` when `--pr` is set.
 
 The orchestrator owns the final copy step — Phase 6 must not write to
 `--output` directly and must not call `present_files`.
@@ -172,6 +183,33 @@ Key differences from the other modes:
   (reuse the verbose appendix, including the Coverage limitations bullets) at the
   end of the vendor report. Everything else stays as the vendor structure.
 
+### PR Review report (`--pr`) — for a pull-request diff, not a full scan
+
+**Goal**: give a reviewer a fast, actionable read of what a specific PR
+changes, security-wise — not a repository audit. It replaces the default/
+verbose/vendor structure entirely (see PR Review Report Structure below) and
+is short enough to paste as a PR comment.
+
+Key differences from the other modes:
+- **Scope banner is mandatory and leads the report** — this mode is
+  diff-scoped by construction (see `pr-review.md` → "Confidence and Scope
+  Disclaimers"); a reader must not mistake a clean result for a full audit.
+- **Findings use the `D-` prefix** from `pr-findings.json` /
+  `pr-validated.json`, not `phase4-owasp.json`.
+- **Regressions are called out distinctly** — a finding with
+  `regression: true` is a control that existed before this diff and doesn't
+  anymore, which is a different (and often more urgent) class of issue than
+  a net-new vulnerability. Render these in their own subsection, not mixed
+  into the general findings list.
+- **No Priority (P0–P3) assignment** — a PR review isn't a remediation
+  sprint; severity alone drives ordering. `CRITICAL`/`HIGH` findings still
+  get a one-line "blocks merge" recommendation.
+- **Phase 1/2/3/4/4b/5 outputs are not read** unless a prior full scan
+  happens to have left them in `.security-review/` — do not reference them;
+  this report is self-contained from `pr-findings.json`/`pr-validated.json`.
+- **`--verbose` and `--vendor` do not apply** — the orchestrator does not
+  allow combining them with `--pr` (see SKILL.md).
+
 ### Priority assignment (default & verbose modes)
 
 Assign a `**Priority**` to every finding before rendering.
@@ -243,10 +281,12 @@ Use a flat numbered list — no sub-sections by phase.}
 | Phase 3 · Dependency CVEs | `C-` | `C-001` |
 | Phase 4 · OWASP code analysis | `O-` | `O-001` |
 | Phase 4b · LLM/AI security | `L-` | `L-001` |
+| PR Review mode · diff-scoped findings | `D-` | `D-001` |
 
 The ID comes directly from the phase JSON file that produced the finding. For Phase 5
 validated findings, use `original_id` from `phase5-validated.json` (which is the Phase 4
-`O-XXX` id). Never assign a new sequential `F-NN` identifier.
+`O-XXX` id, or `pr-validated.json`'s `original_id` — the PR mode `D-XXX` id — when
+`--pr` was used). Never assign a new sequential `F-NN` identifier.
 
 **When a finding was confirmed by more than one phase** (e.g. an architecture weakness
 also caught as an OWASP code finding): use the canonical ID (Phase 4's `O-XXX` wins
@@ -771,6 +811,137 @@ _Vendor risk assessment · repo-security-review skill (vendor mode). Static + ru
 
 ---
 
+## PR Review Report Structure (`--pr`)
+
+Produced instead of the default/verbose/vendor structure when `--pr` is set.
+Read `pr-findings.json` and `pr-validated.json` (substituted filenames per
+`phase5-validate-and-poc.md`'s PR Mode note). Do not read or reference
+`phase1-secrets.json` / `phase2-architecture.json` / `phase3-cves.json` /
+`phase4-owasp.json` / `phase5-validated.json` — those belong to the full-scan
+pipeline and are not produced by this mode.
+
+```markdown
+# PR Security Review
+**Repository**: {repo_name}
+**Diff**: `{base}...{head}` ({N} files changed)
+**Review Date**: {date}
+**Model**: {standard_tier_model} (PR mode pins to the resolved Standard tier — never Opus)
+
+> ⚠️ **Diff-scoped review — not a full repository audit.** Findings below
+> reflect only the code this PR changes, plus targeted lookups (not an
+> exhaustive read) used to establish auth status and surface classification
+> for the routes/files it touches. A clean result here means no issue was
+> found **in this diff**, not that the repository as a whole is secure. Run
+> `/repo-security-review` without `--pr` for full-repository coverage.
+
+---
+
+## Summary
+
+{1-2 sentences: what this PR does from a security lens, and the headline
+risk if any CRITICAL/HIGH findings exist.}
+
+| Severity | Count |
+|---|---|
+| 🔴 Critical | N |
+| 🟠 High | N |
+| 🟡 Medium | N |
+| 🟢 Low | N |
+
+**All four severity rows must always appear, even when the count is 0.**
+
+{If any CRITICAL/HIGH findings exist:}
+**Recommendation**: 🚫 Do not merge until addressed — {one-line reason naming the finding(s)}.
+{Otherwise:}
+**Recommendation**: ✅ No blocking findings in this diff.
+
+---
+
+## Removed Security Controls          ← omit entirely if no finding has regression: true
+
+{Findings with `regression: true` — a control that existed before this diff
+and does not anymore. Render first and separately from other findings; this
+class of issue is often more urgent than a net-new vulnerability because it's
+a regression in previously-working protection, not a gap that was always there.}
+
+### 🔴 {ID} · {Title}
+- **Severity**: {severity}
+- **File**: `{file}:{line}`
+- **Removed** (was at pre-diff line {removed_control.pre_diff_line}):
+```{language}
+{removed_control.pre_diff_code}
+```
+- **What changed**: {description — what the control did and why its removal matters}
+- **Impact**: {attack_vector}
+- **Validation**: {CONFIRMED — no equivalent control found elsewhere in the call chain | CONFIRMED_LOW_CONFIDENCE — reason}
+- **Fix**: {remediation — usually "restore the removed check" unless it was deliberately consolidated elsewhere}
+{If PoC file exists:}
+- **PoC**: `pocs/{poc_filename}`
+
+---
+
+## Findings                          ← new vulnerable code introduced by this diff
+
+{Findings with `regression: false`, sorted by severity — highest first. Flat
+list, no priority labels. Use the `D-` prefix from pr-findings.json/
+pr-validated.json — never renumber to F-NN.}
+
+### 🟠 {ID} · {Title}
+- **Severity**: {severity}
+- **Category**: {OWASP A0x / API / secret / dependency CVE}
+- **File**: `{file}:{line}`
+{If code snippet available (≤10 lines):}
+**Code**:
+```{language}
+{snippet}
+```
+- **Description**: {what the problem is and why it matters}
+- **Impact**: {what an attacker can do}
+- **Auth context**: {if this finding's route appears in touched_auth_context: "Route is {auth_status} ({auth_confidence} confidence) — {basis}"; omit this line entirely for non-route findings}
+- **Remediation**: {specific, actionable fix}
+{If PoC file exists:}
+- **PoC**: `pocs/{poc_filename}`
+{If phase5-equivalent poc_skipped: true AND finding is CONFIRMED:}
+- **PoC**: skipped (`--skip poc` was set)
+
+{If no non-regression findings exist:}
+_No new vulnerabilities introduced by this diff._
+
+---
+
+## False Positives
+
+Investigated and ruled out — included so the review's rigor is visible:
+
+| ID | Type | File | Reason |
+|----|------|------|--------|
+| D-004 | XSS | src/views/export.tsx | Output passed through framework's autoescape |
+
+{If none: "None — no candidate findings were excluded during validation."}
+
+---
+
+## Scope & Limitations
+
+- **Diff-scoped by design.** Reviewed: {N} changed files in `{base}...{head}`.
+  Not reviewed: the rest of the repository — pre-existing issues outside this
+  diff are out of scope for this report.
+- **Auth/trust context is inferred, not exhaustive.** `touched_auth_context`
+  entries were established via targeted greps + reads of the files those
+  greps pointed to — not a repository-wide `auth_coverage` map. A route
+  marked `protected` here has not been checked against every possible
+  bypass path the way a full `/repo-security-review` run's Phase 2 would.
+- **No whole-program taint analysis.** Same limitation as the full pipeline —
+  a clean result means no rule-matched or hand-traced sink in the diff, not
+  that none exists.
+- **Dependency scanning**: {"ran, scoped to {manifest} (touched by this diff)" | "skipped — no manifest/lockfile in this diff"}.
+- **Model**: `{standard_tier_model}` (PR mode pins to the resolved Standard tier — never Opus).
+
+_PR-scoped security review · repo-security-review skill (`--pr` mode). Reviews only the diff; not a substitute for a full repository scan._
+```
+
+---
+
 ## Formatting Guidelines
 
 - Use severity emoji consistently: 🔴 Critical, 🟠 High, 🟡 Medium, 🟢 Low
@@ -796,6 +967,7 @@ _Vendor risk assessment · repo-security-review skill (vendor mode). Static + ru
 
 ```bash
 echo "✅ Phase 6 complete — report written to {repo_path}/.security-review/final-report.md"
+# PR Review mode (--pr): echo the pr-report.md path instead — see Output Path exception above.
 ```
 
 Do not copy to `--output`, do not call `present_files`. The orchestrator performs those steps.

@@ -31,6 +31,15 @@ You must be isolated from Phase 2 and Phase 4's agent context. You receive:
 - The `--skip poc` flag (if set) — see below
 - `tech-stack.json` path (includes `runtime_hints` used for Dockerfile synthesis)
 
+> **PR Review Mode substitution**: when invoked from `references/pr-review.md`
+> (`--pr` flag), replace every mention of `phase4-owasp.json` in this file with
+> `pr-findings.json`, `phase5-validated.json` with `pr-validated.json`,
+> `phase5-pocs.json` with `pr-pocs.json`, and "Phase 4"/"the finder" with "the
+> PR diff-scan phase." Every gate, schema field, and decision rule below is
+> otherwise unchanged — including the `regression`/`removed_control` fields
+> `pr-review.md` adds to its findings, which Step 2 (mitigation hunt) must
+> validate per that file's "Additional validation duty" note.
+
 Re-read the relevant source code from scratch for each finding. Do not
 assume Phase 4 was correct. Your validation must be independent.
 
