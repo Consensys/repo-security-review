@@ -169,7 +169,11 @@ different generation or a different chain.
 > **Abort — Claude 5 active account, no `--claude5`:** when the abort above is
 > caused specifically by `opus`/`sonnet` aliases resolving to Claude
 > 5-generation models (not a genuine outage), don't dump a wall of text —
-> ask. If `AskUserQuestion` is available, call it once:
+> ask. **Also applies in Standard-only modes (`--vendor`, `--pr`) when the
+> `sonnet` alias resolves to a v5 model** — even though `haiku` survives and
+> the chain doesn't fully fail, silently running on haiku 4.5 is the same
+> generation-drift condition; Ask rather than fall through. If `AskUserQuestion`
+> is available, call it once:
 >
 > - Question: "This session's model resolves to Claude 5, and `--claude5`
 >   wasn't passed. How do you want to proceed?"
