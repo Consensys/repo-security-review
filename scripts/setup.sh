@@ -196,12 +196,19 @@ for pack in p/owasp-top-ten p/security-audit; do
 done
 
 echo "Language packs:"
-for pack in p/python p/golang p/javascript p/java p/ruby; do
+for pack in p/python p/golang p/javascript p/typescript p/java p/ruby; do
   download_semgrep_pack "$pack"
 done
 
 echo "Security / framework packs:"
-for pack in p/gosec p/django p/flask p/express p/react p/nodejs-scan p/ruby-security; do
+# p/express is 404; its rules mostly overlap with p/javascript, so omitted.
+# p/ruby-security is 404 with no exact rename; p/brakeman (live) is the community
+#   equivalent and adds real coverage beyond p/ruby for Rails projects.
+# p/nodejs-scan (404) was renamed to p/nodejsscan (no hyphen) — live, and has
+#   zero rule overlap with p/javascript, so it's cached here, not omitted.
+# No pack exists for gin/echo/fiber (Go frameworks) — p/gitlab-gosec is 404 with
+#   no replacement; this is a known Semgrep coverage gap, not an omission here.
+for pack in p/gosec p/django p/flask p/react p/nodejsscan p/brakeman; do
   download_semgrep_pack "$pack"
 done
 

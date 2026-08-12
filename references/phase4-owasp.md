@@ -302,49 +302,84 @@ case "$LANG" in
   *)  SEMGREP_LANG="$LANG" ;;
 esac
 
-# Always-on layers.
-CANDIDATE_CONFIGS="p/owasp-top-ten p/security-audit"
+# Use a shell array so the list works correctly in both bash and zsh.
+# (In zsh, "for x in $VAR" does NOT word-split — arrays are required.)
+CANDIDATE_CONFIGS=(p/owasp-top-ten p/security-audit)
 
 # Language pack (if the language is known).
-[ -n "$SEMGREP_LANG" ] && CANDIDATE_CONFIGS="$CANDIDATE_CONFIGS p/${SEMGREP_LANG}"
+[ -n "$SEMGREP_LANG" ] && CANDIDATE_CONFIGS+=("p/${SEMGREP_LANG}")
 
 # Language-specific security pack, where a dedicated one exists.
+# p/javascript covers both JS and TS files (cross-JS/TS rules); p/typescript
+# is already added above via the generic language-pack line for TypeScript projects.
+# p/nodejs-scan (404) was renamed in the registry to p/nodejsscan (no hyphen) —
+# verified live and, unlike p/express→p/javascript, has ZERO rule overlap with
+# p/javascript (it's the ported njsscan ruleset, not a Semgrep-native one) —
+# added unconditionally for JS/TS since it's a genuinely distinct rule source.
 case "$SEMGREP_LANG" in
-  golang)     CANDIDATE_CONFIGS="$CANDIDATE_CONFIGS p/gosec" ;;
-  javascript|typescript)
-              CANDIDATE_CONFIGS="$CANDIDATE_CONFIGS p/javascript p/nodejs-scan" ;;
+  golang)            CANDIDATE_CONFIGS+=(p/gosec) ;;
+  javascript|typescript) CANDIDATE_CONFIGS+=(p/javascript p/nodejsscan) ;;
 esac
 
 # Framework packs — map detected frameworks in tech-stack.json to Semgrep packs.
-FRAMEWORKS=$(python3 -c \
+# Iterate directly over python3 command substitution output, which word-splits
+# correctly in both bash and zsh (command substitution always word-splits).
+# Dead packs removed (verified 404): p/express, p/ruby-security, p/gitlab-gosec.
+# p/express → verified 69/71 rules already duplicated in p/javascript; no separate
+#   pack needed (p/expressjs exists live but adds negligible unique coverage).
+# p/ruby-security → no exact rename, but p/brakeman (the community Rails scanner,
+#   ported to Semgrep) is live and has 6 rules not already in p/ruby — added for rails.
+# p/gitlab-gosec → NO live replacement exists. p/gosec is generic Go security and
+#   has ZERO gin/echo/fiber-specific rules (verified by word-boundary search, not
+#   substring match — an earlier substring grep falsely matched "ori-gin" and
+#   wrongly implied coverage). This is a real, currently unaddressed gap: no
+#   Semgrep pack targets these Go web frameworks. Do not add a case for
+#   gin/echo/fiber below; instead this gap is logged explicitly after the pack
+#   list is built (see the coverage-gap check further down).
+for fw in $(python3 -c \
   "import json; d=json.load(open('$TECH')); \
-   print(' '.join(d.get('frameworks',[])))" 2>/dev/null)
-for fw in $FRAMEWORKS; do
+   print(' '.join(d.get('frameworks',[])))" 2>/dev/null); do
   case "$fw" in
-    django)          CANDIDATE_CONFIGS="$CANDIDATE_CONFIGS p/django" ;;
-    flask)           CANDIDATE_CONFIGS="$CANDIDATE_CONFIGS p/flask" ;;
-    express|express.js) CANDIDATE_CONFIGS="$CANDIDATE_CONFIGS p/express" ;;
-    react)           CANDIDATE_CONFIGS="$CANDIDATE_CONFIGS p/react" ;;
-    gin|echo|fiber)  CANDIDATE_CONFIGS="$CANDIDATE_CONFIGS p/gitlab-gosec" ;;
-    spring|springboot) CANDIDATE_CONFIGS="$CANDIDATE_CONFIGS p/java" ;;
-    rails)           CANDIDATE_CONFIGS="$CANDIDATE_CONFIGS p/ruby-security" ;;
+    django)            CANDIDATE_CONFIGS+=(p/django) ;;
+    flask)             CANDIDATE_CONFIGS+=(p/flask) ;;
+    react)             CANDIDATE_CONFIGS+=(p/react) ;;
+    rails)             CANDIDATE_CONFIGS+=(p/brakeman) ;;
+    spring|springboot) CANDIDATE_CONFIGS+=(p/java) ;;
   esac
 done
 
-# Remove duplicate packs while preserving order.
-CANDIDATE_CONFIGS=$(printf '%s\n' $CANDIDATE_CONFIGS | awk '!seen[$0]++')
+# Honest coverage-gap log: no Semgrep pack exists for these Go web frameworks.
+# Record this so Phase 6 can report it as a known Semgrep coverage limitation
+# rather than silently relying on generic p/gosec / p/golang rules to catch
+# framework-specific misuse (e.g. gin route/middleware misconfiguration).
+UNCOVERED_FRAMEWORKS=$(python3 -c \
+  "import json; d=json.load(open('$TECH')); \
+   fws=set(d.get('frameworks',[])) & {'gin','echo','fiber'}; \
+   print(' '.join(sorted(fws)))" 2>/dev/null)
+if [ -n "$UNCOVERED_FRAMEWORKS" ]; then
+  echo "ℹ️  No Semgrep pack available for: $UNCOVERED_FRAMEWORKS — generic p/gosec/p/golang rules apply; framework-specific misuse patterns are not covered by Semgrep and rely on Step 3 manual analysis."
+fi
+
+# Remove duplicate packs while preserving order (in-array dedup, no awk word-split needed).
+DEDUPED=()
+for cfg in "${CANDIDATE_CONFIGS[@]}"; do
+  if ! printf '%s\n' "${DEDUPED[@]}" | grep -qxF "$cfg"; then
+    DEDUPED+=("$cfg")
+  fi
+done
+CANDIDATE_CONFIGS=("${DEDUPED[@]}")
 
 # For each candidate pack, resolve to its effective config source:
 # local cache file if present, otherwise the registry pack name.
 # This means a 404 or renamed pack in the registry never blocks a scan when
 # setup.sh has already cached the rules.
-RESOLVED_CONFIGS=""
-for cfg in $CANDIDATE_CONFIGS; do
+RESOLVED_CONFIGS=()
+for cfg in "${CANDIDATE_CONFIGS[@]}"; do
   name="${cfg#p/}"
   if [ -f "$RULES_CACHE/${name}.yaml" ]; then
-    RESOLVED_CONFIGS="$RESOLVED_CONFIGS $RULES_CACHE/${name}.yaml"
+    RESOLVED_CONFIGS+=("$RULES_CACHE/${name}.yaml")
   else
-    RESOLVED_CONFIGS="$RESOLVED_CONFIGS $cfg"
+    RESOLVED_CONFIGS+=("$cfg")
   fi
 done
 
@@ -358,7 +393,7 @@ OUT_DIR={repo_path}/.security-review
 printf '{"results":[],"errors":[]}\n' > "$OUT_DIR/semgrep-raw.json"
 
 SUCCESS=0
-for cfg in $RESOLVED_CONFIGS; do
+for cfg in "${RESOLVED_CONFIGS[@]}"; do
   # Use the basename (without path or extension) as the label in log/tmp files.
   label=$(basename "$cfg" .yaml)
   TMP="$OUT_DIR/semgrep-${label}.json"
