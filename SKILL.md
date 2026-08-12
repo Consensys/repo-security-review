@@ -110,14 +110,10 @@ step and cannot be skipped; passing it aborts with a clear error.
 
 **Do this before any model probing or phase execution.**
 
-If the current session model is **confirmed** to be `claude-opus-5`,
-`claude-sonnet-5`, or `claude-fable-5` **and** `--claude5` was not passed,
-stop immediately and call `AskUserQuestion` — do not proceed to model
-configuration or any phase.
-
-**If the session model is uncertain or unknown, skip this check entirely** and
-proceed to Model Configuration — chain probing will detect any mismatch. Do
-not output prose about the uncertainty.
+Ask yourself: **"Am I a Claude 5 generation model?"** — i.e., is your model
+ID `claude-opus-5`, `claude-sonnet-5`, or `claude-fable-5`? If yes **and**
+`--claude5` was not passed, stop immediately and call `AskUserQuestion` — do
+not proceed to model configuration or any phase.
 
 In CI / non-interactive (no `AskUserQuestion`), print one line and abort:
 ```
