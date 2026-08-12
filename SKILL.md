@@ -166,6 +166,28 @@ attack-path and injection-vector reasoning Phases 2 and 4b depend on.
 bottom rung), abort with a clear error.** Do not substitute a model from a
 different generation or a different chain.
 
+> **Abort — Claude 5 active account, no `--claude5`:** when the abort above is
+> caused specifically by `opus`/`sonnet` aliases resolving to Claude
+> 5-generation models (not a genuine outage), don't dump a wall of text —
+> ask. If `AskUserQuestion` is available, call it once:
+>
+> - Question: "This session's model resolves to Claude 5, and `--claude5`
+>   wasn't passed. How do you want to proceed?"
+> - Options: **"Use --claude5"** (Claude 5 models, more tokens/phase) ·
+>   **"I'll switch models"** (cancel — I'll set this session to a 4.x
+>   snapshot and re-run)
+>
+> If `AskUserQuestion` isn't available (e.g. non-interactive/CI), print one
+> short line instead:
+> ```
+> ❌ [tier] chain unreachable — aliases resolve to Claude 5, --claude5 not set.
+>    Re-run with --claude5, or switch this session to a 4.x snapshot first.
+> ```
+>
+> Use whichever form applies for any abort caused by this condition —
+> triggered by the rule above, Vendor mode's Standard-only constraint, or the
+> dispatch-reality note below — it's the same failure mode every time.
+
 > **Note on Claude 5 (`claude-sonnet-5`, `claude-opus-5`):**
 > By default, both chains use pinned 4.x models (as of 2026-07-30 — an explicit
 > user choice accepting that the skill aborts if 4.x versions are unavailable).
@@ -192,7 +214,8 @@ different generation or a different chain.
 > snapshot this chain names. If the alias-resolved model is Claude 5-generation
 > and the account has no way to pin the 4.x snapshot directly, that is the
 > "nothing in the chain is available" case above: abort rather than proceed on
-> a substitute. Record what was actually resolved and dispatched in
+> a substitute, using the abort message template above. Record what was
+> actually resolved and dispatched in
 > `run-metadata.json → fallback_notes` regardless of which path was used, so a
 > reader can always tell which concrete model produced a given phase's output.
 
