@@ -175,11 +175,12 @@ different generation or a different chain.
 > generation-drift condition; Ask rather than fall through. If `AskUserQuestion`
 > is available, call it once:
 >
-> - Question: "This session's model resolves to Claude 5, and `--claude5`
->   wasn't passed. How do you want to proceed?"
-> - Options: **"Use --claude5"** (Claude 5 models, more tokens/phase) ·
->   **"I'll switch models"** (cancel — I'll set this session to a 4.x
->   snapshot and re-run)
+> - Question: "Your CLI is on a Claude 5 model. Without `--claude5` this
+>   scan can't use Sonnet — it would fall back to Haiku. How do you want
+>   to proceed?"
+> - Options: **"Add --claude5"** (re-run with Claude 5 — uses significantly
+>   more tokens per phase) · **"I'll switch models"** (cancel — switch
+>   this session to Sonnet 4.6 or Opus 4.8 and re-run for free)
 >
 > If `AskUserQuestion` isn't available (e.g. non-interactive/CI), print one
 > short line instead:
