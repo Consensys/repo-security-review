@@ -110,17 +110,19 @@ step and cannot be skipped; passing it aborts with a clear error.
 
 **Do this before any model probing or phase execution.**
 
-If the current session model is `claude-opus-5`, `claude-sonnet-5`, or
-`claude-fable-5` **and** `--claude5` was not passed, stop immediately and call
-`AskUserQuestion` — do not proceed to model configuration or any phase.
+If the current session model is **confirmed** to be `claude-opus-5`,
+`claude-sonnet-5`, or `claude-fable-5` **and** `--claude5` was not passed,
+stop immediately and call `AskUserQuestion` — do not proceed to model
+configuration or any phase.
+
+**If the session model is uncertain or unknown, skip this check entirely** and
+proceed to Model Configuration — chain probing will detect any mismatch. Do
+not output prose about the uncertainty.
 
 In CI / non-interactive (no `AskUserQuestion`), print one line and abort:
 ```
 ❌ CLI is on a Claude 5 model — pass --claude5 or switch to Sonnet 4.6 / Opus 4.8.
 ```
-
-Only continue past this check if `--claude5` is set, or if the session model
-is a 4.x snapshot.
 
 ---
 
