@@ -33,12 +33,16 @@ You must be isolated from Phase 2 and Phase 4's agent context. You receive:
 
 > **PR Review Mode substitution**: when invoked from `references/pr-review.md`
 > (`--pr` flag), replace every mention of `phase4-owasp.json` in this file with
-> `pr-findings.json`, `phase5-validated.json` with `pr-validated.json`,
-> `phase5-pocs.json` with `pr-pocs.json`, and "Phase 4"/"the finder" with "the
-> PR diff-scan phase." Every gate, schema field, and decision rule below is
-> otherwise unchanged — including the `regression`/`removed_control` fields
+> `pr-findings.json` and `phase5-validated.json` with `pr-validated.json`, and
+> "Phase 4"/"the finder" with "the PR diff-scan phase." Validation (Part 1,
+> including the Surface Gate, mitigation hunt, and Boundary Gate) applies
+> **unchanged** — including the `regression`/`removed_control` fields
 > `pr-review.md` adds to its findings, which Step 2 (mitigation hunt) must
-> validate per that file's "Additional validation duty" note.
+> validate per that file's "Additional validation duty" note. **PoC generation
+> (Part 2) and runtime validation (Part 3) never run in PR mode** — treat it as
+> if `--skip poc` is always set: assign validation verdicts normally, set
+> `poc_generated: false` / `poc_file: null` on every finding, and do not
+> produce `phase5-pocs.json` / `pr-pocs.json` at all.
 
 Re-read the relevant source code from scratch for each finding. Do not
 assume Phase 4 was correct. Your validation must be independent.

@@ -253,11 +253,13 @@ dependency," which a diff-scoped OWASP pass would otherwise miss entirely.
 
 Findings from Steps 3–5 (secrets, OWASP/regression, dependency) are written
 to `pr-findings.json` (see Output Format). Hand off to
-`phase5-validate-and-poc.md` for independent validation — that file's gates,
-schema, and PoC-generation logic apply **unchanged**. Per its "PR Mode" note,
-substitute `pr-findings.json` for `phase4-owasp.json` and "the PR diff-scan
-phase" for "Phase 4" throughout; everything else (Surface Gate, mitigation
-hunt, Boundary Gate, PoC generation) runs exactly as written there.
+`phase5-validate-and-poc.md` for independent validation — that file's gates
+and schema apply **unchanged**. Per its "PR Mode" note, substitute
+`pr-findings.json` for `phase4-owasp.json` and "the PR diff-scan phase" for
+"Phase 4" throughout; the Surface Gate, mitigation hunt, and Boundary Gate run
+exactly as written there. **This mode does not generate PoCs** — PR review
+produces validation verdicts only (see `phase5-validate-and-poc.md`'s PR Mode
+note).
 
 **Additional validation duty specific to `regression: true` findings**:
 Phase 5 must independently re-derive that the removed control has no
@@ -279,9 +281,9 @@ or a previous `--pr` run's report, must not be silently overwritten).
 ## Confidence and Scope Disclaimers
 
 Every finding in `pr-findings.json` carries a `context_scope` field (see
-Output Format) and the report must lead with a scope banner. This mode
-trades completeness for speed **by design** — the report must never let a
-reader mistake "no findings in this diff" for "this codebase is secure":
+Output Format). This mode trades completeness for speed **by design** — a
+reader should not mistake "no findings in this diff" for "this codebase is
+secure":
 
 - `touched_auth_context` reflects only routes this diff touches — it is not
   a repo-wide `auth_coverage` map. A route classified `protected` here was
@@ -352,7 +354,6 @@ Write to `{repo_path}/.security-review/pr-findings.json`:
       "surface_type": "production",
       "surface_confidence": "high",
       "remediation": "...",
-      "poc_needed": true,
       "validation_notes": "..."
     },
     {
@@ -378,7 +379,6 @@ Write to `{repo_path}/.security-review/pr-findings.json`:
       "surface_type": "production",
       "surface_confidence": "high",
       "remediation": "Restore the ownership check, or move it into a shared middleware if consolidating.",
-      "poc_needed": true,
       "validation_notes": "Confirm no equivalent check exists elsewhere in the call chain (e.g. moved to middleware) before treating as confirmed."
     }
   ]
@@ -404,10 +404,9 @@ instead.
 - ID prefix is `D-` (diff) — distinct from `S-`/`A-`/`C-`/`O-`/`L-` so a
   reader can immediately tell a finding came from a diff-scoped review, not
   a full scan, even if the two are ever shown side by side.
-- `poc_needed` and PoC generation semantics are unchanged from Phase 4/5 —
-  a confirmed finding still gets a PoC unless `--skip poc` is set.
-- `--runtime` is honored the same way Phase 5 always honors it (per-finding
-  Runtime Value Assessment) — nothing about PR mode changes that logic.
+- This mode never generates PoCs and never runs runtime validation — Phase 5's
+  validation gates and verdicts apply, but Part 2 (PoC generation) and Part 3
+  (runtime) are always skipped, regardless of `--skip poc` / `--runtime`.
 - This mode does not write `phase2-architecture.json`, `phase3-cves.json`,
   or `phase4-owasp.json` — a repo that later gets a full `/repo-security-review`
   run is not affected by files left behind from a prior `--pr` run, since the

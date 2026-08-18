@@ -100,11 +100,13 @@ Exception: if `--yes` is set and no repo path is provided, abort with a clear er
 
 **Skip aliases in PR mode (`--pr`)** reinterpret the same names against
 `references/pr-review.md`'s steps, not the numbered phases: `secrets` → Step
-3, `dependencies` → Step 5, `owasp` → Step 4, `validation`/`poc` → Step 6
-(same cascade rules as above). `architecture` is **not a valid skip target in
-PR mode** — Step 1/2's structural context is load-bearing for every other
-step and cannot be skipped; passing it aborts with a clear error.
-`skill-security` has no effect in PR mode (Phase 4b does not run).
+3, `dependencies` → Step 5, `owasp` → Step 4, `validation` → Step 6.
+`architecture` is **not a valid skip target in PR mode** — Step 1/2's
+structural context is load-bearing for every other step and cannot be
+skipped; passing it aborts with a clear error. `skill-security` has no effect
+in PR mode (Phase 4b does not run). **`poc` has no effect in PR mode** — this
+mode never generates PoCs (see PR Review Mode below), so there is nothing for
+`--skip poc` to additionally suppress.
 
 ### Pre-flight: Claude 5 session check
 
@@ -522,8 +524,8 @@ PR Review Agent → runs references/pr-review.md
   Step 4: Diff-scoped OWASP + regression check [skip alias: owasp]
   Step 5: Dependency check — only if the diff touches a manifest/lockfile
                                                [skip alias: dependencies]
-  Step 6: Validation — delegates to phase5-validate-and-poc.md unmodified
-                                               [skip aliases: validation, poc]
+  Step 6: Validation (no PoC generation) — delegates to phase5-validate-and-poc.md
+                                               [skip alias: validation]
   Step 7: Report — delegates to phase6-report.md → PR Review Report format
 ```
 
@@ -553,17 +555,19 @@ and `pr_phase_model` set to the resolved Standard tier model.
 
 **4. Output.** Writes to the same `{repo_path}/.security-review/` working
 directory as the full pipeline, but with `pr-`-prefixed filenames
-(`pr-findings.json`, `pr-validated.json`, `pr-pocs.json`,
-`pr-changed-files.txt`) and `pr-report.md` — **never** `phase4-owasp.json` /
-`phase5-validated.json` / `final-report.md`. This is deliberate: a repo may
-already have a full scan's `final-report.md`, and `--pr` may be run
-repeatedly for different PRs against the same repo — a shared filename would
-let one overwrite the other silently. Running `--pr` twice does overwrite
-the previous `pr-report.md`, the same "last run wins" semantics the full
-pipeline already has for `final-report.md`.
+(`pr-findings.json`, `pr-validated.json`, `pr-changed-files.txt`) and
+`pr-report.md` — **never** `phase4-owasp.json` / `phase5-validated.json` /
+`final-report.md`. This is deliberate: a repo may already have a full scan's
+`final-report.md`, and `--pr` may be run repeatedly for different PRs against
+the same repo — a shared filename would let one overwrite the other
+silently. Running `--pr` twice does overwrite the previous `pr-report.md`,
+the same "last run wins" semantics the full pipeline already has for
+`final-report.md`.
 
-**5. `--runtime`** is honored exactly as Phase 5 always honors it (per-finding
-Runtime Value Assessment) — nothing about PR mode changes that logic.
+**5. `--runtime` and `--skip poc` have no effect in PR mode.** This mode
+never generates PoCs or runs runtime validation (see Step 6 above and
+`phase5-validate-and-poc.md`'s PR Mode note) — there is no PoC step for
+either flag to act on.
 
 ## Phase Execution Order
 
@@ -735,7 +739,7 @@ Read the agent instructions for each phase from `references/` before spawning:
 | 3 + 3b | `references/phase3-dependencies.md` | always (full pipeline) |
 | 4 | `references/phase4-owasp.md` | always (full pipeline) |
 | 4b (LLM Security) | `references/phase-llm-security.md` | when `has_skill_files: true` |
-| 5 (Validation + PoC) | `references/phase5-validate-and-poc.md` | always (full pipeline) — also reused unmodified by PR mode's Step 6 |
+| 5 (Validation + PoC) | `references/phase5-validate-and-poc.md` | always (full pipeline) — also reused by PR mode's Step 6 (validation only, no PoC) |
 | 6 (Report) | `references/phase6-report.md` | always (full pipeline) — also reused by PR mode's Step 7 for the PR Review Report format |
 | 7 (Synthesis) | `references/phase7-synthesis.md` | multi-repo only |
 | PR Review | `references/pr-review.md` | **only** when `--pr` is set — replaces phases 1–4 and 7 entirely; see [PR Review Mode](#pr-review-mode---pr) |
@@ -811,9 +815,7 @@ never overwritten:
 ├── pr-gitleaks-raw.json      ← Step 3: deleted after processing, same as Phase 1
 ├── pr-findings.json          ← Steps 3-5: candidate findings (D-XXX ids)
 ├── pr-validated.json         ← Step 6: phase5-validate-and-poc.md output, substituted filename
-├── pr-pocs.json              ← Step 6: substituted filename for phase5-pocs.json
-├── pocs/                     ← individual PoC scripts, same convention as full pipeline
-│   └── poc_D-001.py
+│                                (validation verdicts only — this mode generates no PoCs)
 └── pr-report.md              ← Step 7: never final-report.md — see Output Path exception
 ```
 

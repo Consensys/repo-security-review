@@ -191,9 +191,10 @@ verbose/vendor structure entirely (see PR Review Report Structure below) and
 is short enough to paste as a PR comment.
 
 Key differences from the other modes:
-- **Scope banner is mandatory and leads the report** — this mode is
-  diff-scoped by construction (see `pr-review.md` → "Confidence and Scope
-  Disclaimers"); a reader must not mistake a clean result for a full audit.
+- **No PoC generation** — this mode never writes PoC files or runs runtime
+  validation, regardless of `--skip poc` / `--runtime` (see `pr-review.md`
+  and `phase5-validate-and-poc.md`'s PR Mode note); omit all PoC lines from
+  every finding.
 - **Findings use the `D-` prefix** from `pr-findings.json` /
   `pr-validated.json`, not `phase4-owasp.json`.
 - **Regressions are called out distinctly** — a finding with
@@ -827,13 +828,6 @@ pipeline and are not produced by this mode.
 **Review Date**: {date}
 **Model**: {standard_tier_model} (PR mode pins to the resolved Standard tier — never Opus)
 
-> ⚠️ **Diff-scoped review — not a full repository audit.** Findings below
-> reflect only the code this PR changes, plus targeted lookups (not an
-> exhaustive read) used to establish auth status and surface classification
-> for the routes/files it touches. A clean result here means no issue was
-> found **in this diff**, not that the repository as a whole is secure. Run
-> `/repo-security-review` without `--pr` for full-repository coverage.
-
 ---
 
 ## Summary
@@ -875,8 +869,6 @@ a regression in previously-working protection, not a gap that was always there.}
 - **Impact**: {attack_vector}
 - **Validation**: {CONFIRMED — no equivalent control found elsewhere in the call chain | CONFIRMED_LOW_CONFIDENCE — reason}
 - **Fix**: {remediation — usually "restore the removed check" unless it was deliberately consolidated elsewhere}
-{If PoC file exists:}
-- **PoC**: `pocs/{poc_filename}`
 
 ---
 
@@ -899,43 +891,11 @@ pr-validated.json — never renumber to F-NN.}
 - **Impact**: {what an attacker can do}
 - **Auth context**: {if this finding's route appears in touched_auth_context: "Route is {auth_status} ({auth_confidence} confidence) — {basis}"; omit this line entirely for non-route findings}
 - **Remediation**: {specific, actionable fix}
-{If PoC file exists:}
-- **PoC**: `pocs/{poc_filename}`
-{If phase5-equivalent poc_skipped: true AND finding is CONFIRMED:}
-- **PoC**: skipped (`--skip poc` was set)
 
 {If no non-regression findings exist:}
 _No new vulnerabilities introduced by this diff._
 
 ---
-
-## False Positives
-
-Investigated and ruled out — included so the review's rigor is visible:
-
-| ID | Type | File | Reason |
-|----|------|------|--------|
-| D-004 | XSS | src/views/export.tsx | Output passed through framework's autoescape |
-
-{If none: "None — no candidate findings were excluded during validation."}
-
----
-
-## Scope & Limitations
-
-- **Diff-scoped by design.** Reviewed: {N} changed files in `{base}...{head}`.
-  Not reviewed: the rest of the repository — pre-existing issues outside this
-  diff are out of scope for this report.
-- **Auth/trust context is inferred, not exhaustive.** `touched_auth_context`
-  entries were established via targeted greps + reads of the files those
-  greps pointed to — not a repository-wide `auth_coverage` map. A route
-  marked `protected` here has not been checked against every possible
-  bypass path the way a full `/repo-security-review` run's Phase 2 would.
-- **No whole-program taint analysis.** Same limitation as the full pipeline —
-  a clean result means no rule-matched or hand-traced sink in the diff, not
-  that none exists.
-- **Dependency scanning**: {"ran, scoped to {manifest} (touched by this diff)" | "skipped — no manifest/lockfile in this diff"}.
-- **Model**: `{standard_tier_model}` (PR mode pins to the resolved Standard tier — never Opus).
 
 _PR-scoped security review · repo-security-review skill (`--pr` mode). Reviews only the diff; not a substitute for a full repository scan._
 ```
@@ -946,7 +906,9 @@ _PR-scoped security review · repo-security-review skill (`--pr` mode). Reviews 
 
 - Use severity emoji consistently: 🔴 Critical, 🟠 High, 🟡 Medium, 🟢 Low
 - Every finding must have a remediation — never "this is bad" without "do this"
-- False Positives section is mandatory — it builds trust with the dev team
+- False Positives section is mandatory in default/verbose/vendor modes — it
+  builds trust with the dev team. PR Review mode (`--pr`) has no False
+  Positives section — see PR Review Report Structure.
 - In default mode: PoC scripts are referenced by filename only —
   `- **PoC**: \`pocs/{poc_filename}\`` — never inline code blocks
 - Redact ALL secret values — show only first 4 and last 3 chars
