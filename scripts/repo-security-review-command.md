@@ -7,6 +7,7 @@
 #   /repo-security-review /path/to/repo --skip secrets
 #   /repo-security-review /path/to/repo --skip architecture,dependencies
 #   /repo-security-review /path/to/repo --output ~/reports/myapp
+#   /repo-security-review /path/to/repo --poc
 #   /repo-security-review /path/to/repo --runtime
 #   /repo-security-review /path/to/repo --skip architecture --output ~/reports/myapp --runtime
 #   /repo-security-review --repos /path/svc1,/path/svc2,/path/svc3 --output ~/reports/my-system
@@ -40,7 +41,13 @@ Options:
   --output <dir>        Directory to save the report and PoC scripts into.
                         Default: (single-repo: none — everything stays in
                         <repo>/.security-review/) (multi-repo: ./system-security-review/)
-  --runtime             Enable Docker-based runtime PoC validation
+  --poc                 Opt-in: generate a PoC for each finding Phase 5
+                        confirms. Without this flag (the default), Phase 5
+                        still validates every finding, but writes no PoC
+                        files. Has no effect in --pr mode; forced off in
+                        --vendor mode.
+  --runtime             Enable Docker-based runtime PoC validation. Implies
+                        --poc.
   --yes                 Non-interactive / CI mode. Auto-confirms all prompts:
                         the --output copy gate, the Docker runtime gate, and
                         the pure-skill-repo auto-skip cascade. Path-validation
@@ -103,14 +110,10 @@ Phases you can skip (--skip <name>):
 
   validation        Phase 5 · Independent validation of Phase 4 findings
                     (data flow tracing, mitigation checks, false positive
-                    filtering) + immediate PoC generation for confirmed
-                    findings only. Skipping this skips PoC as well.
-
-  poc               PoC generation only. Phase 5 validation still runs and
-                    confirms/rejects findings — no PoC files are written.
-                    Use when you want validation verdicts without the time
-                    cost of PoC generation, or in headless/CI runs where
-                    PoC scripts are not needed.
+                    filtering). PoC generation is opt-in (--poc) and, when
+                    enabled, happens immediately for confirmed findings only.
+                    Skipping this means --poc has no effect (nothing to
+                    validate).
 
   skill-security    Phase 4b · LLM / AI skill security analysis. Only
                     runs when Phase 2 detects skill/agent instruction files
@@ -119,9 +122,10 @@ Phases you can skip (--skip <name>):
                     Auto-activated — no flag needed to turn it on.
 
 Cascade rules:
-  --skip owasp        → also skips validation and poc (nothing to validate)
-  --skip validation   → also skips poc (PoC requires a validation verdict)
-  --skip poc          → validation runs; PoC generation suppressed
+  --skip owasp        → also skips validation (nothing to validate); --poc
+                        then has no effect
+  --skip validation   → --poc has no effect (PoC requires a validation verdict)
+  --runtime           → implies --poc (runtime validation needs a PoC to run)
   --skip architecture → also skips skill-security (skill detection
                         requires tech-stack.json from Phase 2)
 
@@ -140,14 +144,14 @@ Examples:
   # Architecture review only — no code-level analysis
   /repo-security-review ~/repos/my-service --skip dependencies,owasp
 
-  # Full review with runtime PoC validation via Docker
+  # Full review with runtime PoC validation via Docker (--runtime implies --poc)
   /repo-security-review ~/repos/my-service --runtime --output ~/reports/my-service
 
-  # CI / headless — no interactive prompts, validation only (no PoC files)
-  /repo-security-review . --output ./security-report --skip poc --yes
+  # CI / headless — no interactive prompts, validation only (default: no PoC files)
+  /repo-security-review . --output ./security-report --yes
 
   # CI — full review including PoC generation, auto-confirm all gates
-  /repo-security-review . --output ./security-report --yes
+  /repo-security-review . --output ./security-report --poc --yes
 
   # Inspect how the skill reads files — writes execution-log.md to paste back
   /repo-security-review ~/repos/my-service --debug
@@ -181,12 +185,15 @@ Parse `$ARGUMENTS` for:
   When absent, the first positional arg is the single repo path (required).
 - First positional arg → single repo path (required unless `--repos` is set)
 - `--skip <phases>` → comma-separated list from: `secrets`, `architecture`,
-  `dependencies`, `owasp`, `validation`, `poc`, `skill-security`
+  `dependencies`, `owasp`, `validation`, `skill-security`
 - `--output <dir>` → output directory; both `final-report.md` and `pocs/` are
   copied here at the end. Created if it doesn't exist.
   Default (single-repo): none — when omitted everything stays at `{repo_path}/.security-review/`
   Default (multi-repo): `./system-security-review/`
-- `--runtime` → enable Docker-based runtime PoC validation in Phase 5
+- `--poc` → opt-in: generate a PoC for each finding Phase 5 confirms.
+  Without it (the default), Phase 5 validates every finding but writes no
+  PoC files. Has no effect in `--pr` mode; forced off in `--vendor` mode.
+- `--runtime` → enable Docker-based runtime PoC validation in Phase 5. Implies `--poc`.
 - `--yes` → non-interactive mode: auto-confirm all user-facing prompts
   (the `--output` copy gate, the Docker runtime gate, the pure-skill-repo
   auto-skip cascade). Path-validation safety checks are never bypassed.
@@ -209,12 +216,13 @@ Parse `$ARGUMENTS` for:
   the run with a clear error message.
 
 Abort with a clear error if any skip value is not in the allowed list above:
-`❌ Unknown --skip value: "{value}". Allowed: secrets, architecture, dependencies, owasp, validation, poc, skill-security`
+`❌ Unknown --skip value: "{value}". Allowed: secrets, architecture, dependencies, owasp, validation, skill-security`
 
 Apply cascade rules silently:
-- `--skip owasp` → add `validation` and `poc` to skip list
-- `--skip validation` → add `poc` to skip list (PoC requires a validation verdict)
-- `--skip poc` → pass `--skip poc` flag to Phase 5; validation still runs normally
+- `--skip owasp` → add `validation` to skip list; `--poc` then has no effect
+- `--skip validation` → `--poc` has no effect (PoC requires a validation verdict)
+- `--runtime` without `--poc` → treat `--poc` as set (runtime validation needs a PoC to run)
+- `--poc` not set → pass no PoC flag to Phase 5; it validates every finding but writes no PoC files
 - `--skip architecture` → add `skill-security` to skip list (skill detection requires Phase 2 output)
 
 **Multi-repo validation:** if `--repos` is set with only one path, warn:
@@ -244,6 +252,7 @@ done
 Phases running:   {list}
 Phases skipped:   {list or "none"}
 Output:           {output_path if set, else "<repo>/.security-review/final-report.md"}
+PoC generation:   {enabled (--poc) / disabled (default)}
 Runtime PoC:      {enabled / disabled}
 Report mode:      {detailed (--verbose) / lean (default)}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -257,6 +266,7 @@ Services:         {svc1}, {svc2}, {svc3}
 Phases running:   Phase 0 → [1–6 per service] → Phase 7
 Phases skipped:   {list or "none" — applies to each service's per-repo phases}
 Output:           {output_dir}
+PoC generation:   {enabled (--poc) / disabled (default)}
 Runtime PoC:      {enabled / disabled}
 Report mode:      {detailed (--verbose) / lean (default)}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

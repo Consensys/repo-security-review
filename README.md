@@ -44,11 +44,14 @@ In any Claude Code session (CLI or Desktop), point the skill at a local repo pat
 # Full detailed report (OWASP coverage, remediation priority, appendix)
 /repo-security-review /path/to/repo --verbose
 
-# Runtime PoC validation in Docker
+# Generate PoCs for confirmed findings
+/repo-security-review /path/to/repo --poc
+
+# Runtime PoC validation in Docker (implies --poc)
 /repo-security-review /path/to/repo --runtime
 
-# CI / headless — validation only (no PoC files), no prompts
-/repo-security-review . --output ./security-report --skip poc --yes
+# CI / headless — validation only (default: no PoC files), no prompts
+/repo-security-review . --output ./security-report --yes
 
 # Calibrate severity for a local-only tool behind auth
 /repo-security-review /path/to/repo --context deployment_target=local,auth_required_to_reach=true
@@ -68,11 +71,12 @@ In any Claude Code session (CLI or Desktop), point the skill at a local repo pat
 | Flag | Default | Effect |
 |------|---------|--------|
 | `--repos <paths>` | none | Comma-separated repo paths → multi-repo mode (adds cross-service topology + synthesis). |
-| `--skip <phases>` | none | Comma-separated: `secrets`, `architecture`, `dependencies`, `owasp`, `skill-security`, `validation`, `poc`. |
+| `--skip <phases>` | none | Comma-separated: `secrets`, `architecture`, `dependencies`, `owasp`, `skill-security`, `validation`. |
 | `--output <dir>` | none | Copy the report and PoC scripts into this directory after the run (created if needed). |
 | `--verbose` | off | Full detailed report (OWASP checks inventory, remediation-priority section, appendix). |
-| `--runtime` | off | Stand the app up in Docker and run each confirmed PoC against it. |
-| `--vendor` | off | Third-party adoption audit. Skips secrets/dependencies/PoC, pins all phases to Sonnet, and produces an adoption-risk report (verdict + conditions + "what it does" + adopter-side controls). |
+| `--poc` | off | Opt-in: generate a PoC for each finding Phase 5 confirms. Without it, Phase 5 still validates every finding, but writes no PoC files. |
+| `--runtime` | off | Stand the app up in Docker and run each confirmed PoC against it. Implies `--poc`. |
+| `--vendor` | off | Third-party adoption audit. Skips secrets/dependencies, forces PoC generation off, pins all phases to Sonnet, and produces an adoption-risk report (verdict + conditions + "what it does" + adopter-side controls). |
 | `--pr <base>...<head>` | none | PR review mode. Reviews only a pull request's diff — no full-repo scan needed first. `--pr <base>` is shorthand for `<base>...HEAD`. Pins to Sonnet, writes `pr-report.md`. Mutually exclusive with `--repos` and `--vendor`. |
 | `--context <pairs>` | none | Inline threat model to calibrate severity: `deployment_target=local\|public`, `auth_required_to_reach=true\|false`. Softens only — never sharpens. |
 | `--claude5` | off | Opt into Claude 5 generation models (with 4.x fallback). By default uses pinned 4.x versions. |
@@ -80,7 +84,7 @@ In any Claude Code session (CLI or Desktop), point the skill at a local repo pat
 | `--debug` | off | Write `.security-review/execution-log.md` showing how the file-reading phases actually ran. |
 | `--help` | — | Show usage. |
 
-**Skip cascades** (applied silently): `--skip owasp` also skips `validation` + `poc`; `--skip validation` also skips `poc`; `--skip poc` keeps validation but writes no PoC files; `--skip architecture` also skips `skill-security`. `--vendor` forces skip of `secrets`, `dependencies`, and `poc`. In `--pr` mode the same skip names apply but target its own steps instead of numbered phases, and `architecture` cannot be skipped (its diff-scoped context is load-bearing for every other step).
+**Skip cascades** (applied silently): `--skip owasp` also skips `validation` (and PoC generation has nothing left to run against); `--skip validation` means `--poc` has no effect; `--skip architecture` also skips `skill-security`. `--vendor` forces skip of `secrets` and `dependencies`, and forces PoC generation off regardless of `--poc`. In `--pr` mode the same skip names apply but target its own steps instead of numbered phases, and `architecture` cannot be skipped (its diff-scoped context is load-bearing for every other step); `--poc` has no effect in `--pr` mode.
 
 ### Output
 

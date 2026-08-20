@@ -192,7 +192,7 @@ is short enough to paste as a PR comment.
 
 Key differences from the other modes:
 - **No PoC generation** — this mode never writes PoC files or runs runtime
-  validation, regardless of `--skip poc` / `--runtime` (see `pr-review.md`
+  validation, regardless of `--poc` / `--runtime` (see `pr-review.md`
   and `phase5-validate-and-poc.md`'s PR Mode note); omit all PoC lines from
   every finding.
 - **Findings use the `D-` prefix** from `pr-findings.json` /
@@ -313,7 +313,7 @@ separate `**Also identified as**` label — fold it into the description prose.
 {If PoC file exists for this finding:}
 - **PoC**: `pocs/{poc_filename}`
 {If phase5-validated.json → poc_skipped: true AND finding is CONFIRMED:}
-- **PoC**: skipped (`--skip poc` was set — re-run without `--skip poc` to generate)
+- **PoC**: not generated (pass `--poc` to generate PoC scripts for confirmed findings)
 
 {If runtime_status == RUNTIME_CONFIRMED:}
 > ✅ **Runtime Validated** — confirmed against a live Docker instance.
@@ -593,7 +593,7 @@ Omit entirely if none exist. (Previously unnumbered — now 5b to keep numbering
 | OWASP Analysis | semgrep + {standard_tier_model} | ✅ Ran / ⏭️ Skipped |
 | Validation | Static data flow tracing | ✅ Ran / ⏭️ Skipped |
 | Runtime Validation | Docker + PoC probes | ✅ Ran / ⏭️ Skipped / ❌ Not available |
-| PoC Generation | {standard_tier_model} | ✅ Ran / ⏭️ Skipped (`--skip poc`) / ⏭️ Skipped (validation skipped) |
+| PoC Generation | {standard_tier_model} | ✅ Ran (`--poc`) / ⏭️ Skipped (default — pass `--poc` to enable) / ⏭️ Skipped (validation skipped) |
 
 **Semgrep rulesets applied**: {read from `semgrep-configs.txt` if present, else
 "language + OWASP packs"}. List the packs so the reader can judge scan depth.

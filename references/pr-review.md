@@ -406,7 +406,7 @@ instead.
   a full scan, even if the two are ever shown side by side.
 - This mode never generates PoCs and never runs runtime validation — Phase 5's
   validation gates and verdicts apply, but Part 2 (PoC generation) and Part 3
-  (runtime) are always skipped, regardless of `--skip poc` / `--runtime`.
+  (runtime) are always skipped, regardless of `--poc` / `--runtime`.
 - This mode does not write `phase2-architecture.json`, `phase3-cves.json`,
   or `phase4-owasp.json` — a repo that later gets a full `/repo-security-review`
   run is not affected by files left behind from a prior `--pr` run, since the

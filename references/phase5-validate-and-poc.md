@@ -1,4 +1,4 @@
-# Phase 5: Validation + PoC Agent
+# Phase 5: Validation (+ optional PoC) Agent
 
 ## Security Constraints
 
@@ -20,15 +20,15 @@ You are the **judgment layer**. You receive candidate findings from Phase 4
 (the finder) and your job has two sequential parts:
 
 1. **Validate** each finding independently — challenge it, try to disprove it
-2. **Write a PoC** immediately for any finding that passes — while your
-   validation reasoning is still in context
+2. **Write a PoC** — only if `--poc` was passed — immediately for any finding
+   that passes, while your validation reasoning is still in context
 
 You must be isolated from Phase 2 and Phase 4's agent context. You receive:
 - This reference file
 - The path to `phase4-owasp.json` (you read it yourself)
 - The repo path to re-examine code independently
 - The `--runtime` flag (if set)
-- The `--skip poc` flag (if set) — see below
+- The `--poc` flag (if set) — see below
 - `tech-stack.json` path (includes `runtime_hints` used for Dockerfile synthesis)
 
 > **PR Review Mode substitution**: when invoked from `references/pr-review.md`
@@ -40,7 +40,7 @@ You must be isolated from Phase 2 and Phase 4's agent context. You receive:
 > `pr-review.md` adds to its findings, which Step 2 (mitigation hunt) must
 > validate per that file's "Additional validation duty" note. **PoC generation
 > (Part 2) and runtime validation (Part 3) never run in PR mode** — treat it as
-> if `--skip poc` is always set: assign validation verdicts normally, set
+> if `--poc` was never passed: assign validation verdicts normally, set
 > `poc_generated: false` / `poc_file: null` on every finding, and do not
 > produce `phase5-pocs.json` / `pr-pocs.json` at all.
 
@@ -59,17 +59,22 @@ searching broadly (grepping other files, tracing into shared middleware) for a
 compensating control is still required. The bound is on exhaustively reading
 one large file end-to-end, not on how far you search for a mitigation.
 
-**The PoC gate is structural**: you only write a PoC immediately after a
-finding passes validation within the same reasoning chain. A finding that
-fails validation gets no PoC — ever. There is no separate step where PoCs
-are generated for unvalidated findings.
+**The PoC gate is structural**: when `--poc` is set, you only write a PoC
+immediately after a finding passes validation within the same reasoning chain.
+A finding that fails validation gets no PoC — ever. There is no separate step
+where PoCs are generated for unvalidated findings.
 
-**`--skip poc` flag**: when set, run the full validation workflow (Parts 1 and 2
-below) exactly as normal — confirm, reject, assign verdicts. Skip only Part 3
-(PoC generation): do not write any files under `pocs/`, do not evaluate runtime
-value, and do not start Docker. The `poc_skipped: true` flag must be set in
-`phase5-validated.json` so Phase 6 can note this in the report. Validation
-verdicts still appear in full.
+**`--poc` flag**: PoC generation is opt-in. When `--poc` is **not** set (the
+default), run the full validation workflow (Part 1) exactly as normal —
+confirm, reject, assign verdicts. Skip Part 2 (PoC generation) and Part 3
+(runtime validation) entirely: do not write any files under `pocs/`, do not
+evaluate runtime value, and do not start Docker. The `poc_skipped: true` flag
+must be set in `phase5-validated.json` so Phase 6 can note this in the report.
+Validation verdicts still appear in full.
+
+When `--poc` **is** set, additionally run Part 2 for every finding that passes
+validation (CONFIRMED / CONFIRMED_LOW_CONFIDENCE), and Part 3 if `--runtime`
+is also set (`--runtime` implies `--poc` — see SKILL.md).
 
 ---
 
@@ -95,7 +100,7 @@ For each finding in `phase4-owasp.json`, execute this sequence in full
 before moving to the next finding:
 
 ```
-0. SURFACE GATE (Step 0 — skip full validation for high-confidence non-production surfaces) → 1. VALIDATE (Steps 1–4) → 2. BOUNDARY GATE (Step 5, only if threat-model.json present with auth_required_to_reach=true) → 3. DECISION → 4. POC (only if confirmed AND NOT --skip poc) → 5. RUNTIME? (per-finding, only if --runtime AND NOT --skip poc) → 6. WRITE OUTPUTS
+0. SURFACE GATE (Step 0 — skip full validation for high-confidence non-production surfaces) → 1. VALIDATE (Steps 1–4) → 2. BOUNDARY GATE (Step 5, only if threat-model.json present with auth_required_to_reach=true) → 3. DECISION → 4. POC (only if confirmed AND --poc is set) → 5. RUNTIME? (per-finding, only if --runtime AND --poc are both set) → 6. WRITE OUTPUTS
 ```
 
 Never batch-validate all findings first and then batch-write PoCs. Process
@@ -103,8 +108,8 @@ one finding end-to-end at a time.
 
 Step 4 is evaluated independently for each finding — Docker is only started if
 at least one confirmed finding actually warrants runtime validation. See
-"Runtime Value Assessment" below. Steps 3 and 4 are both suppressed when
-`--skip poc` is set.
+"Runtime Value Assessment" below. Steps 3 and 4 are both suppressed unless
+`--poc` is set.
 
 **Step 5, "WRITE OUTPUTS," means write to disk now, not hold in memory for a
 single terminal write.** A repo with many candidate findings makes this loop
@@ -359,7 +364,7 @@ this run is in the "earns its cost" list. If every confirmed finding is in the
 
 ---
 
-## Part 2: PoC Generation (CONFIRMED and CONFIRMED_LOW_CONFIDENCE only)
+## Part 2: PoC Generation (only if `--poc` is set; CONFIRMED and CONFIRMED_LOW_CONFIDENCE only)
 
 Write the PoC immediately after the validation decision, while you still
 have the full data flow context in mind. Derive all endpoint values from
@@ -514,7 +519,7 @@ for url in [
 
 ---
 
-## Part 3: Optional Runtime Validation (if `--runtime` flag set)
+## Part 3: Optional Runtime Validation (if `--runtime` flag set; requires `--poc`, which `--runtime` implies)
 
 Only enter this section if the current finding is in the "runtime earns its cost"
 list from the Runtime Value Assessment above. For all other confirmed findings,

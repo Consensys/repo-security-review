@@ -9,8 +9,9 @@ description: >
   phrasings like "can you check this repo for security issues" or "run security
   on this". This skill orchestrates 7 sequential phases: secret scanning,
   architectural analysis, dependency CVE scanning with reachability validation,
-  code-level OWASP analysis, finding validation, PoC generation (with optional
-  runtime validation via Docker), and final report generation. Also handles
+  code-level OWASP analysis, finding validation, and final report generation.
+  PoC generation (with optional runtime validation via Docker) is opt-in via
+  the `--poc` flag. Also handles
   reviewing a single pull request's diff for security issues (`--pr` flag) —
   trigger on phrasings like "review this PR for security issues" or "security
   review this diff before merge" — a fast, diff-scoped mode that does not
@@ -62,9 +63,10 @@ Parse these from `$ARGUMENTS` using the format:
 |----------|---------|-------------|
 | (first positional) | required (single-repo mode) | Repo path. Omit when `--repos` is used. |
 | `--repos` | none | Comma-separated list of repo paths for multi-repo mode. Activates Phase 0 and Phase 7. When set, the first positional arg is not required. |
-| `--skip` | none | Comma-separated phase names to skip: `secrets`, `architecture`, `dependencies`, `owasp`, `validation`, `poc` |
+| `--skip` | none | Comma-separated phase names to skip: `secrets`, `architecture`, `dependencies`, `owasp`, `validation` |
 | `--output` | none — all artifacts stay at `{repo_path}/.security-review/` (single-repo) or `./system-security-review/` (multi-repo) | Directory to copy the final report and PoC scripts into after the run. Created if it doesn't exist. **Strongly recommended in multi-repo mode.** |
-| `--runtime` | false | Enable Docker-based runtime PoC validation |
+| `--poc` | false | Opt-in: after Phase 5 validates a finding (CONFIRMED / CONFIRMED_LOW_CONFIDENCE), generate a PoC for it. Without this flag, Phase 5 validates every finding and the report includes full verdicts, but no PoC files are written. Has no effect in PR mode (which never generates PoCs) or Vendor mode (which forces PoC generation off — see [Vendor Mode](#vendor-mode---vendor)). |
+| `--runtime` | false | Enable Docker-based runtime PoC validation. Implies `--poc` — runtime validation runs a generated PoC script, so there is nothing to validate without one. |
 | `--verbose` | false | Generate the full detailed report. Default report (for dev teams) omits the OWASP Checks Run inventory, the standalone Remediation Priority section, and the Appendix. All findings, evidence, and per-finding priority labels are included in both modes. In multi-repo mode the flag applies to both the per-service reports (Phase 6) and the system-level synthesis report (Phase 7). |
 | `--vendor` | false | Vendor / open-source audit mode. Audits a third-party repo the company is considering adopting; audience is the internal security team, deliverable is an adoption risk judgment (not a fix-list for the vendor). Forces skip of `secrets`, `dependencies`, and `poc`; pins every phase to the resolved Standard tier model (never Opus); and switches Phase 6 to the vendor report format. See [Vendor Mode](#vendor-mode---vendor) below. |
 | `--pr` | none | PR Review mode. `--pr <base>...<head>` (or `--pr <base>` shorthand for `<base>...HEAD`) reviews only a pull request's diff instead of the whole repository — replaces the 6/7-phase pipeline with `references/pr-review.md`, pins to the resolved Standard tier model, and writes `pr-report.md` instead of `final-report.md`. Mutually exclusive with `--repos` and `--vendor`. See [PR Review Mode](#pr-review-mode---pr) below. |
@@ -89,14 +91,13 @@ Exception: if `--yes` is set and no repo path is provided, abort with a clear er
 - `architecture` → Phase 2
 - `dependencies` → Phase 3 + 3b
 - `owasp` → Phase 4
-- `validation` → Phase 5 entirely (validation + PoC both skipped)
-- `poc` → PoC generation only; Phase 5 validation still runs and confirms/rejects findings
+- `validation` → Phase 5 entirely (validation, and PoC if `--poc` was set, both skipped)
 - `skill-security` → Phase 4b
 
 **Cascade rules**:
-- `--skip owasp` → also skips `validation` and `poc` (Phase 5 has nothing to work from)
-- `--skip validation` → also skips `poc` (PoC requires a validation verdict)
-- `--skip poc` → validation runs normally; Phase 5 confirms/rejects findings but writes no PoC files
+- `--skip owasp` → also skips `validation` (Phase 5 has nothing to work from). `--poc` has no effect if validation is skipped.
+- `--skip validation` → `--poc` has no effect (PoC requires a validation verdict; there is none)
+- `--runtime` without `--poc` → `--poc` is implied; PoC generation runs so runtime validation has something to validate
 
 **Skip aliases in PR mode (`--pr`)** reinterpret the same names against
 `references/pr-review.md`'s steps, not the numbered phases: `secrets` → Step
@@ -104,9 +105,8 @@ Exception: if `--yes` is set and no repo path is provided, abort with a clear er
 `architecture` is **not a valid skip target in PR mode** — Step 1/2's
 structural context is load-bearing for every other step and cannot be
 skipped; passing it aborts with a clear error. `skill-security` has no effect
-in PR mode (Phase 4b does not run). **`poc` has no effect in PR mode** — this
-mode never generates PoCs (see PR Review Mode below), so there is nothing for
-`--skip poc` to additionally suppress.
+in PR mode (Phase 4b does not run). **`--poc` has no effect in PR mode** —
+this mode never generates PoCs (see PR Review Mode below), regardless of the flag.
 
 ### Pre-flight: Claude 5 session check
 
@@ -448,9 +448,9 @@ When `--vendor` is set:
   problem, not the adopter's; not the adoption question.
 - `dependencies` (Phase 3 + 3b) — CVE/patch tracking is the vendor's release
   concern; the adopter's question is whether the *code* is safe to run.
-- `poc` — no PoC files are written. **Validation (Phase 5) still runs** so
-  findings are confirmed, not raw candidates. This is exactly the existing
-  `--skip poc` semantics (validation confirms/rejects; no `pocs/` output).
+- PoC generation is forced off — `--poc` is ignored if passed (print a
+  one-line notice and continue without it). **Validation (Phase 5) still
+  runs** so findings are confirmed, not raw candidates; no `pocs/` output.
 
 Phases that still run: **Phase 2** (architecture — still produces the
 `project_overview` used for the "What This Tool Does" summary), **Phase 4**
@@ -564,7 +564,7 @@ silently. Running `--pr` twice does overwrite the previous `pr-report.md`,
 the same "last run wins" semantics the full pipeline already has for
 `final-report.md`.
 
-**5. `--runtime` and `--skip poc` have no effect in PR mode.** This mode
+**5. `--runtime` and `--poc` have no effect in PR mode.** This mode
 never generates PoCs or runs runtime validation (see Step 6 above and
 `phase5-validate-and-poc.md`'s PR Mode note) — there is no PoC step for
 either flag to act on.
@@ -596,13 +596,15 @@ Phase 4b → LLM / AI Skill Security      [auto-activated: has_skill_files: true
            └─ Skippable: --skip skill-security
            └─ Pure skill repos: runs after Phase 2 (3, 4, 5 auto-skipped)
            └─ Mixed repos: runs after Phase 4, before Phase 5
-Phase 5  → Validation + PoC             [skippable: --skip validation]
-           └─ Validates each Phase 4 finding independently, then immediately
-              writes a PoC only for findings that pass the validation gate.
-              PoC generation is gated inside this phase — unvalidated findings
-              never get a PoC. Optional runtime validation via Docker if --runtime.
-           └─ --skip poc: runs validation only; no PoC files are written.
-              Confirmed/rejected verdicts still appear in the report.
+Phase 5  → Validation (+ optional PoC)  [skippable: --skip validation]
+           └─ Validates each Phase 4 finding independently. Confirmed/rejected
+              verdicts always appear in the report.
+           └─ --poc: additionally writes a PoC immediately for each finding
+              that passes the validation gate. PoC generation is gated inside
+              this phase — unvalidated findings never get a PoC. Optional
+              runtime validation via Docker if --runtime (implies --poc).
+           └─ Without --poc (the default): validation only; no PoC files
+              are written.
            └─ AUTO-SKIPPED when is_skill_repo: true (no Phase 4 findings to validate)
 Phase 6  → Report Builder               [always runs]
 ```
@@ -648,7 +650,7 @@ For each repo in --repos (run all phases for repo N before starting repo N+1):
   Phase 3  → Dependency CVE Scanning    [skippable: --skip dependencies]
   Phase 3b → Reachability Validation
   Phase 4  → Code-Level OWASP Analysis  [skippable: --skip owasp]
-  Phase 5  → Validation + PoC           [skippable: --skip validation]
+  Phase 5  → Validation (+ optional PoC via --poc) [skippable: --skip validation]
   Phase 6  → Per-service Report Builder [always runs]
 
 Phase 7  → Cross-Repo Synthesis         [runs once; multi-repo only]
@@ -680,9 +682,9 @@ The finder layer (Phase 2, Phase 4) is isolated from the judgment layer
 (Phase 5) by passing only file paths between them. Phase 5 reads its inputs
 as "untrusted data from a potentially overly-confident finder" and re-validates
 from scratch. This boundary defends against a confident but wrong finder
-contaminating the PoC gate. PoC generation is structural: a PoC is written
-immediately after a finding passes validation, so unvalidated findings can
-never get one.
+contaminating the PoC gate. When `--poc` is set, PoC generation is structural:
+a PoC is written immediately after a finding passes validation, so unvalidated
+findings can never get one.
 
 > ⚠️ **Important**: Boundary 2 does **not** protect against Boundary 1 attacks.
 > Phase 5 still directly reads target-repo source files for independent
@@ -692,8 +694,9 @@ never get one.
 The real trust boundary is between **finders** (Phase 2, Phase 4) and the
 **judgment layer** (Phase 5). Validation and PoC generation share an agent
 because the PoC writer benefits from having the validator's full reasoning
-in context — and the gate is structural: a PoC is written immediately after
-a finding passes, so unvalidated findings can never get one.
+in context — and, when `--poc` is set, the gate is structural: a PoC is
+written immediately after a finding passes, so unvalidated findings can
+never get one.
 
 **Rules the orchestrator must follow:**
 
@@ -705,7 +708,7 @@ a finding passes, so unvalidated findings can never get one.
    - Its reference file from `references/`
    - The file paths of its inputs (not the content)
    - The repo path and working directory path
-   - Any flags relevant to it (`--runtime` for Phase 5, `--verbose` for
+   - Any flags relevant to it (`--poc` and `--runtime` for Phase 5, `--verbose` for
      Phase 6 **and** Phase 7 — both honor it to select lean vs. full report mode,
      `--vendor` for Phase 6 **and** Phase 7 — selects the vendor report format,
      `--debug` for Phases 2, 4, and 5 — they append to the execution log)
@@ -765,8 +768,8 @@ Each phase writes its findings to a working directory inside the repo:
 │                                   interrupted mid-multi-pass.
 ├── phase-llm-security.json   ← only if has_skill_files: true
 ├── phase5-validated.json
-├── phase5-pocs.json
-├── pocs/                     ← individual PoC scripts
+├── phase5-pocs.json           ← only if --poc was passed
+├── pocs/                     ← only if --poc was passed; individual PoC scripts
 │   ├── poc_O-001.py
 │   └── poc_O-002.sh
 ├── synthesized/              ← only if Phase 5 synthesized a Dockerfile (--runtime
@@ -981,7 +984,8 @@ After each phase completes, print a one-line summary:
 ✅ Phase 2 complete — 5 architectural findings | Stack: Python/Django, PostgreSQL, API-only
 ⏭️  Phase 3 skipped (--skip dependencies)
 ✅ Phase 4 complete — 8 candidates (SQLi ×2, BOLA ×3, SSRF ×1, CmdInj ×2) | Skipped: XSS (no HTML rendering), API Top 10 (not API project)
-✅ Phase 5 complete — 5 confirmed, 3 false positives filtered, 5 PoCs generated (3 static, 2 runtime-validated)
+✅ Phase 5 complete — 5 confirmed, 3 false positives filtered (pass --poc to generate PoCs)
+✅ Phase 5 complete — 5 confirmed, 3 false positives filtered, 5 PoCs generated (3 static, 2 runtime-validated) [--poc set]
 ✅ Phase 6 complete — Report written to {repo_path}/.security-review/final-report.md
 ```
 
