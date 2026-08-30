@@ -46,17 +46,32 @@ you read or checks you run.
 
 **phase2-architecture.json** (optional — improves prioritization and cuts
 re-derivation cost):
-- Read if present: used for auth model context, known weak areas, **and** surface
-  classification. Reuse `project_overview` (`trust_posture`, `external_interfaces`,
-  `data_handled`) and `coverage.security_relevant_files` as established facts.
-- **Surface annotation**: also read `surface_map` from this file. For each finding
-  you emit, match its `file` path against `surface_map.non_production[].pattern`
-  (glob matching). Set `surface_type` to the matching category (`test`, `fixture`,
-  `example`, `demo`), or `"production"` if no pattern matches. Set
-  `surface_confidence` to the matched entry's `confidence`, or — when no pattern
-  matches and `surface_map.classification_confidence` is `"high"` — to `"high"`
-  (meaning it is confidently production). Fallback-to-`"unknown"` rule: see
-  Output Format notes below. Phase 5 reads these fields to run the Surface Gate
+- **Read only these three top-level fields into your own reasoning context —
+  never load or reason over the `findings` array's contents**:
+  `project_overview` (`trust_posture`, `external_interfaces`, `data_handled`),
+  `coverage.security_relevant_files`, and `surface_map`. Phase 2's findings
+  are that phase's conclusions, not facts — Phase 4 must reach its own
+  conclusions independently, and reading the finding descriptions at all
+  invites reusing them as a checklist instead of scanning the repo yourself.
+  (The one exception is the codebase-size `jq` count below, which extracts a
+  bare number via a shell command and never puts finding content in your
+  context — that's fine.) If your tooling reads the whole file, discard the
+  `findings` array from context immediately and do not reason from it.
+- **Never cite a Phase 2 finding ID (`P2-XXX`) anywhere in a Phase 4 finding**
+  — not in `description`, `attack_vector`, `remediation`, or anywhere else. If
+  Phase 4's independent analysis happens to land on the same underlying issue
+  Phase 2 flagged, that's expected and fine (see below) — it stands alone
+  under its own `O-XXX` id, written from what *you* independently observed in
+  the code. Reconciling the two into one report entry is Phase 6's
+  Deduplication Step, not something Phase 4 does or references.
+- **Surface annotation**: for each finding you emit, match its `file` path
+  against `surface_map.non_production[].pattern` (glob matching). Set
+  `surface_type` to the matching category (`test`, `fixture`, `example`,
+  `demo`), or `"production"` if no pattern matches. Set `surface_confidence`
+  to the matched entry's `confidence`, or — when no pattern matches and
+  `surface_map.classification_confidence` is `"high"` — to `"high"` (meaning
+  it is confidently production). Fallback-to-`"unknown"` rule: see Output
+  Format notes below. Phase 5 reads these fields to run the Surface Gate
   without re-doing pattern matching.
   Don't re-derive "what's the auth mechanism here" or "is this file
   security-relevant" per category/per match when Phase 2 already answered it —
@@ -68,6 +83,9 @@ re-derivation cost):
   If a match falls outside Phase 2's `security_relevant_files` list, that is
   not a reason to skip it; Phase 2's inventory is a prioritization head start,
   not a ceiling (it can itself under-count — see its own `not_read` field).
+  **A near-total overlap between your finding set and Phase 2's — same files,
+  same order, one-to-one — is a signal you leaned on Phase 2's conclusions
+  instead of scanning independently, not a sign of thorough work.**
 - If absent (Phase 2 was skipped), continue without it. Note in output:
   `"architecture_context": "unavailable — Phase 2 was skipped"`.
   All OWASP checks still run; the analysis loses Phase 2's signal on
