@@ -36,11 +36,6 @@ For each repo (substituting its actual path):
 If a per-repo file is absent (phase was skipped), note it in `coverage_notes`
 and continue — do not abort.
 
-**Report mode:** The orchestrator passes the `--verbose` flag to this phase, the
-same as it does to Phase 6. It controls the structure of `system-report.md`
-(see Output below). `system-findings.json` is unaffected — it is always written
-in full so downstream tooling has complete data regardless of report mode.
-
 **Vendor mode:** When `--vendor` is passed (multi-repo vendor audit), keep the
 cross-service analysis unchanged but frame `system-report.md` for a security
 team deciding on adoption: open with a one-paragraph **system-level adoption
@@ -202,11 +197,6 @@ Write two files:
 
 ### 2. `{output_dir}/system-report.md`
 
-The structure mirrors Phase 6's two report modes. Check the `--verbose` flag
-passed by the orchestrator.
-
-#### Default system report (no `--verbose`) — for dev / platform teams
-
 **Goal**: give the team the systemic issues and what to do, with no meta-context.
 Drop the model-disclosure line and the detailed coverage narrative.
 
@@ -272,17 +262,6 @@ Rules (parallel to Phase 6 default mode):
 - **Single severity** per finding — no base/contextual columns.
 - **Coverage Gaps** section is included only when a per-repo file was absent or a
   phase was skipped; omit it entirely otherwise.
-
-#### Verbose system report (`--verbose`) — for security team
-
-Everything in the default report, plus:
-- **Model-disclosure line** in the header: `**Model:** {deep_tier_model} (adaptive thinking)`
-  {if a Deep-tier fallback was recorded in `run-metadata.json → fallback_notes`,
-  append a one-line notice}
-- Full **Coverage Notes** section (replacing Coverage Gaps): what topology
-  information was available vs. inferred, what was not analyzed (e.g., runtime
-  service mesh encryption, sidecar proxies), and every phase skipped for any
-  service — always included, even when nothing was skipped.
 
 ## Quality Bar
 

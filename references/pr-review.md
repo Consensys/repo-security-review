@@ -254,12 +254,12 @@ dependency," which a diff-scoped OWASP pass would otherwise miss entirely.
 Findings from Steps 3–5 (secrets, OWASP/regression, dependency) are written
 to `pr-findings.json` (see Output Format). Hand off to
 `phase5-validate-and-poc.md` for independent validation — that file's gates
-and schema apply **unchanged**. Per its "PR Mode" note, substitute
+and schema apply **unchanged**. Per its "PR Review Mode substitution" note, substitute
 `pr-findings.json` for `phase4-owasp.json` and "the PR diff-scan phase" for
 "Phase 4" throughout; the Surface Gate, mitigation hunt, and Boundary Gate run
 exactly as written there. **This mode does not generate PoCs** — PR review
-produces validation verdicts only (see `phase5-validate-and-poc.md`'s PR Mode
-note).
+produces validation verdicts only (see `phase5-validate-and-poc.md`'s
+"PR Review Mode substitution" note).
 
 **Additional validation duty specific to `regression: true` findings**:
 Phase 5 must independently re-derive that the removed control has no

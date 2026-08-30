@@ -41,9 +41,6 @@ In any Claude Code session (CLI or Desktop), point the skill at a local repo pat
 # Skip phases you don't need, copy the report somewhere
 /repo-security-review /path/to/repo --skip secrets,dependencies --output ~/reports/myapp
 
-# Full detailed report (OWASP coverage, remediation priority, appendix)
-/repo-security-review /path/to/repo --verbose
-
 # Generate PoCs for confirmed findings
 /repo-security-review /path/to/repo --poc
 
@@ -73,7 +70,6 @@ In any Claude Code session (CLI or Desktop), point the skill at a local repo pat
 | `--repos <paths>` | none | Comma-separated repo paths → multi-repo mode (adds cross-service topology + synthesis). |
 | `--skip <phases>` | none | Comma-separated: `secrets`, `architecture`, `dependencies`, `owasp`, `skill-security`, `validation`. |
 | `--output <dir>` | none | Copy the report and PoC scripts into this directory after the run (created if needed). |
-| `--verbose` | off | Full detailed report (OWASP checks inventory, remediation-priority section, appendix). |
 | `--poc` | off | Opt-in: generate a PoC for each finding Phase 5 confirms. Without it, Phase 5 still validates every finding, but writes no PoC files. |
 | `--runtime` | off | Stand the app up in Docker and run each confirmed PoC against it. Implies `--poc`. |
 | `--vendor` | off | Third-party adoption audit. Skips secrets/dependencies, forces PoC generation off, pins all phases to Sonnet, and produces an adoption-risk report (verdict + conditions + "what it does" + adopter-side controls). |

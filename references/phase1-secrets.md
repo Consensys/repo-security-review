@@ -117,8 +117,5 @@ Write to `{repo_path}/.security-review/phase1-secrets.json`:
   into `phase1-secrets.json`, delete them:
   ```bash
   rm -f {repo_path}/.security-review/gitleaks-raw.json
-  rm -f {repo_path}/.security-review/npm-audit-raw-*.json
-  rm -f {repo_path}/.security-review/pip-audit-raw-*.json
-  rm -f {repo_path}/.security-review/grype-raw.json
   ```
   If deletion fails, log a warning — do not abort the phase.

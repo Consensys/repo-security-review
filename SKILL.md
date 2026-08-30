@@ -67,7 +67,6 @@ Parse these from `$ARGUMENTS` using the format:
 | `--output` | none — all artifacts stay at `{repo_path}/.security-review/` (single-repo) or `./system-security-review/` (multi-repo) | Directory to copy the final report and PoC scripts into after the run. Created if it doesn't exist. **Strongly recommended in multi-repo mode.** |
 | `--poc` | false | Opt-in: after Phase 5 validates a finding (CONFIRMED / CONFIRMED_LOW_CONFIDENCE), generate a PoC for it. Without this flag, Phase 5 validates every finding and the report includes full verdicts, but no PoC files are written. Has no effect in PR mode (which never generates PoCs) or Vendor mode (which forces PoC generation off — see [Vendor Mode](#vendor-mode---vendor)). |
 | `--runtime` | false | Enable Docker-based runtime PoC validation. Implies `--poc` — runtime validation runs a generated PoC script, so there is nothing to validate without one. |
-| `--verbose` | false | Generate the full detailed report. Default report (for dev teams) omits the OWASP Checks Run inventory, the standalone Remediation Priority section, and the Appendix. All findings, evidence, and per-finding priority labels are included in both modes. In multi-repo mode the flag applies to both the per-service reports (Phase 6) and the system-level synthesis report (Phase 7). |
 | `--vendor` | false | Vendor / open-source audit mode. Audits a third-party repo the company is considering adopting; audience is the internal security team, deliverable is an adoption risk judgment (not a fix-list for the vendor). Forces skip of `secrets`, `dependencies`, and `poc`; pins every phase to the resolved Standard tier model (never Opus); and switches Phase 6 to the vendor report format. See [Vendor Mode](#vendor-mode---vendor) below. |
 | `--pr` | none | PR Review mode. `--pr <base>...<head>` (or `--pr <base>` shorthand for `<base>...HEAD`) reviews only a pull request's diff instead of the whole repository — replaces the 6/7-phase pipeline with `references/pr-review.md`, pins to the resolved Standard tier model, and writes `pr-report.md` instead of `final-report.md`. Mutually exclusive with `--repos` and `--vendor`. See [PR Review Mode](#pr-review-mode---pr) below. |
 | `--context` | none | Inline `key=value,key=value` threat model used to calibrate severity. Optional — omit for default behavior. See [`--context`](#--context-threat-model-calibration) below. |
@@ -228,10 +227,8 @@ whether the resolved snapshot turns out to be 4.x or 5-generation.
 
 3. Write run-metadata.json with the resolved IDs and a fallback_notes field.
    Include fallback_notes whenever a model lower in the chain was used, so
-   Phase 6 can surface a one-line notice in the verbose report header.
+   the run's model resolution is auditable after the fact.
 ```
-
-Record each fallback in `run-metadata.json`.
 
 #### run-metadata.json
 
@@ -272,8 +269,7 @@ When `--pr` is set, the file instead contains only:
 No `deep_tier_model`, `deep_tier_thinking`, or per-numbered-phase fields —
 PR mode has no Deep tier and no numbered phases, only the one PR-review agent.
 
-`fallback_notes` is omitted when no fallback was needed. Phase 6 reads it and
-includes a one-line notice in the verbose report header when it is present.
+`fallback_notes` is omitted when no fallback was needed.
 When phases are dispatched via the session's own subagent tool rather than a
 raw API call (see "Dispatch reality" note above), also record in
 `fallback_notes` which generic alias and effort tier were actually used, so the
@@ -423,8 +419,7 @@ framed as adoption risk with adopter-side compensating controls.
 **4. `--runtime` is ignored** — there is no PoC to validate at runtime. If both
 flags are passed, print a one-line notice and continue without Docker.
 
-`--vendor` composes with `--verbose` (adds the Coverage & Tools appendix to the
-vendor report) and with multi-repo `--repos` (each vendor repo gets a vendor
+`--vendor` composes with multi-repo `--repos` (each vendor repo gets a vendor
 report; Phase 7 synthesis still runs, and its report is likewise vendor-framed).
 
 ## PR Review Mode (`--pr`)
@@ -485,14 +480,11 @@ starts — re-reading source from scratch rather than reasoning from
 conclusions it already reached.
 
 **3. Model tier.** PR Review mode always uses the **resolved Standard tier
-model** — the same constraint as `--vendor` (never Deep/Opus, no
-chain-walking beyond the Standard chain: `claude-sonnet-4-6` →
-`claude-haiku-4-5`). This mode is meant to run frequently (every PR,
-potentially in CI), where the full pipeline's Deep-tier reasoning cost isn't
-justified for a diff-scoped review. Whichever concrete snapshot resolves for
-the Standard chain (4.x or 5-generation) is accepted as-is, identical to
-Vendor Mode's rule. If the Standard chain is entirely unavailable, abort
-with a clear error — do not fall back to Deep.
+model** — identical constraint and chain-walk behavior to
+[Vendor Mode](#vendor-mode---vendor) §2 (never Deep/Opus; abort rather than
+fall back to Deep if the Standard chain is entirely unavailable). This mode
+is meant to run frequently (every PR, potentially in CI), where the full
+pipeline's Deep-tier reasoning cost isn't justified for a diff-scoped review.
 
 Write `run-metadata.json` with `pr_mode: true`, `pr_diff_range: "{base}...{head}"`,
 and `pr_phase_model` set to the resolved Standard tier model.
@@ -643,12 +635,8 @@ findings can never get one.
 > validation, so it is equally exposed to prompt injection from the repo.
 > Both boundaries must be in place; neither substitutes for the other.
 
-The real trust boundary is between **finders** (Phase 2, Phase 4) and the
-**judgment layer** (Phase 5). Validation and PoC generation share an agent
-because the PoC writer benefits from having the validator's full reasoning
-in context — and, when `--poc` is set, the gate is structural: a PoC is
-written immediately after a finding passes, so unvalidated findings can
-never get one.
+Validation and PoC generation share an agent because the PoC writer benefits
+from having the validator's full reasoning in context while it's still fresh.
 
 **Rules the orchestrator must follow:**
 
@@ -660,8 +648,7 @@ never get one.
    - Its reference file from `references/`
    - The file paths of its inputs (not the content)
    - The repo path and working directory path
-   - Any flags relevant to it (`--poc` and `--runtime` for Phase 5, `--verbose` for
-     Phase 6 **and** Phase 7 — both honor it to select lean vs. full report mode,
+   - Any flags relevant to it (`--poc` and `--runtime` for Phase 5,
      `--vendor` for Phase 6 **and** Phase 7 — selects the vendor report format,
      `--debug` for Phases 2, 4, and 5 — they append to the execution log)
 

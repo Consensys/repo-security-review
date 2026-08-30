@@ -55,9 +55,9 @@ re-derivation cost):
   `example`, `demo`), or `"production"` if no pattern matches. Set
   `surface_confidence` to the matched entry's `confidence`, or — when no pattern
   matches and `surface_map.classification_confidence` is `"high"` — to `"high"`
-  (meaning it is confidently production). When `surface_map` is absent or
-  `classification_confidence` is `"low"`, set both fields to `"unknown"`. Phase 5
-  reads these fields to run the Surface Gate without re-doing pattern matching.
+  (meaning it is confidently production). Fallback-to-`"unknown"` rule: see
+  Output Format notes below. Phase 5 reads these fields to run the Surface Gate
+  without re-doing pattern matching.
   Don't re-derive "what's the auth mechanism here" or "is this file
   security-relevant" per category/per match when Phase 2 already answered it —
   apply that context directly. This is reuse of **facts Phase 2 already spent
@@ -103,8 +103,9 @@ skipping and why — this appears in the report.
 > Before skipping any high-severity check, read `tech-stack.json → detection`:
 >
 > - If the check's gating signal appears in `detection.low_confidence_signals`
->   or `detection.truncated_signals`, **RUN the check anyway** and tag its
->   findings `detection_confidence: "reduced"`. Do not skip.
+>   or `detection.truncated_signals`, **RUN the check anyway** and tag any
+>   findings it produces with `detection_confidence: "reduced"` (finding
+>   schema field, see Output Format). Do not skip.
 > - **Never skip these high-severity injection checks on a low-confidence
 >   negative**: A03 SQL Injection, A03 Command Injection, A08 Deserialization.
 >   If detection for their signal was manifest-only, unrecognized-stack, or
@@ -112,9 +113,9 @@ skipping and why — this appears in the report.
 > - A signal that is `false`, absent from both `detection` lists, on a
 >   recognized and fully-searched stack → confident negative → skip is allowed.
 >
-> When you run a check because of this rule (rather than a positive signal),
-> log it distinctly in the check plan (see below) so the report is honest about
-> why the check ran.
+> When a check ran because of this rule (rather than a positive signal), add
+> its name to `checks_run_reduced_confidence` (see Output Format) so the report
+> is honest about why the check ran, even when it produced zero findings.
 
 ### OWASP Top 10 — Applicability Matrix
 
@@ -943,6 +944,7 @@ Write to `{repo_path}/.security-review/phase4-owasp.json`:
     "trigger_reasons": ["source_files=847", "applicable_checks=12"]
   },
   "checks_run": ["A01", "A02", "A03-SQLi", "A07", "A09", "API1", "API2"],
+  "checks_run_reduced_confidence": ["A08-Deser"],
   "checks_skipped": [
     {"check": "A03-XSS", "reason": "is_api_only=true, no HTML rendering detected", "negative_confidence": "confident"},
     {"check": "A03-CmdInj", "reason": "has_shell_execution=false", "negative_confidence": "confident"},
@@ -989,6 +991,7 @@ Write to `{repo_path}/.security-review/phase4-owasp.json`:
       "validation_notes": "What the validator should check",
       "surface_type": "production | test | fixture | example | demo | unknown",
       "surface_confidence": "high | medium | low | unknown",
+      "detection_confidence": "reduced (omit unless this finding came from a check run under the fail-safe gating rule in Step 1)",
       "family_swept": "src/cmds/*/  (pattern: timer.track(format!(...)))",
       "family_matches": ["src/cmds/cloud/curl_cmd.rs", "src/cmds/cloud/wget_cmd.rs"]
     }
@@ -999,19 +1002,21 @@ Write to `{repo_path}/.security-review/phase4-owasp.json`:
 `family_swept`/`family_matches` are present on any finding that belongs to a file
 family (omit for standalone findings). `class_negatives` lists every check class
 marked negative at **reduced** confidence with the files that were not examined —
-this is the honest-negative record from the Finalization step.
+this is the honest-negative record from the Finalization step. `checks_run_reduced_confidence`
+lists any entries from `checks_run` that executed only because of the Step 1
+fail-safe gating rule (a low-confidence/truncated negative), not a positive signal —
+omit the field entirely when empty.
 
 `surface_type` and `surface_confidence` are always present. When `phase2-architecture.json`
 is absent or its `surface_map.classification_confidence` is `"low"`, set both to `"unknown"`.
 Do not skip findings in non-production surfaces here — Phase 5's Surface Gate owns that
 decision. Phase 4's role is annotation only.
 
-`data_flow` is required for injection-class findings (SQLi, XSS, SSRF, command
-injection, template injection, deserialization). Omit it for non-injection classes
-(A01, A02, A04, A05, A07, A09) and use `attack_vector` as the narrative instead.
-`cross_file: true` when any hop crosses a file boundary; `hops: []` when source and
-sink are in the same function. A finding with `data_flow: null` and an injection-class
-OWASP category will be flagged by Phase 5 as unverifiable.
+See "Source → Sink Tracing" above for which classes require `data_flow` and the
+omit rule for the rest. In the JSON: `cross_file: true` when any hop crosses a
+file boundary, `hops: []` when source and sink share a function, and a
+`data_flow: null` on an injection-class finding will be flagged by Phase 5 as
+unverifiable.
 
 ## Quality Bar
 

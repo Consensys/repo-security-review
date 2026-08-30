@@ -1,5 +1,7 @@
 # Repo Security Review Pipeline
 # Save as: .claude/commands/repo-security-review.md in your Claude Code project
+# Requires the rest of this skill directory (references/*.md) to also be
+# reachable from that project — this file is not fully standalone; see Step 7.
 #
 # Usage:
 #   /repo-security-review --help
@@ -59,13 +61,8 @@ Options:
                         file-reading phases (2, 4, 5) actually ran: every file
                         read with its line range and a full/partial flag, which
                         files were treated as security-relevant, the greps run,
-                        and checks run vs skipped. For inspecting skill behaviour;
-                        independent of --verbose. Paste it back for analysis.
-  --verbose             Generate the full detailed report. Default report
-                        (suitable for dev teams) omits the OWASP Checks Run
-                        inventory, Remediation Priority section, and Appendix.
-                        All findings, evidence, and per-finding priority labels
-                        are present in both modes.
+                        and checks run vs skipped. For inspecting skill behaviour.
+                        Paste it back for analysis.
   --context <pairs>     Optional inline threat model used to calibrate
                         severity. Format: comma-separated key=value pairs.
                         Keys: deployment_target (local|public),
@@ -156,9 +153,6 @@ Examples:
   # Inspect how the skill reads files — writes execution-log.md to paste back
   /repo-security-review ~/repos/my-service --debug
 
-  # Full detailed report (includes Appendix, OWASP coverage, Remediation Priority)
-  /repo-security-review ~/repos/my-service --verbose --output ~/reports/my-service
-
   # Skip arch (you already reviewed it) — deps + OWASP only
   /repo-security-review ~/repos/my-service --skip architecture,secrets
 
@@ -203,7 +197,6 @@ Parse `$ARGUMENTS` for:
   Passed to Phases 2, 4, and 5, which append how they actually ran (files read
   with line ranges + full/partial flag, security-relevant files, greps, checks
   run/skipped). See SKILL.md → Execution Log for the format.
-- `--verbose` → pass to Phase 6 to generate the full detailed report
 - `--context <pairs>` → optional inline threat model as comma-separated
   `key=value` pairs. Allowed keys: `deployment_target` (`local`|`public`),
   `auth_required_to_reach` (`true`|`false`).
@@ -254,7 +247,6 @@ Phases skipped:   {list or "none"}
 Output:           {output_path if set, else "<repo>/.security-review/final-report.md"}
 PoC generation:   {enabled (--poc) / disabled (default)}
 Runtime PoC:      {enabled / disabled}
-Report mode:      {detailed (--verbose) / lean (default)}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
@@ -268,7 +260,6 @@ Phases skipped:   {list or "none" — applies to each service's per-repo phases}
 Output:           {output_dir}
 PoC generation:   {enabled (--poc) / disabled (default)}
 Runtime PoC:      {enabled / disabled}
-Report mode:      {detailed (--verbose) / lean (default)}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
@@ -333,9 +324,7 @@ After Phase 2: read tech-stack.json.
 2. For each repo in `--repos` (one at a time, never interleaved):
    - Run phases 1–6 for that repo using the single-repo logic above
    - Pass `{output_dir}/service-topology.json` to the Phase 2 agent as additional context
-3. Run Phase 7 (cross-repo synthesis) — passes `{output_dir}`, all per-repo paths,
-   and the `--verbose` flag (Phase 7 uses it to pick lean vs. full system-report.md,
-   the same way Phase 6 does for per-service reports)
+3. Run Phase 7 (cross-repo synthesis) — passes `{output_dir}` and all per-repo paths
 
 After each phase (and each per-repo phase in multi-repo mode), print a one-line
 progress summary **in the main session chat** as the phase's subagent returns —
