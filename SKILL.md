@@ -513,6 +513,14 @@ never generates PoCs or runs runtime validation (see Step 6 above and
 `phase5-validate-and-poc.md`'s PR Mode note) — there is no PoC step for
 either flag to act on.
 
+**6. Chat output follows the same status-only-until-the-report rule as the
+full pipeline** (see [Progress Updates](#progress-updates) and
+[Final Step](#final-step)). Print a bare status line per step (0–7), no
+finding content. Once `pr-report.md` exists, print its `## Summary` section
+verbatim (1–2 sentence summary + severity table + the Recommendation line)
+as the chat recap — nothing from `pr-findings.json` / `pr-validated.json`
+before that point.
+
 ## Phase Execution Order
 
 Run phases **sequentially** — each phase's output informs the next.
@@ -922,15 +930,23 @@ signal: if phases are dispatched as background tasks, the main chat can otherwis
 go silent for the entire run. The orchestrator resumes between phases; emit the
 one-line summary in that gap. A silent run is a bug, not a style choice.
 
-After each phase completes, print a one-line summary:
+**No finding content in progress lines — status only.** A phase-completion line
+exists purely so the user doesn't think the run is stuck. It must never include
+a finding count, a category/type breakdown (e.g. "SQLi ×2, BOLA ×3"), a
+confirmed/false-positive tally, a severity number, or a tech-stack detail — any
+of that is "part of the result," not progress. The **only** place finding
+content may appear in the chat is the post-report recap in
+[Final Step](#final-step), after `final-report.md` already exists on disk.
+Phase name/number and a bare status (running / complete / skipped, with the
+skip reason if skipped) is all a progress line may contain:
+
 ```
-✅ Phase 1 complete — 3 secrets found (2 API keys, 1 private key)
-✅ Phase 2 complete — 5 architectural findings | Stack: Python/Django, PostgreSQL, API-only
-⏭️  Phase 3 skipped (--skip dependencies)
-✅ Phase 4 complete — 8 candidates (SQLi ×2, BOLA ×3, SSRF ×1, CmdInj ×2) | Skipped: XSS (no HTML rendering), API Top 10 (not API project)
-✅ Phase 5 complete — 5 confirmed, 3 false positives filtered (pass --poc to generate PoCs)
-✅ Phase 5 complete — 5 confirmed, 3 false positives filtered, 5 PoCs generated (3 static, 2 runtime-validated) [--poc set]
-✅ Phase 6 complete — Report written to {repo_path}/.security-review/final-report.md
+✅ Phase 1 (Secret Scanning) complete
+✅ Phase 2 (Architectural Analysis) complete
+⏭️  Phase 3 (Dependency CVE Scanning) skipped — --skip dependencies
+✅ Phase 4 (Code-Level OWASP Analysis) complete
+✅ Phase 5 (Validation) complete
+✅ Phase 6 (Report Builder) complete
 ```
 
 ### Multi-repo progress
@@ -948,14 +964,16 @@ Print, in the main session chat:
    ━━━ Service 2/3: gateway ━━━
    ```
 3. The per-phase one-line summaries (above) under each service banner as each
-   phase completes.
-4. A per-service completion line when its Phase 6 finishes:
+   phase completes — same status-only rule, no finding content.
+4. A per-service completion line when its Phase 6 finishes — status only,
+   no finding count (its findings appear later, in the batch recap described
+   in Final Step → Multi-repo mode, once the whole run is done):
    ```
-   ✅ gateway complete — 4 findings (1 HIGH, 3 MEDIUM) · report written
+   ✅ gateway complete — report written
    ```
-5. A synthesis line when Phase 7 finishes:
+5. A synthesis line when Phase 7 finishes — status only:
    ```
-   ✅ Phase 7 complete — 2 cross-service findings · system-report.md written
+   ✅ Phase 7 complete — system-report.md written
    ```
 
 If the orchestrator spawns any phase as a background task and also prints the
@@ -971,6 +989,17 @@ If a phase fails or a tool is not installed:
 - Never abort the full pipeline for a single phase failure
 
 ## Final Step
+
+**This is the only point in the run where finding content may appear in the
+main chat.** Every phase before this printed status only (see Progress
+Updates above); now that `final-report.md` (or the mode-specific report)
+exists on disk, print a short recap pulled *verbatim* from that report's own
+`## Summary` section — do not print individual finding descriptions,
+remediation text, evidence, or PoC content; that stays in the file. The recap
+is exactly two things:
+- The report's severity count table (or, in Vendor mode, the verdict +
+  overall risk line — see [Vendor Mode](#vendor-mode---vendor)'s report format)
+- The report's 2–3 sentence summary paragraph
 
 ### Single-repo mode
 
@@ -998,6 +1027,9 @@ If a phase fails or a tool is not installed:
 
 3. Call `present_files` with `{output_dir}/final-report.md`
 
+4. Print the recap (severity table + summary paragraph, read from the
+   report's `## Summary` section) directly in the chat.
+
 **If `--output` was NOT provided:**
 
 1. Print:
@@ -1007,6 +1039,19 @@ If a phase fails or a tool is not installed:
    ```
 
 2. Call `present_files` with `{repo_path}/.security-review/final-report.md`
+
+3. Print the recap (severity table + summary paragraph, read from the
+   report's `## Summary` section) directly in the chat. Example:
+   ```
+   | Severity | Count |
+   |----------|-------|
+   | 🔴 Critical | 0 |
+   | 🟠 High | 4 |
+   | 🟡 Medium | 13 |
+   | 🟢 Low | 4 |
+
+   {the report's 2–3 sentence summary paragraph, verbatim}
+   ```
 
 ### Multi-repo mode
 
@@ -1037,3 +1082,27 @@ Print completion banner:
 ```
 
 Call `present_files` with `{output_dir}/system-report.md`.
+
+Print the batch recap — this is the first point in a multi-repo run where
+finding content appears in the chat. For each service, print its name and
+the severity table read from that service's own `final-report.md → ##
+Summary` (no per-finding detail); then print `system-report.md`'s Executive
+Summary paragraph and a compact table of cross-service findings
+(`ID | Severity | Title`, read from `system-findings.json`):
+```
+── auth ──
+| Severity | Count |
+|----------|-------|
+| 🔴 Critical | 0 | 🟠 High | 1 | 🟡 Medium | 2 | 🟢 Low | 0 |
+
+── gateway ──
+| Severity | Count |
+|----------|-------|
+| 🔴 Critical | 0 | 🟠 High | 0 | 🟡 Medium | 3 | 🟢 Low | 1 |
+
+{system-report.md's 2–3 paragraph Executive Summary, verbatim}
+
+| ID | Severity | Title |
+|----|----------|-------|
+| SYS-001 | CRITICAL | {title} |
+```
