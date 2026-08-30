@@ -138,3 +138,13 @@ Write to `{output_dir}/service-topology.json`:
   the service's role in the wider system (entry point vs. internal, blind-trust
   callers, etc.) and incorporates this into its architecture analysis.
 - **Phase 7** reads it as the authoritative service graph for cross-repo synthesis.
+
+## Final Response (chat output)
+
+Your own closing message — separate from the orchestrator's one-line progress
+update — is a channel that can leak topology detail into the chat if you're
+not careful. Do not restate the service graph, trust boundary gaps, or any
+other analysis content in your final response. Everything belongs in
+`service-topology.json`. Your final message is one line: confirm completion
+and the output path, nothing else — e.g. `Phase 0 complete — wrote
+service-topology.json`.

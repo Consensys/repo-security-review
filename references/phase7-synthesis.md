@@ -272,3 +272,13 @@ Only report findings you can trace to concrete evidence. For each finding:
 
 Avoid re-reporting per-service findings that are already covered in individual
 reports unless they are amplified by the cross-repo context.
+
+## Final Response (chat output)
+
+Your own closing message — separate from the orchestrator's one-line progress
+update — is a channel that can leak findings into the chat if you're not
+careful. Do not restate cross-service findings, attack scenarios, or a
+narrative summary in your final response. Everything belongs in
+`system-findings.json` and `system-report.md`. Your final message is one
+line: confirm completion and the output paths, nothing else — e.g. `Phase 7
+complete — wrote system-findings.json, system-report.md`.

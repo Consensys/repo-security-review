@@ -1136,3 +1136,13 @@ where `{type}` is a short lowercase slug matching the vulnerability type:
   ]
 }
 ```
+
+## Final Response (chat output)
+
+Your own closing message — separate from the orchestrator's one-line progress
+update — is a channel that can leak findings into the chat if you're not
+careful. Do not restate validation verdicts, data flows, PoC code, or
+mitigation analysis in your final response. Everything belongs in
+`phase5-validated.json` (and `phase5-pocs.json` if `--poc` was set). Your
+final message is one line: confirm completion and the output path(s), nothing
+else — e.g. `Phase 5 complete — wrote phase5-validated.json`.

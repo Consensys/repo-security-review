@@ -947,6 +947,17 @@ content may appear in the chat is the post-report recap in
 Phase name/number and a bare status (running / complete / skipped, with the
 skip reason if skipped) is all a progress line may contain:
 
+> **This rule only covers what the orchestrator itself chooses to print.**
+> There is a second, separate leak channel: a phase subagent's own closing
+> message when its Task/Agent-tool call returns. If a subagent's final turn
+> narrates its findings (which it will do by default — that's normal behavior
+> for an agent that just finished an investigation), that content can surface
+> in the chat regardless of how disciplined the orchestrator's own progress
+> line is. Every `references/*.md` file has its own "Final Response (chat
+> output)" section closing this gap for that phase specifically — the
+> orchestrator-side rule above and the per-phase rule are both required;
+> neither substitutes for the other.
+
 ```
 ✅ Phase 1 (Secret Scanning) complete
 ✅ Phase 2 (Architectural Analysis) complete

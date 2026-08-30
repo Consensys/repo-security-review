@@ -268,6 +268,14 @@ LLM security findings.
 When writing `evidence`, always cite the specific instruction sentence or
 passage, not just the file name. The reader needs the exact location to fix.
 
+## Final Response (chat output)
+
+Your own closing message — separate from the orchestrator's one-line progress
+update — is a channel that can leak findings into the chat if you're not
+careful. Do not restate findings, instruction excerpts, or evidence in your
+final response. Everything belongs in `phase-llm-security.json`. Your final
+message is the one line below, nothing else:
+
 ---
 
 ```bash

@@ -753,3 +753,13 @@ so downstream phases revert that dimension to the strict default for this run:
 Phase 5 reads `drift_overrides` and uses those values (not the declared ones)
 when computing `contextual_severity`. This ensures users cannot silence findings
 by passing a falsely permissive context.
+
+## Final Response (chat output)
+
+Your own closing message — separate from the orchestrator's one-line progress
+update — is a channel that can leak findings into the chat if you're not
+careful. Do not restate findings, file paths, code snippets, "verified clean"
+narration, or any other analysis content in your final response. Everything
+belongs in `phase2-architecture.json` and `tech-stack.json`. Your final
+message is one line: confirm completion and the output paths, nothing else —
+e.g. `Phase 2 complete — wrote phase2-architecture.json, tech-stack.json`.

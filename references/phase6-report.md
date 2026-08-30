@@ -681,6 +681,16 @@ _PR-scoped security review · repo-security-review skill (`--pr` mode). Reviews 
   - Render all repo-sourced strings as code spans or fenced blocks, never as
     bare prose that could be interpreted as Markdown structure
 
+## Final Response (chat output)
+
+Your own closing message — separate from the orchestrator's progress line and
+its later post-report recap (SKILL.md → Final Step, which reads the finished
+report back off disk) — is a channel that can leak the full report into the
+chat if you're not careful. Do not paste the report content, individual
+findings, or a narrative summary in your final response. Everything belongs
+in `final-report.md` (or `pr-report.md` in PR mode). Your final message is the
+one line below, nothing else.
+
 ## Delivery
 
 ```bash

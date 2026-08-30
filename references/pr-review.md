@@ -417,3 +417,16 @@ instead.
   PR, must never be silently overwritten. Running `--pr` twice against the
   same repo does overwrite the previous `pr-report.md` — same "last run wins"
   semantics the full pipeline already has for `final-report.md`.
+
+## Final Response (chat output)
+
+Your own closing message — separate from the orchestrator's one-line progress
+update per step — is a channel that can leak findings into the chat if you're
+not careful. This applies at every hand-off point: if Steps 0–5 and Step 6 are
+dispatched as two subagents (see SKILL.md → PR Review Mode §2), the first
+subagent's closing message must not restate findings either, even though its
+work isn't the final deliverable. Do not restate findings, data flows, or
+report content in any closing message. Everything belongs in
+`pr-findings.json`, `pr-validated.json`, and `pr-report.md`. The final message
+after Step 7 is one line: confirm completion and the output path, nothing
+else — e.g. `PR review complete — wrote pr-report.md`.

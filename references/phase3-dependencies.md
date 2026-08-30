@@ -336,3 +336,13 @@ Apply in order — the first matching rule wins.
 - `>= 0.7` (top ~3% of all CVEs) — actively targeted; treat as reachable even if static analysis says otherwise
 - `0.1–0.7` — moderate exploitation interest; reachability drives the call
 - `< 0.1` — rarely exploited; unreachable paths can be deprioritised aggressively
+
+## Final Response (chat output)
+
+Your own closing message — separate from the orchestrator's one-line progress
+update — is a channel that can leak findings into the chat if you're not
+careful. Do not restate CVEs, packages, versions, or reachability analysis in
+your final response. Everything belongs in `phase3-cves.json` and
+`phase3b-reachability.json`. Your final message is one line: confirm
+completion and the output paths, nothing else — e.g. `Phase 3 complete —
+wrote phase3-cves.json, phase3b-reachability.json`.

@@ -119,3 +119,12 @@ Write to `{repo_path}/.security-review/phase1-secrets.json`:
   rm -f {repo_path}/.security-review/gitleaks-raw.json
   ```
   If deletion fails, log a warning — do not abort the phase.
+
+## Final Response (chat output)
+
+Your own closing message — separate from the orchestrator's one-line progress
+update — is a channel that can leak findings into the chat if you're not
+careful. Do not restate findings, secret types, file paths, or redacted values
+in your final response. Everything belongs in `phase1-secrets.json`. Your
+final message is one line: confirm completion and the output path, nothing
+else — e.g. `Phase 1 complete — wrote phase1-secrets.json`.

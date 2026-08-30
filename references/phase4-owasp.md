@@ -1024,3 +1024,13 @@ Only include findings you're confident in. For BOLA/IDOR:
 - Read the full auth middleware and verify it doesn't handle this globally
 - Check for policy/permission layers you might have missed
 - Mark `poc_needed: true` only if structurally confirmed
+
+## Final Response (chat output)
+
+Your own closing message — separate from the orchestrator's one-line progress
+update — is a channel that can leak findings into the chat if you're not
+careful. Do not restate findings, file paths, code snippets, attack vectors,
+or "verified clean" narration in your final response. Everything belongs in
+`phase4-owasp.json`. Your final message is one line: confirm completion and
+the output path, nothing else — e.g. `Phase 4 complete — wrote
+phase4-owasp.json`.
