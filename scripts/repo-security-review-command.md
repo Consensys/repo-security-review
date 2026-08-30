@@ -57,11 +57,14 @@ Options:
                         never bypassed. Requires a repo path or --repos —
                         aborts if neither is provided.
   --debug               Write an execution log to
-                        <repo>/.security-review/execution-log.md showing how the
-                        file-reading phases (2, 4, 5) actually ran: every file
-                        read with its line range and a full/partial flag, which
-                        files were treated as security-relevant, the greps run,
-                        and checks run vs skipped. For inspecting skill behaviour.
+                        <repo>/.security-review/execution-log.md showing how
+                        Phases 2, 4, 5, and 6 actually ran: for the file-reading
+                        phases (2, 4, 5), every file read with its line range
+                        and a full/partial flag, which files were treated as
+                        security-relevant, the greps run, and checks run vs
+                        skipped; for Phase 6 (report builder), which phase
+                        output files it read. Every phase also reports its own
+                        token consumption. For inspecting skill behaviour.
                         Paste it back for analysis.
   --context <pairs>     Optional inline threat model used to calibrate
                         severity. Format: comma-separated key=value pairs.
@@ -194,9 +197,10 @@ Parse `$ARGUMENTS` for:
   If `--yes` is set and no repo path is provided, abort with:
   `❌ --yes requires a repo path or --repos — interactive input unavailable`
 - `--debug` → write an execution log to `{repo_path}/.security-review/execution-log.md`.
-  Passed to Phases 2, 4, and 5, which append how they actually ran (files read
+  Passed to Phases 2, 4, 5, and 6, which append how they actually ran (files read
   with line ranges + full/partial flag, security-relevant files, greps, checks
-  run/skipped). See SKILL.md → Execution Log for the format.
+  run/skipped — Phase 6 instead lists which phase-output files it read, since it
+  doesn't read target-repo source). See SKILL.md → Execution Log for the format.
 - `--context <pairs>` → optional inline threat model as comma-separated
   `key=value` pairs. Allowed keys: `deployment_target` (`local`|`public`),
   `auth_required_to_reach` (`true`|`false`).

@@ -650,7 +650,7 @@ from having the validator's full reasoning in context while it's still fresh.
    - The repo path and working directory path
    - Any flags relevant to it (`--poc` and `--runtime` for Phase 5,
      `--vendor` for Phase 6 **and** Phase 7 — selects the vendor report format,
-     `--debug` for Phases 2, 4, and 5 — they append to the execution log)
+     `--debug` for Phases 2, 4, 5, and 6 — they append to the execution log)
 
 3. **The orchestrator's only job** is sequencing, path management, and
    printing progress summaries. It must not accumulate findings across phases.
@@ -825,8 +825,8 @@ tech-stack detection before proceeding (see each phase's reference file).
 
 ## Execution Log (`--debug`)
 
-When `--debug` is set, the orchestrator passes it to Phases 2, 4, and 5. Each of
-those phases **appends** a section to `{repo_path}/.security-review/execution-log.md`
+When `--debug` is set, the orchestrator passes it to Phases 2, 4, 5, and 6.
+Each of those phases **appends** a section to `{repo_path}/.security-review/execution-log.md`
 recording how it actually ran. The file is created (empty) by the orchestrator
 before Phase 1 when `--debug` is set. This is a self-report by each phase agent —
 useful and structured, but the authoritative record of tool calls remains the
@@ -880,6 +880,14 @@ never omit it or fold it into a summary line. (See Phase 2 Step 0.5.)
 | Cost (est.) | $0.32 |
 ```
 
+> **Phase 6 variant**: Phase 6 does not read target-repo source, so the "Files
+> read" / "Security-relevant files" / "Directory coverage" / "Tools / greps run" /
+> "Checks run / skipped" tables above do not apply to it. Its section replaces
+> them with an "### Input files read" list (which phase-output JSON files it
+> read, e.g. `phase2-architecture.json`, `phase4-owasp.json`,
+> `phase5-validated.json`) followed by the same "### Token consumption" block —
+> see `references/phase6-report.md` → Execution Log.
+
 Keep it factual and terse — this is instrumentation, not narrative. If `--debug`
 is not set, write nothing and do not create the file.
 
@@ -889,6 +897,13 @@ touches the Claude API). Input and output tokens are reported separately. The
 `Cost (est.)` is optional — if you have the resolved model's pricing from the
 claude-api skill or SKILL.md model table, include it; otherwise omit that row.
 
+**`Total tokens` must always equal `Input tokens` + `Output tokens` — never add
+a third row (e.g. a separate "Subagent tokens" line) that changes what Total
+means.** If part of a phase's own work was delegated to an internal
+subagent/tool call (e.g. an Explore-tool call Phase 2 made on its own
+initiative), fold that usage into this phase's own Input/Output figures —
+don't report it as a separate category that inflates Total beyond their sum.
+
 After all phases complete, the orchestrator **must append a final section** to
 `execution-log.md`:
 
@@ -897,16 +912,21 @@ After all phases complete, the orchestrator **must append a final section** to
 
 | Phase | Input tokens | Output tokens | Total tokens |
 |-------|--------------|---------------|--------------|
-| Phase 1 | 5,200 | 1,100 | 6,300 |
 | Phase 2 | 45,230 | 8,920 | 54,150 |
-| Phase 3 | 12,500 | 2,300 | 14,800 |
 | Phase 4 | 38,100 | 7,800 | 45,900 |
 | Phase 5 | 22,400 | 4,200 | 26,600 |
-| **TOTAL** | **123,430** | **24,320** | **147,750** |
+| Phase 6 | 15,600 | 3,100 | 18,700 |
+| **TOTAL** | **121,330** | **24,020** | **145,350** |
 ```
 
-Sum each column across all reported phases (skip any that didn't run or didn't
-write to the log). The `TOTAL` row is bold and locked at the bottom.
+Only Phases 2, 4, 5, and 6 ever write a section to `execution-log.md` (Phases
+1, 3, and 7 don't take `--debug`) — **never add a row for a phase that has no
+corresponding `## Phase N` section above it**, even if that phase ran. Sum
+each column across only the phases that actually wrote a section (skip any
+that didn't run, were skipped, or don't take `--debug` at all). The `TOTAL`
+row is bold and locked at the bottom, and must equal each column's own sum —
+if a per-phase row's `Total tokens` isn't `Input + Output` for that row (see
+the invariant above), fix the row before summing, not after.
 
 ## Progress Updates
 

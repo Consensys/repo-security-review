@@ -68,9 +68,11 @@ where PoCs are generated for unvalidated findings.
 default), run the full validation workflow (Part 1) exactly as normal —
 confirm, reject, assign verdicts. Skip Part 2 (PoC generation) and Part 3
 (runtime validation) entirely: do not write any files under `pocs/`, do not
-evaluate runtime value, and do not start Docker. The `poc_skipped: true` flag
-must be set in `phase5-validated.json` so Phase 6 can note this in the report.
-Validation verdicts still appear in full.
+evaluate runtime value, do not start Docker, and **do not create the `pocs/`
+directory at all** — not even empty. Only create it lazily, immediately before
+writing the first PoC file into it. The `poc_skipped: true` flag must be set
+in `phase5-validated.json` so Phase 6 can note this in the report. Validation
+verdicts still appear in full.
 
 When `--poc` **is** set, additionally run Part 2 for every finding that passes
 validation (CONFIRMED / CONFIRMED_LOW_CONFIDENCE), and Part 3 if `--runtime`

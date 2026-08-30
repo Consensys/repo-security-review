@@ -54,6 +54,39 @@ The orchestrator owns the final copy step — Phase 6 must not write to
 
 ---
 
+## Execution Log (only if `--debug` was passed)
+
+If `--debug` is set, append a `## Phase 6` section to
+`{repo_path}/.security-review/execution-log.md` following the canonical
+format in SKILL.md → Execution Log, using the Phase 6 variant noted there:
+you don't read target-repo source, so skip the "Files read" / "Security-
+relevant files" / "Directory coverage" / "Tools / greps run" / "Checks run /
+skipped" tables entirely. Instead write:
+
+```markdown
+## Phase 6 — Report Builder   (model: {resolved_model})
+
+### Input files read
+- run-metadata.json
+- phase2-architecture.json
+- phase4-owasp.json
+- phase5-validated.json
+{list only the files actually present and read, per Input Files to Read above}
+
+### Token consumption
+| Metric | Value |
+|--------|-------|
+| Input tokens | 15,600 |
+| Output tokens | 3,100 |
+| Total tokens | 18,700 |
+```
+
+`Total tokens` must equal `Input tokens` + `Output tokens` — same invariant as
+every other phase; never add an extra row. Skip this entire section if
+`--debug` is not set — do not create or append to `execution-log.md`.
+
+---
+
 ## Calibration Step (only when threat-model.json exists)
 
 When `threat-model.json` is present, compute `contextual_severity` for every
