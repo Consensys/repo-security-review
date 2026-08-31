@@ -130,45 +130,46 @@ Two tiers are used across all phases:
 
 #### Fallback Chains
 
-Try each model in order. Use the first one that is available on the current
-API key / account tier.
+Try each **family** in order. Use the first one available on the current API
+key / account tier — accept whichever concrete snapshot that family resolves
+to. **Never target, prefer, or probe for a specific dated version** (no
+"claude-opus-4-8", no "claude-sonnet-4-6") — the chain names families only.
 
 ```
 Deep tier:
-  1. claude-opus-4-8         ← preferred; adaptive thinking supported
-  2. claude-sonnet-4-6       ← fallback; no thinking for deep tier
+  1. Opus family      ← preferred; adaptive thinking supported
+  2. Sonnet family     ← fallback, only if Opus family is entirely unavailable
 
 Standard tier:
-  1. claude-sonnet-4-6       ← preferred
-  2. claude-haiku-4-5        ← fallback; reduced analysis depth
+  1. Sonnet family     ← preferred
+  2. Haiku family      ← fallback, only if Sonnet family is entirely unavailable
 ```
 
-`claude-fable-5` is never in either chain, at any position — its
-post-release guardrails can cause over-cautious refusal on the
-attack-path and injection-vector reasoning Phases 2 and 4b depend on. This
-is the one generation-related exclusion the skill still enforces.
+`claude-fable-5` is never selectable at any position in either tier — its
+post-release guardrails can cause over-cautious refusal on the attack-path
+and injection-vector reasoning Phases 2 and 4b depend on. This is the one
+model-level exclusion the skill still enforces; everything else within a
+family is fair game, whichever snapshot the account currently provides.
 
-**If literally nothing in the selected chain's family is available (not even
-the bottom rung), abort with a clear error.** Do not substitute a model from
-a different chain (e.g. never fall from Standard to Deep, or vice versa) —
-the only exception is Fable 5, which must never be substituted in regardless
-of what's unavailable.
+**If literally nothing in a tier's family (nor its one fallback family) is
+available, abort with a clear error.** Do not substitute a model from a
+different tier (e.g. never fall from Standard to Deep, or vice versa) — the
+only exception is Fable 5, which must never be substituted in regardless of
+what's unavailable.
 
-> **Generation-agnostic by design.** The skill does not gate on, prefer, or
-> ask about which Claude generation (4.x vs. 5) ends up resolved — it names a
-> *tier* (Deep/Standard) and a *family* (Opus/Sonnet/Haiku) and accepts
-> whichever concrete snapshot the account/session actually provides for that
-> family. `claude-opus-5` or `claude-sonnet-5` resolving in place of the named
-> 4.x snapshot is expected behavior, not a failure condition — record what
-> actually resolved in `run-metadata.json` so a reader can always tell which
-> concrete model produced a given phase's output, but do not abort or prompt
-> over it.
+> **Family-only by design — no version pinning anywhere.** The skill never
+> names, targets, or prefers a specific dated snapshot — only a *tier*
+> (Deep/Standard) and a *family* (Opus/Sonnet/Haiku). Whatever concrete model
+> the account currently provides for that family is accepted as-is; a newer
+> or older snapshot resolving in is expected behavior, not a failure
+> condition, and never something to gate on, ask about, or prompt over.
+> Whatever actually resolved gets recorded in `run-metadata.json` — that's an
+> observation of the outcome, not a target the skill was aiming for.
 
 > **Vendor mode (`--vendor`) overrides tier resolution.** When `--vendor` is
-> set, every phase uses the **resolved Standard tier model** (whatever that
-> chain resolved to — e.g. `claude-sonnet-4-6`, `claude-sonnet-5`, or
-> `claude-haiku-4-5`) — no Opus, no chain-walking beyond the Standard chain
-> itself. If the entire Standard chain is unavailable, abort with a clear
+> set, every phase uses the **resolved Standard tier model** — the Sonnet
+> family, falling back to the Haiku family only if Sonnet is entirely
+> unavailable — no Opus, ever. If both are unavailable, abort with a clear
 > error (the mode's contract is "Standard tier only, never Deep" — do not
 > silently borrow a Deep-tier model). See [Vendor Mode](#vendor-mode---vendor).
 
@@ -179,7 +180,7 @@ of what's unavailable.
 > — never an exact dated model ID, and never an explicit `thinking` parameter.
 > These generic aliases resolve to whichever model is *currently* canonical
 > for that family on the active account — accept it as-is, per the
-> generation-agnostic note above. Record what was actually resolved and
+> family-only note above. Record what was actually resolved and
 > dispatched in `run-metadata.json → fallback_notes` regardless of which path
 > was used, so a reader can always tell which concrete model produced a given
 > phase's output. The only case that still aborts is the family itself being
@@ -197,23 +198,26 @@ whether the resolved snapshot turns out to be 4.x or 5-generation.
 | Sonnet (any generation) | Deep (fallback) / Standard | omit `thinking` param unless the resolved snapshot is Sonnet 5, which also supports `adaptive` | `"medium"` |
 | Haiku (any generation) | Standard (fallback) | omit `thinking` param | `"medium"` |
 
-> **Never pass `thinking: {type: "disabled"}`** — this returns a 400 on Opus 4.8.
-> Omit the param entirely when thinking is not wanted.
+> **Never pass `thinking: {type: "disabled"}`** — adaptive-thinking-only Opus
+> snapshots return a 400 for it. Omit the param entirely when thinking is not
+> wanted.
 
 #### Model Resolution Step
 
 **Before spawning Phase 1** (or Phase 0 in multi-repo mode):
 
 ```
-1. Resolve each tier via probe-by-attempt:
-   - Attempt a minimal agent call with the first model in the Deep chain.
-     If it succeeds, that is the resolved Deep model — accept whichever
-     concrete snapshot comes back (4.x or 5-generation), per the
-     generation-agnostic note above.
-     If it fails with a model-not-found / model-unavailable error, try
-     the next model in the chain. If the entire chain fails, abort with
-     a clear error — do not substitute a model outside the chain.
-   - Repeat the same walk for the Standard chain.
+1. Resolve each tier via probe-by-attempt, one family at a time:
+   - Attempt a minimal agent call requesting the Deep tier's primary family
+     (Opus). If it succeeds, that is the resolved Deep model — accept
+     whichever concrete snapshot comes back; never target or prefer a
+     specific dated version.
+     If it fails with a model-not-found / model-unavailable error, try the
+     Deep tier's one fallback family (Sonnet). If that also fails, abort
+     with a clear error — do not substitute a model outside these two
+     families.
+   - Repeat the same walk for the Standard tier (primary: Sonnet family;
+     fallback: Haiku family).
    - Inside an interactive Claude Code session, this "attempt" is simply
      requesting the tier's family alias (`opus` / `sonnet` / `haiku`) via
      the subagent-dispatch tool rather than a literal dated ID — see
@@ -227,14 +231,20 @@ whether the resolved snapshot turns out to be 4.x or 5-generation.
 2. Determine the thinking param / effort for the resolved family (table above).
 
 3. Write run-metadata.json with the resolved IDs and a fallback_notes field.
-   Include fallback_notes whenever a model lower in the chain was used, so
-   the run's model resolution is auditable after the fact.
+   Include fallback_notes whenever a tier's fallback family was used instead
+   of its primary family, so the run's model resolution is auditable after
+   the fact.
 ```
 
 #### run-metadata.json
 
 *Single-repo:* write to `{repo_path}/.security-review/run-metadata.json`.
 *Multi-repo:* write one shared copy to `{output_dir}/run-metadata.json`.
+
+The concrete IDs below are illustrative only — they show the *shape* of what
+gets recorded, not a target the skill was aiming for. The actual values are
+whatever snapshot each family resolved to on the day of the run (could just
+as easily be a different Opus or Sonnet snapshot than shown here).
 
 ```json
 {
@@ -252,7 +262,7 @@ whether the resolved snapshot turns out to be 4.x or 5-generation.
   "phase5_model":  "claude-sonnet-4-6",
   "phase6_model":  "claude-sonnet-4-6",
   "phase7_model":  "claude-sonnet-4-6 (only present in multi-repo mode)",
-  "fallback_notes": "Deep tier: claude-opus-4-8 not available, using claude-sonnet-4-6"
+  "fallback_notes": "Deep tier: Opus family entirely unavailable — fell back to Sonnet family"
 }
 ```
 
@@ -400,14 +410,13 @@ detected; vendor AI tools are a prime case), **Phase 5** (validation only), and
 **Phase 6** (vendor report). The skill-repo auto-skip cascade still applies.
 
 **2. Model pinned to the Standard tier.** Every phase uses the **resolved
-Standard tier model** (walk only the Standard chain: `claude-sonnet-4-6` →
-`claude-haiku-4-5` — never the Deep chain, no Opus). Whichever concrete
-snapshot resolves (4.x or 5-generation, per the generation-agnostic note
-above) is accepted as-is.
+Standard tier model** (Sonnet family, falling back to Haiku family only if
+Sonnet is entirely unavailable — never the Deep tier, no Opus). Whichever
+concrete snapshot resolves is accepted as-is, per the family-only note above.
 
 Write every `*_model` field in `run-metadata.json` as that resolved model,
-and set `deep_tier_thinking: false`, `vendor_mode: true`. If the entire
-Standard chain is unavailable, abort with a clear error — do not fall back
+and set `deep_tier_thinking: false`, `vendor_mode: true`. If both families
+are unavailable, abort with a clear error — do not fall back
 to Deep (the mode's contract is "Standard tier only, never Opus").
 
 **3. Report format.** The orchestrator passes `--vendor` to Phase 6, which

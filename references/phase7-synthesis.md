@@ -11,9 +11,10 @@ completed for every repo in `--repos`.**
 
 ## Model
 
-Use the resolved Standard tier model (`{standard_tier_model}`, normally
-`claude-sonnet-4-6`). This phase moved off the Deep tier so only Phase 2
-(architecture) uses it — an explicit, deliberate choice, not a fallback.
+Use the resolved Standard tier model (`{standard_tier_model}`) — the Sonnet
+family, whichever concrete snapshot the account resolves. This phase moved
+off the Deep tier so only Phase 2 (architecture) uses it — an explicit,
+deliberate choice, not a fallback.
 
 > `claude-fable-5` is intentionally excluded from both tiers' chains — see
 > SKILL.md → Fallback Chains.
