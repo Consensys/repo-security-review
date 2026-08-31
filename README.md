@@ -77,6 +77,7 @@ In any Claude Code session (CLI or Desktop), point the skill at a local repo pat
 | `--context <pairs>` | none | Inline threat model to calibrate severity: `deployment_target=local\|public`, `auth_required_to_reach=true\|false`. Softens only — never sharpens. |
 | `--yes` | off | Non-interactive / CI mode — auto-confirms prompts (safety path checks still apply). |
 | `--debug` | off | Write `.security-review/execution-log.md` showing how Phases 2, 4, 5, and 6 actually ran, plus per-phase token consumption. |
+| `--sonnet` | off | Experimental A/B flag: runs Phase 2 (architecture) on the Sonnet family instead of Opus, to compare scan quality and token consumption. No effect in `--vendor` or `--pr` mode (both already pin to Sonnet with no Deep tier). |
 | `--help` | — | Show usage. |
 
 **Skip cascades** (applied silently): `--skip owasp` also skips `validation` (and PoC generation has nothing left to run against); `--skip validation` means `--poc` has no effect; `--skip architecture` also skips `skill-security`. `--vendor` forces skip of `secrets` and `dependencies`, and forces PoC generation off regardless of `--poc`. In `--pr` mode the same skip names apply but target its own steps instead of numbered phases, and `architecture` cannot be skipped (its diff-scoped context is load-bearing for every other step); `--poc` has no effect in `--pr` mode.
