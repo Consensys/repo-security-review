@@ -80,6 +80,11 @@ Options:
                         --context deployment_target=local
                         --context auth_required_to_reach=true
                         --context deployment_target=local,auth_required_to_reach=true
+  --sonnet              Experimental: overrides Phase 2 (Deep tier) from Opus
+                        to Sonnet family for this run, to A/B scan quality
+                        and token consumption. Standard tier is unaffected
+                        (already Sonnet). No effect in --vendor or --pr mode
+                        (neither has a Deep tier).
   --help                Show this help
 
 Phases you can skip (--skip <name>):
@@ -211,6 +216,12 @@ Parse `$ARGUMENTS` for:
   behaves exactly as before — no calibration logic runs anywhere. Any
   unknown key, unknown enum value, malformed pair, or duplicate key aborts
   the run with a clear error message.
+- `--sonnet` → experimental: for this run, Phase 2 (Deep tier) resolves
+  against the Sonnet family instead of Opus (falls back to Haiku only if
+  Sonnet is entirely unavailable), so quality/token consumption can be
+  A/B'd against a normal Opus run. Standard tier is unaffected. No effect in
+  `--vendor` or `--pr` mode — neither has a Deep tier to override. Record
+  `sonnet_flag` in `run-metadata.json`.
 
 Abort with a clear error if any skip value is not in the allowed list above:
 `❌ Unknown --skip value: "{value}". Allowed: secrets, architecture, dependencies, owasp, validation, skill-security`
@@ -251,6 +262,7 @@ Phases skipped:   {list or "none"}
 Output:           {output_path if set, else "<repo>/.security-review/final-report.md"}
 PoC generation:   {enabled (--poc) / disabled (default)}
 Runtime PoC:      {enabled / disabled}
+Deep tier model:  {Opus family (default) / Sonnet family (--sonnet)}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
@@ -264,6 +276,7 @@ Phases skipped:   {list or "none" — applies to each service's per-repo phases}
 Output:           {output_dir}
 PoC generation:   {enabled (--poc) / disabled (default)}
 Runtime PoC:      {enabled / disabled}
+Deep tier model:  {Opus family (default) / Sonnet family (--sonnet)}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 

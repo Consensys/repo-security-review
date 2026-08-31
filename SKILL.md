@@ -70,6 +70,7 @@ Parse these from `$ARGUMENTS` using the format:
 | `--vendor` | false | Vendor / open-source audit mode. Audits a third-party repo the company is considering adopting; audience is the internal security team, deliverable is an adoption risk judgment (not a fix-list for the vendor). Forces skip of `secrets`, `dependencies`, and `poc`; pins every phase to the resolved Standard tier model (never Opus); and switches Phase 6 to the vendor report format. See [Vendor Mode](#vendor-mode---vendor) below. |
 | `--pr` | none | PR Review mode. `--pr <base>...<head>` (or `--pr <base>` shorthand for `<base>...HEAD`) reviews only a pull request's diff instead of the whole repository — replaces the 6/7-phase pipeline with `references/pr-review.md`, pins to the resolved Standard tier model, and writes `pr-report.md` instead of `final-report.md`. Mutually exclusive with `--repos` and `--vendor`. See [PR Review Mode](#pr-review-mode---pr) below. |
 | `--context` | none | Inline `key=value,key=value` threat model used to calibrate severity. Optional — omit for default behavior. See [`--context`](#--context-threat-model-calibration) below. |
+| `--sonnet` | false | Experimental / comparison flag: overrides Deep tier's primary family from Opus to Sonnet for this run (falls back to Haiku family only if Sonnet is entirely unavailable — Standard tier is unaffected, it already uses Sonnet). Exists to A/B scan quality and token consumption between Opus and Sonnet on Phase 2, not for routine use. Has no effect in Vendor mode (already pinned to Standard/Sonnet, no Deep tier at all) or PR mode (no Phase 2 / Deep tier in that mode). |
 | `--yes` | false | Non-interactive mode. Auto-confirms all user-facing prompts: the `--output` copy confirmation, the Docker runtime gate (`--runtime`), and the pure-skill-repo auto-skip cascade. Path-validation safety checks (rejecting sensitive `--output` destinations) are never bypassed. Use in CI or scripted runs. |
 | `--debug` | false | Write a paste-friendly execution log to `{repo_path}/.security-review/execution-log.md` recording how the file-reading phases actually ran — every file read with its line range and a full/partial flag, which files were classified security-relevant and whether they were read whole, the greps/tools run, and checks run vs skipped. For inspecting skill behaviour; independent of report mode. See [Execution Log](#execution-log---debug). |
 
@@ -126,7 +127,9 @@ Two tiers are used across all phases:
 > structural extraction, not security judgment). Phase 4b and Phase 7 were
 > moved to Standard as well, so Deep tier is now reserved for architecture
 > analysis alone. Revisit if LLM-security or cross-repo-synthesis quality
-> regresses without it.
+> regresses without it. `--sonnet` (see Fallback Chains below) can override
+> Phase 2's family to Sonnet for A/B comparison — that's a per-run experiment
+> flag, not a change to this default.
 
 #### Fallback Chains
 
@@ -144,6 +147,14 @@ Standard tier:
   1. Sonnet family     ← preferred
   2. Haiku family      ← fallback, only if Sonnet family is entirely unavailable
 ```
+
+> **`--sonnet` overrides the Deep tier chain** to `1. Sonnet family → 2. Haiku
+> family (fallback if Sonnet is entirely unavailable)` — i.e. Deep tier walks
+> the same chain Standard tier always does. This exists purely to A/B Phase
+> 2's scan quality and token consumption between Opus and Sonnet; it does not
+> change Standard tier (already Sonnet) and has no effect in Vendor or PR
+> mode (neither has a Deep tier to override). Record which family was
+> requested in `run-metadata.json → sonnet_flag`.
 
 `claude-fable-5` is never selectable at any position in either tier — its
 post-release guardrails can cause over-cautious refusal on the attack-path
@@ -208,16 +219,21 @@ whether the resolved snapshot turns out to be 4.x or 5-generation.
 
 ```
 1. Resolve each tier via probe-by-attempt, one family at a time:
+   - If `--sonnet` was passed (and this isn't Vendor/PR mode, which have no
+     Deep tier to override), the Deep tier's primary family for this run is
+     Sonnet, not Opus — walk `Sonnet family → Haiku family` instead of
+     `Opus family → Sonnet family`, identical to the Standard tier's own
+     chain. Otherwise, Deep tier's primary family is Opus as usual.
    - Attempt a minimal agent call requesting the Deep tier's primary family
-     (Opus). If it succeeds, that is the resolved Deep model — accept
+     for this run. If it succeeds, that is the resolved Deep model — accept
      whichever concrete snapshot comes back; never target or prefer a
      specific dated version.
      If it fails with a model-not-found / model-unavailable error, try the
-     Deep tier's one fallback family (Sonnet). If that also fails, abort
-     with a clear error — do not substitute a model outside these two
-     families.
+     Deep tier's one fallback family. If that also fails, abort with a clear
+     error — do not substitute a model outside these two families.
    - Repeat the same walk for the Standard tier (primary: Sonnet family;
-     fallback: Haiku family).
+     fallback: Haiku family) — `--sonnet` does not change this, Standard
+     tier already targets Sonnet.
    - Inside an interactive Claude Code session, this "attempt" is simply
      requesting the tier's family alias (`opus` / `sonnet` / `haiku`) via
      the subagent-dispatch tool rather than a literal dated ID — see
@@ -230,7 +246,8 @@ whether the resolved snapshot turns out to be 4.x or 5-generation.
 
 2. Determine the thinking param / effort for the resolved family (table above).
 
-3. Write run-metadata.json with the resolved IDs and a fallback_notes field.
+3. Write run-metadata.json with the resolved IDs, a `sonnet_flag` field
+   (true/false, whether `--sonnet` was passed), and a fallback_notes field.
    Include fallback_notes whenever a tier's fallback family was used instead
    of its primary family, so the run's model resolution is auditable after
    the fact.
@@ -250,6 +267,7 @@ as easily be a different Opus or Sonnet snapshot than shown here).
 {
   "vendor_mode": false,
   "pr_mode": false,
+  "sonnet_flag": false,
   "deep_tier_model":   "claude-opus-4-8",
   "standard_tier_model": "claude-sonnet-4-6",
   "deep_tier_thinking": true,
@@ -277,8 +295,9 @@ When `--pr` is set, the file instead contains only:
   "fallback_notes": "omitted when no fallback was needed"
 }
 ```
-No `deep_tier_model`, `deep_tier_thinking`, or per-numbered-phase fields —
-PR mode has no Deep tier and no numbered phases, only the one PR-review agent.
+No `deep_tier_model`, `deep_tier_thinking`, `sonnet_flag`, or per-numbered-phase
+fields — PR mode has no Deep tier (so nothing for `--sonnet` to override) and
+no numbered phases, only the one PR-review agent.
 
 `fallback_notes` is omitted when no fallback was needed.
 When phases are dispatched via the session's own subagent tool rather than a
@@ -417,7 +436,9 @@ concrete snapshot resolves is accepted as-is, per the family-only note above.
 Write every `*_model` field in `run-metadata.json` as that resolved model,
 and set `deep_tier_thinking: false`, `vendor_mode: true`. If both families
 are unavailable, abort with a clear error — do not fall back
-to Deep (the mode's contract is "Standard tier only, never Opus").
+to Deep (the mode's contract is "Standard tier only, never Opus"). `--sonnet`
+has no effect in this mode — there's no Deep tier here to override; every
+phase is already on the Standard/Sonnet chain.
 
 **3. Report format.** The orchestrator passes `--vendor` to Phase 6, which
 produces the vendor report (see `references/phase6-report.md` → Vendor Report).
@@ -495,6 +516,8 @@ model** — identical constraint and chain-walk behavior to
 fall back to Deep if the Standard chain is entirely unavailable). This mode
 is meant to run frequently (every PR, potentially in CI), where the full
 pipeline's Deep-tier reasoning cost isn't justified for a diff-scoped review.
+`--sonnet` has no effect here either — same reason as Vendor mode, there's no
+Deep tier in this mode to override.
 
 Write `run-metadata.json` with `pr_mode: true`, `pr_diff_range: "{base}...{head}"`,
 and `pr_phase_model` set to the resolved Standard tier model.
