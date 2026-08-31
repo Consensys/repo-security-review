@@ -30,9 +30,11 @@ config run, and — in the **Checks run / skipped** subsection — every check w
 its decision and the confidence behind each skip (confident negative vs
 reduced-confidence run). Write rows as you go.
 
-At the end of your phase, **before finishing**, append a `### Token consumption`
-section with input tokens, output tokens, and total. Track tokens across all
-API calls and tool runs.
+At the end of your phase, **before finishing**, append a `### Token consumption
+(estimated)` section with input tokens, output tokens, and total, estimated per
+SKILL.md → Execution Log → Token Consumption Methodology (chars/4 over what
+this phase actually read and wrote — never a session/budget-counter delta,
+never claimed as "measured").
 
 Skip entirely if `--debug` is not set, and never let logging change which files
 you read or checks you run.

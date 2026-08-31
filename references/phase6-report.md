@@ -73,17 +73,21 @@ skipped" tables entirely. Instead write:
 - phase5-validated.json
 {list only the files actually present and read, per Input Files to Read above}
 
-### Token consumption
+### Token consumption (estimated)
 | Metric | Value |
 |--------|-------|
-| Input tokens | 15,600 |
-| Output tokens | 3,100 |
-| Total tokens | 18,700 |
+| Input tokens (est.) | 15,600 |
+| Output tokens (est.) | 3,100 |
+| Total tokens (est.) | 18,700 |
 ```
 
-`Total tokens` must equal `Input tokens` + `Output tokens` — same invariant as
-every other phase; never add an extra row. Skip this entire section if
-`--debug` is not set — do not create or append to `execution-log.md`.
+Estimate per SKILL.md → Execution Log → Token Consumption Methodology
+(chars/4 over the input files read above plus `final-report.md` and this
+section itself — never a session/budget-counter delta, never claimed as
+"measured"). `Total tokens` must equal `Input tokens` + `Output tokens` — same
+invariant as every other phase; never add an extra row. Skip this entire
+section if `--debug` is not set — do not create or append to
+`execution-log.md`.
 
 ---
 

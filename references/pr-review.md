@@ -44,7 +44,10 @@ file read with FULL/PARTIAL, every grep run (including the repo-wide auth/
 route greps — these are tool calls, not reads, but should still be logged so
 the auth-inference trail is auditable), and the checks run/skipped table.
 
-At the end, append a `### Token consumption` section as in other phases.
+At the end, append a `### Token consumption (estimated)` section as in other
+phases, per SKILL.md → Execution Log → Token Consumption Methodology (chars/4
+over what was actually read and written — never a session/budget-counter
+delta, never claimed as "measured").
 
 Skip entirely if `--debug` is not set.
 

@@ -89,9 +89,11 @@ record each file you open with its line range and a `FULL`/`PARTIAL` flag — th
 is the clearest signal of whether validation re-read the whole implementation or
 only a window. Write rows as you go.
 
-At the end of your phase, **before finishing**, append a `### Token consumption`
-section with input tokens, output tokens, and total. Track tokens across all
-validation and PoC generation runs.
+At the end of your phase, **before finishing**, append a `### Token consumption
+(estimated)` section with input tokens, output tokens, and total, estimated per
+SKILL.md → Execution Log → Token Consumption Methodology (chars/4 over what
+this phase actually read and wrote — never a session/budget-counter delta,
+never claimed as "measured").
 
 Skip entirely if `--debug` is not set, and never let logging change your
 validation reads or verdicts.

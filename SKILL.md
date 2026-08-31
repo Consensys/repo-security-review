@@ -904,12 +904,12 @@ never omit it or fold it into a summary line. (See Phase 2 Step 0.5.)
 - Command Injection: SKIP (confident negative)
 - Deserialization: RUN (reduced-confidence — manifest-only signal)
 
-### Token consumption
+### Token consumption (estimated)
 | Metric | Value |
 |--------|-------|
-| Input tokens | 45,230 |
-| Output tokens | 8,920 |
-| Total tokens | 54,150 |
+| Input tokens (est.) | 45,230 |
+| Output tokens (est.) | 8,920 |
+| Total tokens (est.) | 54,150 |
 | Cost (est.) | $0.32 |
 ```
 
@@ -924,11 +924,48 @@ never omit it or fold it into a summary line. (See Phase 2 Step 0.5.)
 Keep it factual and terse — this is instrumentation, not narrative. If `--debug`
 is not set, write nothing and do not create the file.
 
-**Token consumption reporting**: Each phase tracks its own token usage across all
-API calls it makes (all agent/subagent calls, all tool calls, everything that
-touches the Claude API). Input and output tokens are reported separately. The
-`Cost (est.)` is optional — if you have the resolved model's pricing from the
-claude-api skill or SKILL.md model table, include it; otherwise omit that row.
+### Token Consumption Methodology
+
+**No phase has access to an authoritative token-usage API.** Per the
+"Dispatch reality" note in Model Configuration, a phase dispatched through the
+session's own subagent-dispatch tool is never handed an exact `usage` object
+(input/output token counts) for its own run — the same limitation that blocks
+exact model-ID reporting also blocks exact token reporting. Any number in a
+"Token consumption" section is therefore an **estimate**, never a measurement,
+regardless of how confidently a phase's own log narrates it. Do not write
+"measured", "harness-measured", "exact", or a session/budget-counter delta as
+the source of these figures — that framing claims a precision the dispatch
+layer cannot back up, and different phases picking different proxies (a
+budget counter here, a self-reported total there) produces numbers that are
+not comparable to each other, which defeats the only reason to record them.
+
+**All phases must use the same estimation method, so figures are at least
+comparable across phases and across runs:**
+
+```
+Input tokens (est.)  ≈ (total characters read this phase, summed across every
+                        row in "Files read" + every file listed under "Input
+                        files read"/"Tools / greps run" + this phase's own
+                        reference instruction file) / 4
+
+Output tokens (est.) ≈ (total characters written this phase, summed across
+                        every output JSON artifact + this phase's own section
+                        of execution-log.md +, for Phase 6 only, final-report.md
+                        and any recap text) / 4
+```
+
+The `/4` divisor is the standard rough chars-per-token heuristic — good enough
+for relative comparison (this run vs. that run, this phase vs. that phase),
+not for exact billing reconciliation. Compute it from files/rows you already
+logged in this phase's own tables — don't introduce a separate counter or
+external tool to produce it.
+
+Input and output are reported separately using this method; total is their
+sum (see invariant below). The `Cost (est.)` row is optional — if you have the
+resolved model's pricing from the claude-api skill or SKILL.md model table,
+multiply it against these estimated token counts; otherwise omit that row.
+Every "Token consumption" heading — per-phase and the final rollup — must
+carry the `(estimated)` suffix; never present these numbers as exact.
 
 **`Total tokens` must always equal `Input tokens` + `Output tokens` — never add
 a third row (e.g. a separate "Subagent tokens" line) that changes what Total
@@ -941,9 +978,9 @@ After all phases complete, the orchestrator **must append a final section** to
 `execution-log.md`:
 
 ```markdown
-## Total Token Consumption
+## Total Token Consumption (estimated)
 
-| Phase | Input tokens | Output tokens | Total tokens |
+| Phase | Input tokens (est.) | Output tokens (est.) | Total tokens (est.) |
 |-------|--------------|---------------|--------------|
 | Phase 2 | 45,230 | 8,920 | 54,150 |
 | Phase 4 | 38,100 | 7,800 | 45,900 |
@@ -951,6 +988,12 @@ After all phases complete, the orchestrator **must append a final section** to
 | Phase 6 | 15,600 | 3,100 | 18,700 |
 | **TOTAL** | **121,330** | **24,020** | **145,350** |
 ```
+
+> All figures above are chars/4 estimates per the Token Consumption
+> Methodology — computed the same way for every phase and every run, so they
+> are meaningful for relative comparison (this phase vs. that phase, this run
+> vs. that run), but they are **not** exact API billing figures. Never label
+> this table, or any per-phase table above it, as "measured".
 
 Only Phases 2, 4, 5, and 6 ever write a section to `execution-log.md` (Phases
 1, 3, and 7 don't take `--debug`) — **never add a row for a phase that has no
