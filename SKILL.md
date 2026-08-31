@@ -118,14 +118,15 @@ Two tiers are used across all phases:
 
 | Tier | Used by | Purpose |
 |------|---------|---------|
-| **Deep** | Phase 2, 4b, 7 | Extended reasoning: architecture, LLM security, cross-repo synthesis |
-| **Standard** | Phase 0, 1, 3, 4, 5, 6 | Focused analysis: topology extraction, secrets, CVEs, OWASP, validation, report |
+| **Deep** | Phase 2 | Extended reasoning: architecture |
+| **Standard** | Phase 0, 1, 3, 4, 4b, 5, 6, 7 | Focused analysis: topology extraction, secrets, CVEs, OWASP, LLM/AI skill security, validation, report, cross-repo synthesis |
 
-> **Phase 0 uses Standard, not Deep.** Topology mapping is structural extraction
-> (parsing docker-compose/k8s/OpenAPI/proto files into a service graph), not
-> security judgment — the judgment happens downstream in Phase 7, which stays
-> on Deep tier. Moved off Deep tier (2026-07-30) as a token-efficiency measure;
-> revisit if multi-repo topology quality regresses.
+> **Only Phase 2 uses Deep tier — a deliberate, explicit choice, not a
+> fallback.** Phase 0 was moved to Standard on 2026-07-30 (topology mapping is
+> structural extraction, not security judgment). Phase 4b and Phase 7 were
+> moved to Standard as well, so Deep tier is now reserved for architecture
+> analysis alone. Revisit if LLM-security or cross-repo-synthesis quality
+> regresses without it.
 
 #### Fallback Chains
 
@@ -247,10 +248,10 @@ whether the resolved snapshot turns out to be 4.x or 5-generation.
   "phase2_model":  "claude-opus-4-8",
   "phase3_model":  "claude-sonnet-4-6",
   "phase4_model":  "claude-sonnet-4-6",
-  "phase4b_model": "claude-opus-4-8 (only present when has_skill_files: true)",
+  "phase4b_model": "claude-sonnet-4-6 (only present when has_skill_files: true)",
   "phase5_model":  "claude-sonnet-4-6",
   "phase6_model":  "claude-sonnet-4-6",
-  "phase7_model":  "claude-opus-4-8 (only present in multi-repo mode)",
+  "phase7_model":  "claude-sonnet-4-6 (only present in multi-repo mode)",
   "fallback_notes": "Deep tier: claude-opus-4-8 not available, using claude-sonnet-4-6"
 }
 ```

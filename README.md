@@ -100,7 +100,7 @@ flowchart TD
         P3[Phase 3 · Dependency CVEs<br/>osv-scanner]
         P3b[Phase 3b · Reachability Validation]
         P4[Phase 4 · OWASP Code Scan<br/>semgrep + LLM]
-        P4b[Phase 4b · LLM / AI Skill Security<br/>deep-tier model · extended thinking<br/>auto-activated when skill files detected]
+        P4b[Phase 4b · LLM / AI Skill Security<br/>standard-tier model<br/>auto-activated when skill files detected]
 
         P1 --> P2
         P2 --> TS
