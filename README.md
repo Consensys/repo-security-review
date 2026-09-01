@@ -114,9 +114,10 @@ flowchart TD
     end
 
     P4b -. file path only .-> P5
+    P2 -. file path only .-> P5
 
     subgraph JUDGMENT["JUDGMENT LAYER (isolated context)"]
-        P5[Phase 5 · Validate + PoC<br/>re-validates Phase 4 findings only<br/>PoCs only for confirmed findings<br/>optional Docker runtime]
+        P5[Phase 5 · Validate + PoC<br/>merges + validates Phase 4 findings<br/>and standalone Phase 2 findings<br/>verdict: Confirmed / Needs Review / Rejected<br/>PoCs only for Confirmed<br/>optional Docker runtime]
     end
 
     P1 --> R[Phase 6 · Report Builder]
@@ -124,7 +125,7 @@ flowchart TD
     P3b --> R
     P4b --> R
     P5 --> R
-    R --> Out([final-report.md + pocs/])
+    R --> Out([final-report.md: Findings + Needs Review + False Positives, plus pocs/])
 
     classDef finder fill:#eef6ff,stroke:#5b8def,color:#1a1a1a
     classDef judgment fill:#fff4e6,stroke:#e0883a,color:#1a1a1a
