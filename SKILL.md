@@ -574,15 +574,20 @@ Phase 4b → LLM / AI Skill Security      [auto-activated: has_skill_files: true
            └─ Pure skill repos: runs after Phase 2 (3, 4, 5 auto-skipped)
            └─ Mixed repos: runs after Phase 4, before Phase 5
 Phase 5  → Validation (+ optional PoC)  [skippable: --skip validation]
-           └─ Validates each Phase 4 finding independently. Confirmed/rejected
-              verdicts always appear in the report.
+           └─ Validates each Phase 4 finding independently. Also merges in any
+              standalone Phase 2 (architecture) finding Phase 4 didn't already
+              rediscover, and validates those too (single-repo mode only — see
+              phase5-validate-and-poc.md → Step 0.5). Confirmed / Needs Review
+              / Rejected verdicts always appear in the report.
            └─ --poc: additionally writes a PoC immediately for each finding
               that passes the validation gate. PoC generation is gated inside
               this phase — unvalidated findings never get a PoC. Optional
               runtime validation via Docker if --runtime (implies --poc).
            └─ Without --poc (the default): validation only; no PoC files
               are written.
-           └─ AUTO-SKIPPED when is_skill_repo: true (no Phase 4 findings to validate)
+           └─ AUTO-SKIPPED when is_skill_repo: true (no Phase 4 findings to
+              validate; Phase 2's own findings then render at face value in
+              Phase 6, same as any other `--skip validation` run)
 Phase 6  → Report Builder               [always runs]
 ```
 
@@ -628,13 +633,29 @@ For each repo in --repos (run all phases for repo N before starting repo N+1):
   Phase 3b → Reachability Validation
   Phase 4  → Code-Level OWASP Analysis  [skippable: --skip owasp]
   Phase 5  → Validation (+ optional PoC via --poc) [skippable: --skip validation]
+             └─ Phase 4's own findings validate normally, as in single-repo mode.
+             └─ Standalone Phase 2 findings (no matching Phase 4 finding) are
+                NOT validated here — this phase lacks the cross-repo context
+                to resolve them. Each is written to phase5-validated.json as
+                validation_status: PENDING_CROSS_REPO_VALIDATION and deferred
+                to Phase 7. See phase5-validate-and-poc.md → Step 0.5.
   Phase 6  → Per-service Report Builder [always runs]
+             └─ Renders PENDING_CROSS_REPO_VALIDATION findings under Needs
+                Review, pointing to system-report.md for the resolved verdict
+                — this repo's own report is written before Phase 7 runs, so
+                it cannot show the final answer yet.
 
 Phase 7  → Cross-Repo Synthesis         [runs once; multi-repo only]
            └─ Reads all per-repo phase outputs + service-topology.json
            └─ Produces: system-findings.json + system-report.md
            └─ Finds: shared credentials, trust boundary gaps, auth mismatches,
               cross-service data flows, inconsistent security posture
+           └─ Also resolves every repo's PENDING_CROSS_REPO_VALIDATION
+              finding using cross-repo context (topology + every repo's
+              output, including any IaC/workload-manifest repo in --repos) —
+              see phase7-synthesis.md → Deferred Architecture Finding
+              Validation. This is resolution of existing findings, not new
+              discovery — kept distinct from the cross-service classes above.
 ```
 
 **Run all phases for each repo to completion before moving to the next repo.**
@@ -683,7 +704,10 @@ from having the validator's full reasoning in context while it's still fresh.
    - The repo path and working directory path
    - Any flags relevant to it (`--poc` and `--runtime` for Phase 5,
      `--vendor` for Phase 6 **and** Phase 7 — selects the vendor report format,
-     `--debug` for Phases 2, 4, 5, and 6 — they append to the execution log)
+     `--debug` for Phases 2, 4, 5, and 6 — they append to the execution log,
+     `is_multi_repo` for Phase 5 — true when `--repos` is set; controls
+     whether standalone Phase 2 findings validate locally or defer to Phase 7,
+     see Phase Execution Order → Multi-repo mode)
 
 3. **The orchestrator's only job** is sequencing, path management, and
    printing progress summaries. It must not accumulate findings across phases.

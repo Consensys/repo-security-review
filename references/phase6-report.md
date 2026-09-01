@@ -26,6 +26,8 @@ Read all that exist (some may be absent if a phase was skipped):
   `- **Category**: AI/LLM Security · {owasp_llm}` as the category line.
 - LLM findings never have PoCs — omit the PoC line entirely.
 - LLM findings are never validated by Phase 5 — omit any validation status.
+  They have no `report_tier` field and are exempt from the "Findings is
+  `report_tier: CONFIRMED` only" gate below — they always render in Findings.
 
 Check the `--vendor` and `--pr` flags (passed by the orchestrator). They
 control which report structure is produced — see Report Modes below. `--pr`
@@ -121,18 +123,35 @@ Before building the report, identify Phase 2 (architecture) and Phase 4
 issues independently of Phase 2 to increase confidence, but this produces
 duplicate entries.
 
-**Match criterion — either suffices:**
+**Preferred path — `phase5-validated.json` exists:** Phase 5's own Step 0.5
+already computed this match (so the same underlying issue is validated only
+once, not twice — see `phase5-validate-and-poc.md` → Step 0.5). Read it
+directly instead of re-deriving it:
+- A Phase 2 finding with `"validation_status": "MERGED"` carries
+  `"duplicate_of": "O-XXX"` — treat `O-XXX` as canonical, omit the Phase 2
+  finding from the unified Findings list, and fold one sentence of its
+  architectural framing into `O-XXX`'s description (take the higher severity
+  of the two).
+- Every other Phase 2 finding present in `phase5-validated.json` (`source_phase: 2`,
+  `validation_status` anything other than `MERGED`) was independently
+  validated — render it per its own `report_tier` (see Needs Review section
+  below), it is not a duplicate.
+
+**Fallback path — `phase5-validated.json` is absent** (`--skip validation` was
+used): there is no pre-computed match to read. Derive it yourself using the
+same criterion Phase 5 would have used — either suffices:
 1. **Same file + overlapping line range**: primary evidence file identical AND
    line ranges overlap or are within ±5 lines of each other.
 2. **Same root cause on the same file**: same file AND titles/descriptions share
    a recognizable common pattern (e.g., "Secure flag", "X-Frame-Options",
    "fail-open", "CORS wildcard", same function name).
 
-**When a match is found:**
-1. Mark the Phase 2 finding as merged: `"merged_into": "O-XXX"`.
-2. The Phase 4/5 finding (O-XXX) is canonical: fold one sentence of Phase 2's
-   architectural framing into the description; take the higher severity.
-3. The merged Phase 2 finding is omitted from the unified Findings list.
+When a match is found this way: mark the Phase 2 finding merged, treat the
+Phase 4 finding (`O-XXX`) as canonical (fold in one sentence, take the higher
+severity), and omit the merged Phase 2 finding from the unified Findings list.
+Any standalone (non-matched) Phase 2 finding in this fallback path has no
+validation verdict at all — render it in Findings at face value, same as
+today's pre-existing behavior when Phase 5 doesn't run.
 
 ---
 
@@ -153,12 +172,19 @@ Structure:
 ---
 ## Exposed Secrets          ← omit entirely if no secrets found
 ---
-## Findings                 ← ALL findings unified, sorted by Priority → severity
+## Findings                 ← report_tier: CONFIRMED, sorted by Priority → severity
 ---
-## False Positives          ← always include; builds trust
+## Needs Review             ← report_tier: NEEDS_REVIEW; omit if none exist
+---
+## False Positives          ← report_tier: REJECTED; always include; builds trust
 ---
 ## Skipped Phases           ← omit if nothing was skipped
 ```
+
+**Ordering is deliberate and fixed: Findings (Confirmed) → Needs Review →
+False Positives (Rejected), always in that order.** Confirmed is what to act
+on now; Needs Review is what to chase down next; False Positives is what to
+stop worrying about. Never reorder these relative to each other.
 
 Rules:
 - **Single severity** per finding: contextual if calibration ran, base otherwise.
@@ -168,6 +194,11 @@ Rules:
   All findings (arch, CVE, code-level) appear in one unified list.
 - **No calibration context**: omit Assumed Threat Model, drift notes.
 - **Drift findings** (`category: threat_model_drift`): exclude entirely.
+- **Findings section is `report_tier: CONFIRMED` only.** A Phase 2 or Phase 4
+  finding with `report_tier: NEEDS_REVIEW` or `REJECTED` in `phase5-validated.json`
+  never appears here — it belongs in Needs Review or False Positives instead.
+  Findings with no validated verdict at all (the `--skip validation` fallback
+  in the Deduplication Step above) render here at face value, same as today.
 - Sort order: P0 → P1 → P2 → P3 → Backlog; within each tier, higher severity first.
 - **Methodology footnote**: end the report with a single italic line so a clean
   result is not over-read:
@@ -247,8 +278,31 @@ where that happens); the base wording stays the same everywhere it's used.
 **Fragment — Severity table footnote:**
 All four severity rows must always appear in the table, even when the count is 0. Never omit a row because its count is zero.
 
-**Fragment — Non-Production Surface Findings** (Default mode):
-{Include only if one or more findings have `validation_status: SURFACE_NOT_PRODUCTION`. Omit entirely if none exist.}
+**Fragment — Needs Review table** (Default/Vendor mode):
+{One unified `## Needs Review` section, rendered between Findings and False
+Positives (this ordering — Confirmed, then Needs Review, then Rejected —
+applies in every mode that has a Needs Review concept). It has up to three
+parts; omit any part entirely if it has no rows. Every finding rendered here
+has `report_tier: NEEDS_REVIEW` in `phase5-validated.json` (or, in the
+`--skip validation` fallback with no validated verdicts at all, this whole
+section is empty and omitted — see Deduplication Step above).}
+
+> Findings that are real (or plausible) but not a clean confirm or reject —
+> either the evidence needed to resolve them lives outside this repo, or a
+> gate suppressed the default verdict for a documented reason. Each reason is
+> stated so a reader can decide whether to chase it down.
+
+*Part A — general Needs Review table* (`validation_status` ∈
+`NEEDS_EXTERNAL_VERIFICATION`, `PENDING_CROSS_REPO_VALIDATION`, `NEEDS_RUNTIME`
+that was never resolved because `--runtime` wasn't set or the probe didn't
+run):
+
+| ID | Type | File | Verdict | Reason |
+|----|------|------|---------|--------|
+| A-009 | Missing redaction | src/logging/http.ts:L12 | NEEDS_EXTERNAL_VERIFICATION | Depends on an internal package's own redaction behavior — package source not in this repo |
+| A-011 | Trust boundary | src/services/internal-client.ts:L8 | PENDING_CROSS_REPO_VALIDATION | Requires cross-repo/topology context — see system-report.md |
+
+*Part B — Non-Production Surface Findings* (`validation_status: SURFACE_NOT_PRODUCTION`):
 
 > Vulnerabilities confirmed in code but located in non-production surfaces (test fixtures, example applications, demo code). Not exploitable from a standard deployed instance, but real code defects. If this code is ever executed in a production context — a CI/CD pipeline with live credentials, a deployed demo environment — these become immediately exploitable.
 
@@ -256,10 +310,10 @@ All four severity rows must always appear in the table, even when the count is 0
 |----|------|------|---------|-----------------|
 | O-007 | SQLi | test/helpers/db_test.go:L45 | test (high confidence) | CI pipeline with live DB credentials would expose the injection |
 
-(Vendor mode uses its own adopter-framed variant of this fragment — see Vendor Report Structure.)
+(Vendor mode uses its own adopter-framed variant of this part — see Vendor Report Structure.)
 
-**Fragment — Post-Auth Code Vulnerabilities** (Default mode):
-{Include only if one or more findings have `validation_status: BOUNDARY_NOT_CROSSED`. Omit entirely if none exist — this status only occurs when `--context auth_required_to_reach=true` was set.}
+*Part C — Post-Auth Code Vulnerabilities* (`validation_status: BOUNDARY_NOT_CROSSED`,
+only occurs when `--context auth_required_to_reach=true` was set):
 
 > Vulnerabilities confirmed in code but not reachable by unauthenticated actors per Phase 2 boundary analysis. Real code defects — excluded from the main findings list because the effective threat model (`auth_required_to_reach=true`) places them behind a verified auth gate. If that auth gate is ever bypassed, these become immediately exploitable.
 
@@ -327,8 +381,10 @@ No mention of calibration or context.}
 
 ## Findings
 
-{All confirmed findings from all phases (deduped), sorted by Priority then severity.
-Use a flat numbered list — no sub-sections by phase.}
+{Findings from all phases with `report_tier: CONFIRMED` (deduped per the
+Deduplication Step), sorted by Priority then severity. Use a flat numbered
+list — no sub-sections by phase. Findings with `report_tier: NEEDS_REVIEW` or
+`REJECTED` do not appear here — see Needs Review / False Positives below.}
 
 **Finding IDs — use the original phase-assigned ID, never renumber to F-NN:**
 
@@ -342,9 +398,11 @@ Use a flat numbered list — no sub-sections by phase.}
 | PR Review mode · diff-scoped findings | `D-` | `D-001` |
 
 The ID comes directly from the phase JSON file that produced the finding. For Phase 5
-validated findings, use `original_id` from `phase5-validated.json` (which is the Phase 4
-`O-XXX` id, or `pr-validated.json`'s `original_id` — the PR mode `D-XXX` id — when
-`--pr` was used). Never assign a new sequential `F-NN` identifier.
+validated findings, use `original_id` from `phase5-validated.json` — this is the Phase 4
+`O-XXX` id for `source_phase: 4` records, the Phase 2 `A-XXX` id for `source_phase: 2`
+records (see Step 0.5 in `phase5-validate-and-poc.md`), or `pr-validated.json`'s
+`original_id` — the PR mode `D-XXX` id — when `--pr` was used. Never assign a new
+sequential `F-NN` identifier.
 
 **When a finding was confirmed by more than one phase** (e.g. an architecture weakness
 also caught as an OWASP code finding): use the canonical ID (Phase 4's `O-XXX` wins
@@ -377,21 +435,17 @@ separate `**Also identified as**` label — fold it into the description prose.
 
 ---
 
+## Needs Review
+
+{Fragment: Needs Review table. Omit the entire `## Needs Review` heading and
+section if no finding has `report_tier: NEEDS_REVIEW` — do not render an
+empty section.}
+
+---
+
 ## False Positives
 
 {Fragment: False Positives table}
-
----
-
-## Non-Production Surface Findings
-
-{Fragment: Non-Production Surface Findings}
-
----
-
-## Post-Auth Code Vulnerabilities
-
-{Fragment: Post-Auth Code Vulnerabilities}
 
 ---
 
@@ -484,11 +538,14 @@ change to reconsider. Controls the adopter can apply WITHOUT vendor changes.}
 
 ## Findings
 
-{All confirmed findings (Phase 2 arch + Phase 4 OWASP + Phase 4b LLM, deduped),
-sorted by severity — highest first. Flat list, no priority labels.
-Use original phase-assigned IDs (A-XXX / O-XXX / L-XXX) — never renumber to F-NN.
-For multi-phase findings, use canonical ID and mention the secondary ID in the
-description: "Also identified as A-XXX in architectural analysis."}
+{Findings with `report_tier: CONFIRMED` (Phase 2 arch + Phase 4 OWASP + Phase 4b
+LLM, deduped per the Deduplication Step above), sorted by severity — highest
+first. Flat list, no priority labels. Use original phase-assigned IDs
+(A-XXX / O-XXX / L-XXX) — never renumber to F-NN. For multi-phase findings,
+use canonical ID and mention the secondary ID in the description: "Also
+identified as A-XXX in architectural analysis." Findings with
+`report_tier: NEEDS_REVIEW` or `REJECTED` render in Needs Review / False
+Positives below instead.}
 
 ### 🟠 {ID} · {Title}
 - **Severity**: {severity}
@@ -509,46 +566,20 @@ validation status and no PoC — state `Validation: not applicable (architectura
 
 ---
 
+## Needs Review
+
+{Fragment: Needs Review table — Part A general table plus Parts B/C, applying
+the Vendor mode adopter-framed wording for Part B noted in the fragment.
+Omit the entire `## Needs Review` heading and section if no finding has
+`report_tier: NEEDS_REVIEW`.}
+
+---
+
 ## False Positives
 
 {Fragment: False Positives table — apply the Vendor mode variant noted there
 (rigor-framed lead-in; "None — no candidate findings were excluded during
 validation" if the table would be empty).}
-
----
-
-## Non-Production Surface Findings
-
-{Include only if one or more findings have `validation_status: SURFACE_NOT_PRODUCTION`.
-Omit entirely if none exist.}
-
-Vulnerabilities confirmed in code but located in non-production surfaces (test fixtures,
-example applications, demo code). Not exploitable from a standard deployed instance.
-Included here because test environments with live credentials or deployed demo environments
-would make them immediately exploitable — the adopting team should verify these surfaces
-are never deployed.
-
-| ID | Type | File | Surface | Risk if Deployed |
-|----|------|------|---------|-----------------|
-| O-007 | SQLi | test/helpers/db_test.go:L45 | test (high confidence) | CI pipeline with live DB credentials would expose the injection |
-
----
-
-## Post-Auth Code Vulnerabilities
-
-{Include only if one or more findings have `validation_status: BOUNDARY_NOT_CROSSED`.
-Omit entirely if none exist.}
-
-Vulnerabilities confirmed in code but not reachable by unauthenticated actors per Phase 2 boundary analysis.
-These are real code defects — they are excluded from the main findings list because the effective threat
-model (`auth_required_to_reach=true`) places them behind a verified auth gate. If that auth gate is ever
-bypassed, these become immediately exploitable.
-
-| ID | Type | File | Auth Gate | Action |
-|----|------|------|-----------|--------|
-| O-005 | SQLi | api/admin/search.ts:L34 | `authMiddleware + requireAdminRole` (high confidence) | Fix proactively — one auth bypass away from critical |
-
-{If `--context auth_required_to_reach` was not set, this section never appears.}
 
 ---
 
@@ -671,6 +702,11 @@ _PR-scoped security review · repo-security-review skill (`--pr` mode). Reviews 
 - False Positives section is mandatory in default/vendor modes — it
   builds trust with the dev team. PR Review mode (`--pr`) has no False
   Positives section — see PR Review Report Structure.
+- Needs Review section is conditional in default/vendor modes — omit the
+  whole heading when no finding has `report_tier: NEEDS_REVIEW`, don't render
+  it empty. PR Review mode has no Needs Review section either (Step 0.5,
+  which is what produces `NEEDS_EXTERNAL_VERIFICATION`/`PENDING_CROSS_REPO_VALIDATION`
+  findings, does not run in PR mode).
 - PoC scripts are referenced by filename only —
   `- **PoC**: \`pocs/{poc_filename}\`` — never inline code blocks
 - Redact ALL secret values — show only first 4 and last 3 chars

@@ -9,6 +9,12 @@ in isolation, but the combination creates a vulnerability.
 **This phase runs only in multi-repo mode, after all per-repo phases (1–6) have
 completed for every repo in `--repos`.**
 
+This phase has a second, distinct duty: resolving per-repo Phase 2
+(architecture) findings that Phase 5 could not validate alone and explicitly
+deferred here — see [Deferred Architecture Finding Validation](#deferred-architecture-finding-validation)
+below. That is *resolution* of existing per-repo findings, not new discovery;
+keep the two duties separate in your own reasoning and in the output.
+
 ## Model
 
 Use the resolved Standard tier model (`{standard_tier_model}`) — the Sonnet
@@ -153,6 +159,63 @@ services — creating a path that bypasses the control in the stricter service.
 
 ---
 
+## Deferred Architecture Finding Validation
+
+Distinct from the five vulnerability classes above: this is not new
+discovery, it's *resolving* per-repo Phase 2 findings that Phase 5 could not
+validate alone and deliberately deferred here (see
+`phase5-validate-and-poc.md` → Step 0.5). Do this pass separately from Classes
+1–5 — don't let it influence, or be influenced by, the cross-service findings
+you're independently discovering there.
+
+For each repo, collect every finding in that repo's `phase5-validated.json`
+with `"validation_status": "PENDING_CROSS_REPO_VALIDATION"`.
+
+For each deferred finding:
+```
+1. Read the underlying finding's full record from that repo's own
+   phase2-architecture.json (match by original_id) — the claim, evidence,
+   and file:line, since phase5-validated.json only carries a placeholder.
+
+2. Use service-topology.json and every other repo's phase2-architecture.json
+   / phase4-owasp.json — including any dedicated infrastructure-as-code or
+   workload-manifest repo passed in --repos (Terraform, Helm, Kubernetes
+   manifests, network policy / IAM definitions) — to check the specific
+   claim that blocked single-repo validation: network reachability,
+   IAM/trust policy scope, NetworkPolicy/security-group scope, or a sibling
+   service's actual behavior.
+
+3. Resolve to exactly one of:
+   - CONFIRMED   — cross-repo evidence proves the claim. Cite the specific
+     file in the other repo (e.g. "infra-repo/k8s/netpol.yaml:L12 has no
+     rule permitting this traffic").
+   - REJECTED    — cross-repo evidence disproves the claim (e.g. a
+     NetworkPolicy actually does restrict the traffic the Phase 2 finding
+     assumed was open).
+   - NEEDS_REVIEW — still unresolved even with every repo's context (e.g.
+     the controlling policy lives in a cloud-provider console or IAM
+     configuration not represented in any scanned repo). verdict_reason
+     must name exactly what's still missing.
+
+4. A resolution must cite the specific new cross-repo evidence (file:line in
+   the other repo, or the specific topology field) that changed the answer.
+   Restating the original Phase 2 claim without new cross-repo evidence is
+   not a resolution — leave it NEEDS_REVIEW instead.
+```
+
+> **Genericity**: this operates purely on structural fields
+> (`validation_status`, `original_id`, `file`, `line`, topology fields) and
+> generic categories of cross-repo evidence (network policy, IAM, sibling-
+> service behavior) — never on anything specific to one repository's subject
+> matter.
+
+Write the resolution to `system-findings.json → deferred_architecture_validations`
+(schema below) — never mix these into the `findings` array above; they are a
+different kind of record (resolutions of existing per-repo findings, not new
+system-level findings with their own `SYS-XXX` id).
+
+---
+
 ## Output
 
 Write two files:
@@ -189,11 +252,39 @@ Write two files:
     "medium": 0,
     "low": 0
   },
+  "deferred_architecture_validations": [
+    {
+      "repo": "user-service",
+      "original_id": "A-011",
+      "resolved_status": "REJECTED",
+      "verdict_reason": "infra-repo/k8s/netpol.yaml:L18 restricts ingress on this port to the api-gateway service account only — the internal service is not reachable from arbitrary pods as the Phase 2 finding assumed.",
+      "evidence": [
+        {"repo": "infra-repo", "source_file": "k8s/netpol.yaml", "detail": "L18: podSelector restricts to app=api-gateway"}
+      ]
+    },
+    {
+      "repo": "user-service",
+      "original_id": "A-009",
+      "resolved_status": "NEEDS_REVIEW",
+      "verdict_reason": "The claimed exposure depends on the cloud load balancer's listener configuration, which is not represented in any scanned repo — cannot confirm or reject from repo content alone.",
+      "evidence": []
+    }
+  ],
   "coverage_notes": [
     "phase4-owasp.json absent for user-service (--skip owasp was used) — Class 4 analysis is incomplete for that service"
   ]
 }
 ```
+
+`deferred_architecture_validations` is present (possibly empty) whenever any
+repo's `phase5-validated.json` had a `PENDING_CROSS_REPO_VALIDATION` finding —
+omit the key entirely only if no repo had one. `resolved_status` is always one
+of `CONFIRMED` / `REJECTED` / `NEEDS_REVIEW`, mirroring the report-tier
+vocabulary the rest of the pipeline uses (`CONFIRMED` maps to Phase 6's
+Confirmed tier, `REJECTED` to Rejected, `NEEDS_REVIEW` stays Needs Review —
+the per-repo `final-report.md`, written before this phase ran, will still
+show the old "pending" placeholder; this file and `system-report.md` are the
+authoritative resolved source).
 
 ### 2. `{output_dir}/system-report.md`
 
@@ -251,6 +342,19 @@ issue, and the single most impactful remediation step}
 
 ---
 
+## Deferred Architecture Findings — Resolved     ← omit entirely if deferred_architecture_validations is empty
+
+{One row per entry in `deferred_architecture_validations`. Each per-repo
+`final-report.md` still shows these as "pending cross-repo validation" — this
+table is the resolved answer.}
+
+| Repo | ID | Resolved | Reason |
+|------|----|----------|--------|
+| user-service | A-011 | REJECTED | `infra-repo/k8s/netpol.yaml:L18` restricts ingress to `api-gateway` only |
+| user-service | A-009 | NEEDS_REVIEW | Depends on cloud load-balancer listener config, not represented in any scanned repo |
+
+---
+
 ## Coverage Gaps          ← omit this section entirely if nothing was skipped
 
 {One line per service whose analysis was incomplete: which phase was skipped and
@@ -262,6 +366,8 @@ Rules (parallel to Phase 6 default mode):
 - **Single severity** per finding — no base/contextual columns.
 - **Coverage Gaps** section is included only when a per-repo file was absent or a
   phase was skipped; omit it entirely otherwise.
+- **Deferred Architecture Findings — Resolved** is included only when
+  `deferred_architecture_validations` is non-empty; omit entirely otherwise.
 
 ## Quality Bar
 
@@ -272,6 +378,12 @@ Only report findings you can trace to concrete evidence. For each finding:
 
 Avoid re-reporting per-service findings that are already covered in individual
 reports unless they are amplified by the cross-repo context.
+
+This bar applies equally to the Deferred Architecture Finding Validation duty:
+a resolution needs the same concrete evidence citation as a new finding does —
+naming the exact cross-repo file:line or topology field that answered the
+question. "Still can't tell" is a legitimate outcome (`NEEDS_REVIEW`); an
+unsupported guess is not.
 
 ## Final Response (chat output)
 

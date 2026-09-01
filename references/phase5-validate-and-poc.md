@@ -17,19 +17,37 @@
 ## Context Isolation — Read This First
 
 You are the **judgment layer**. You receive candidate findings from Phase 4
-(the finder) and your job has two sequential parts:
+(the finder) **and** standalone findings from Phase 2 (architecture) that no
+Phase 4 finding already covers, and your job has two sequential parts:
 
 1. **Validate** each finding independently — challenge it, try to disprove it
 2. **Write a PoC** — only if `--poc` was passed — immediately for any finding
    that passes, while your validation reasoning is still in context
 
-You must be isolated from Phase 2 and Phase 4's agent context. You receive:
+You must be isolated from Phase 2 and Phase 4's agent context (you still read
+their **output files** yourself — isolation means not inheriting their
+reasoning/conversation, not avoiding their JSON). You receive:
 - This reference file
 - The path to `phase4-owasp.json` (you read it yourself)
+- The path to `phase2-architecture.json` (you read it yourself — for Step 0.5's
+  merge step and for validating standalone Phase 2 findings)
 - The repo path to re-examine code independently
 - The `--runtime` flag (if set)
 - The `--poc` flag (if set) — see below
 - `tech-stack.json` path (includes `runtime_hints` used for Dockerfile synthesis)
+- The `is_multi_repo` flag (true when the orchestrator is running in `--repos`
+  mode) — see Step 0.5 for how this changes standalone Phase 2 finding handling
+
+> **Genericity note**: everything in this file — the merge/dedup logic, the
+> verdict scheme, the multi-repo deferral — is repo- and finding-content
+> agnostic. It operates on structural fields (`file`, `line`, `severity`,
+> IDs) and generic categories of missing evidence (private dependency
+> internals, infra/network configuration, downstream service behavior), never
+> on anything specific to one repository or one finding's subject matter.
+
+> **Step 0.5 does not apply in PR Review Mode** (see substitution note below)
+> — `pr-findings.json` has no separate architecture-origin findings to merge
+> against; skip straight to the Surface Gate for every finding in that mode.
 
 > **PR Review Mode substitution**: when invoked from `references/pr-review.md`
 > (`--pr` flag), replace every mention of `phase4-owasp.json` in this file with
@@ -38,9 +56,12 @@ You must be isolated from Phase 2 and Phase 4's agent context. You receive:
 > including the Surface Gate, mitigation hunt, and Boundary Gate) applies
 > **unchanged** — including the `regression`/`removed_control` fields
 > `pr-review.md` adds to its findings, which Step 2 (mitigation hunt) must
-> validate per that file's "Additional validation duty" note. **PoC generation
-> (Part 2) and runtime validation (Part 3) never run in PR mode** — treat it as
-> if `--poc` was never passed: assign validation verdicts normally, set
+> validate per that file's "Additional validation duty" note. **Step 0.5
+> (merge Phase 2 into Phase 4) does not run at all in PR mode** — there is no
+> separate architecture-origin finding set to merge; every `pr-findings.json`
+> record goes straight into the candidate list. **PoC generation (Part 2) and
+> runtime validation (Part 3) never run in PR mode** — treat it as if `--poc`
+> was never passed: assign validation verdicts normally, set
 > `poc_generated: false` / `poc_file: null` on every finding, and do not
 > produce `phase5-pocs.json` / `pr-pocs.json` at all.
 
@@ -100,7 +121,12 @@ validation reads or verdicts.
 
 ## Workflow Per Finding
 
-For each finding in `phase4-owasp.json`, execute this sequence in full
+Build the candidate list first — see **Step 0.5** below, which merges
+`phase4-owasp.json` with any standalone `phase2-architecture.json` findings
+and, in multi-repo mode, routes some Phase 2 findings straight to output
+without entering this loop at all.
+
+For each finding in the candidate list, execute this sequence in full
 before moving to the next finding:
 
 ```
@@ -131,6 +157,63 @@ moving to the next finding, not deferred to a final pass at the end of the
 loop.
 
 ---
+
+## Step 0.5: Build the Candidate List (merge Phase 2 into Phase 4)
+
+**Run this once, before the per-finding loop.** Skip entirely in PR Review
+Mode (see substitution note above).
+
+Phase 4 re-discovers some issues Phase 2 already flagged, independently, to
+increase confidence — that produces two records for the same underlying
+issue. Left alone, this phase would spend a full validation pass on each
+copy. Merge first so every underlying issue is validated exactly once.
+
+```
+1. Read phase4-owasp.json → findings (as always).
+2. Read phase2-architecture.json → findings.
+3. For each Phase 2 finding, check it against every Phase 4 finding using
+   either match criterion (either suffices — be conservative, a false match
+   silently removes a finding from independent validation):
+
+   a. Same file + overlapping line range: primary evidence file identical
+      AND line ranges overlap or are within ±5 lines of each other.
+   b. Same root cause on the same file: same file AND titles/descriptions
+      describe a recognizable common pattern (e.g. the same missing check,
+      the same function name, the same control gap) — not merely the same
+      OWASP category or severity.
+
+4. Partition Phase 2's findings into two groups:
+   - OVERLAPPING (matched a Phase 4 finding): do not add to the candidate
+     list. Instead, write a lightweight passthrough record directly to
+     phase5-validated.json now (no validation performed on it):
+     `{"original_id": "A-XXX", "source_phase": 2, "validation_status": "MERGED",
+     "report_tier": null, "duplicate_of": "O-YYY"}`. Phase 6 reads this tag
+     directly instead of re-deriving the match itself.
+   - STANDALONE (no match): proceed to step 5.
+
+5. Route STANDALONE Phase 2 findings based on `is_multi_repo`:
+
+   is_multi_repo = false (single-repo mode):
+     → Add to the candidate list alongside every Phase 4 finding. It goes
+       through the full per-finding workflow below (Surface Gate → Validation
+       → Boundary Gate → Decision), tagged `"source_phase": 2`.
+
+   is_multi_repo = true (--repos mode):
+     → Do NOT add to the candidate list — this phase cannot resolve
+       cross-service reachability/trust questions from one repo alone.
+       Write directly to phase5-validated.json now, skipping Steps 0-5
+       entirely:
+       `{"original_id": "A-XXX", "source_phase": 2,
+       "validation_status": "PENDING_CROSS_REPO_VALIDATION",
+       "report_tier": "NEEDS_REVIEW",
+       "verdict_reason": "Requires cross-repo/topology context this single-repo
+       pass cannot provide — deferred to Phase 7 system-level validation. See
+       system-report.md for the resolved verdict."}`
+
+6. Every Phase 4 finding always enters the candidate list and is validated
+   normally, in both single- and multi-repo mode — this deferral applies
+   only to standalone Phase 2 findings.
+```
 
 ## Step 0: Surface Gate
 
@@ -330,6 +413,36 @@ After the above steps (including the boundary gate if it ran), assign one of:
 | `NEEDS_RUNTIME` | Cannot confirm statically | Attempt runtime probe if `--runtime`, else no PoC |
 | `BOUNDARY_NOT_CROSSED` | Vulnerability exists in code but entry point is behind a high-confidence auth gate with no bypass | No PoC; record in output with boundary evidence |
 | `SURFACE_NOT_PRODUCTION` | Vulnerability exists in code but the file is in a non-production surface (test/fixture/example/demo) with high-confidence classification | No PoC; record in output with surface evidence |
+| `NEEDS_EXTERNAL_VERIFICATION` | Plausible finding (usually `source_phase: 2`), but confirming actual exploitability requires information this repo cannot provide — private dependency internals, infra/network configuration, IAM/trust policy, downstream service behavior | No PoC; `verdict_reason` must name the exact missing fact, e.g. "requires confirming whether the internal package's own serializer redacts this field — package source not in this repo" |
+| `PENDING_CROSS_REPO_VALIDATION` | Multi-repo mode only — a standalone Phase 2 finding routed straight to output by Step 0.5 without entering this workflow at all | No PoC; Phase 7 resolves the real verdict using cross-repo context |
+
+**Report Tier** — every finding also gets a `report_tier`, computed from
+`validation_status` by this fixed mapping (Phase 6 reads this field directly
+rather than re-deriving it):
+
+| `validation_status` | `report_tier` |
+|---|---|
+| `CONFIRMED`, `CONFIRMED_LOW_CONFIDENCE` | `CONFIRMED` |
+| `FALSE_POSITIVE` | `REJECTED` |
+| `NEEDS_RUNTIME`, `BOUNDARY_NOT_CROSSED`, `SURFACE_NOT_PRODUCTION`, `NEEDS_EXTERNAL_VERIFICATION`, `PENDING_CROSS_REPO_VALIDATION` | `NEEDS_REVIEW` |
+| `MERGED` (Step 0.5 passthrough) | `null` — not independently rendered; folded into its `duplicate_of` finding |
+
+**`verdict_reason`**: every finding whose `report_tier` is not `CONFIRMED`
+must carry a one-sentence explanation somewhere in its record — this is what
+lets a reader tell a rejected finding from one that's merely unresolved
+without re-reading the full validation trace. Don't duplicate a reason into
+two fields: `FALSE_POSITIVE` already has `false_positive_reason`,
+`BOUNDARY_NOT_CROSSED` already has `boundary_gate.reason`,
+`SURFACE_NOT_PRODUCTION` already has `surface_gate.reason` — use those, and
+leave the top-level `verdict_reason` field `null` for those three statuses.
+Populate the top-level `verdict_reason` field itself only for the two
+statuses that have no existing dedicated reason field: `NEEDS_EXTERNAL_VERIFICATION`
+and `PENDING_CROSS_REPO_VALIDATION` (and `NEEDS_RUNTIME`, which has no
+per-finding reason field today). `CONFIRMED`/`CONFIRMED_LOW_CONFIDENCE`
+findings leave everything null — the description and evidence already carry
+the "why." Phase 6 must know to pull the reason from whichever field is
+populated for a given `validation_status` when rendering the Needs Review
+table (see phase6-report.md → Needs Review section).
 
 ### Runtime Value Assessment
 
@@ -983,6 +1096,9 @@ their final shape, not a new write step.
     "needs_runtime": 0,
     "boundary_not_crossed": 0,
     "surface_not_production": 0,
+    "needs_external_verification": 0,
+    "pending_cross_repo_validation": 0,
+    "merged_phase2_findings": 0,
     "pocs_generated": 0,
     "runtime_confirmed": 0,
     "runtime_not_needed": 0,
@@ -991,8 +1107,44 @@ their final shape, not a new write step.
   },
   "findings": [
     {
+      "original_id": "A-004",
+      "source_phase": 2,
+      "validation_status": "MERGED",
+      "report_tier": null,
+      "duplicate_of": "O-001",
+      "verdict_reason": null
+    },
+    {
+      "original_id": "A-009",
+      "source_phase": 2,
+      "validation_status": "NEEDS_EXTERNAL_VERIFICATION",
+      "report_tier": "NEEDS_REVIEW",
+      "confidence": "MEDIUM",
+      "verdict_reason": "The claimed data flow depends on an internal package's own request-serialization behavior; that package's source is not present in this repo, so redaction cannot be confirmed or ruled out from here.",
+      "data_flow": null,
+      "mitigations_checked": [],
+      "boundary_gate": null,
+      "false_positive_reason": null,
+      "exploitability_notes": null,
+      "poc_generated": false,
+      "poc_file": null,
+      "runtime_status": null,
+      "runtime_notes": null
+    },
+    {
+      "original_id": "A-011",
+      "source_phase": 2,
+      "validation_status": "PENDING_CROSS_REPO_VALIDATION",
+      "report_tier": "NEEDS_REVIEW",
+      "verdict_reason": "Requires cross-repo/topology context this single-repo pass cannot provide — deferred to Phase 7 system-level validation. See system-report.md for the resolved verdict.",
+      "poc_generated": false,
+      "poc_file": null
+    },
+    {
       "original_id": "O-001",
+      "source_phase": 4,
       "validation_status": "CONFIRMED",
+      "report_tier": "CONFIRMED",
       "confidence": "HIGH",
       "data_flow": {
         "entrypoint": "GET /api/users/:id",
@@ -1022,7 +1174,9 @@ their final shape, not a new write step.
     },
     {
       "original_id": "O-003",
+      "source_phase": 4,
       "validation_status": "FALSE_POSITIVE",
+      "report_tier": "REJECTED",
       "confidence": "HIGH",
       "data_flow": {
         "entrypoint": "GET /search",
@@ -1045,7 +1199,9 @@ their final shape, not a new write step.
     },
     {
       "original_id": "O-005",
+      "source_phase": 4,
       "validation_status": "BOUNDARY_NOT_CROSSED",
+      "report_tier": "NEEDS_REVIEW",
       "confidence": "HIGH",
       "data_flow": {
         "entrypoint": "POST /api/admin/search",
@@ -1082,7 +1238,9 @@ their final shape, not a new write step.
     },
     {
       "original_id": "O-007",
+      "source_phase": 4,
       "validation_status": "SURFACE_NOT_PRODUCTION",
+      "report_tier": "NEEDS_REVIEW",
       "confidence": "HIGH",
       "data_flow": null,
       "mitigations_checked": [],
