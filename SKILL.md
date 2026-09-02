@@ -71,6 +71,7 @@ Parse these from `$ARGUMENTS` using the format:
 | `--pr` | none | PR Review mode. `--pr <base>...<head>` (or `--pr <base>` shorthand for `<base>...HEAD`) reviews only a pull request's diff instead of the whole repository — replaces the 6/7-phase pipeline with `references/pr-review.md`, pins to the resolved Standard tier model, and writes `pr-report.md` instead of `final-report.md`. Mutually exclusive with `--repos` and `--vendor`. See [PR Review Mode](#pr-review-mode---pr) below. |
 | `--context` | none | Inline `key=value,key=value` threat model used to calibrate severity. Optional — omit for default behavior. See [`--context`](#--context-threat-model-calibration) below. |
 | `--sonnet` | false | Experimental / comparison flag: overrides Deep tier's primary family from Opus to Sonnet for this run (falls back to Haiku family only if Sonnet is entirely unavailable — Standard tier is unaffected, it already uses Sonnet). Exists to A/B scan quality and token consumption between Opus and Sonnet on Phase 2, not for routine use. Has no effect in Vendor mode (already pinned to Standard/Sonnet, no Deep tier at all) or PR mode (no Phase 2 / Deep tier in that mode). |
+| `--skill-security` | false | Opt-in: run Phase 4b (LLM/AI skill security) on a **mixed repo** (`is_skill_repo: false`) even though Phase 2 detected skill/agent-instruction files (`has_skill_files: true`). Without this flag, a mixed repo never runs Phase 4b by default in the **default report mode** — `has_skill_files: true` alone is a structural signal, not an auto-run trigger, for mixed repos. Redundant (already going to run) on a **pure skill repo** (`is_skill_repo: true`, e.g. this skill's own repo — use `--skip skill-security` to suppress it there instead) and in **Vendor mode** (`--vendor` already auto-runs Phase 4b on `has_skill_files: true` regardless of `is_skill_repo`, since assessing a vendor's AI-tooling risk is the point of that mode — see Vendor Mode below). No effect in PR mode (Phase 4b never runs there). |
 | `--yes` | false | Non-interactive mode. Auto-confirms all user-facing prompts: the `--output` copy confirmation, the Docker runtime gate (`--runtime`), and the pure-skill-repo auto-skip cascade. Path-validation safety checks (rejecting sensitive `--output` destinations) are never bypassed. Use in CI or scripted runs. |
 | `--debug` | false | Write a paste-friendly execution log to `{repo_path}/.security-review/execution-log.md` recording how the file-reading phases actually ran — every file read with its line range and a full/partial flag, which files were classified security-relevant and whether they were read whole, the greps/tools run, and checks run vs skipped. For inspecting skill behaviour; independent of report mode. See [Execution Log](#execution-log---debug). |
 
@@ -97,6 +98,9 @@ Exception: if `--yes` is set and no repo path is provided, abort with a clear er
 - `--skip owasp` → also skips `validation` (Phase 5 has nothing to work from). `--poc` has no effect if validation is skipped.
 - `--skip validation` → `--poc` has no effect (PoC requires a validation verdict; there is none)
 - `--runtime` without `--poc` → `--poc` is implied; PoC generation runs so runtime validation has something to validate
+- `--skip skill-security` together with `--skill-security` (either repo type) →
+  the skip wins; Phase 4b does not run. An explicit skip always overrides an
+  opt-in request for the same phase.
 
 **Skip aliases in PR mode (`--pr`)** reinterpret the same names against
 `references/pr-review.md`'s steps, not the numbered phases: `secrets` → Step
@@ -276,7 +280,7 @@ as easily be a different Opus or Sonnet snapshot than shown here).
   "phase2_model":  "claude-opus-4-8",
   "phase3_model":  "claude-sonnet-4-6",
   "phase4_model":  "claude-sonnet-4-6",
-  "phase4b_model": "claude-sonnet-4-6 (only present when has_skill_files: true)",
+  "phase4b_model": "claude-sonnet-4-6 (only present when Phase 4b actually ran — is_skill_repo: true, or a mixed repo with --skill-security passed)",
   "phase5_model":  "claude-sonnet-4-6",
   "phase6_model":  "claude-sonnet-4-6",
   "phase7_model":  "claude-sonnet-4-6 (only present in multi-repo mode)",
@@ -424,9 +428,14 @@ When `--vendor` is set:
 
 Phases that still run: **Phase 2** (architecture — still produces the
 `project_overview` used for the "What This Tool Does" summary), **Phase 4**
-(OWASP / API Top 10), **Phase 4b** (LLM / AI security — if skill files are
-detected; vendor AI tools are a prime case), **Phase 5** (validation only), and
-**Phase 6** (vendor report). The skill-repo auto-skip cascade still applies.
+(OWASP / API Top 10), **Phase 4b** (LLM / AI security — auto-runs whenever
+`has_skill_files: true`, regardless of `is_skill_repo`; unlike the default
+mode's mixed-repo opt-in gate (`--skill-security`), Vendor mode does not
+require it — assessing a vendor's AI/agent tooling for LLM Top 10 issues is
+exactly the point of an adoption audit, so it stays on by default here. Use
+`--skip skill-security` to suppress it if not wanted), **Phase 5** (validation
+only), and **Phase 6** (vendor report). The skill-repo auto-skip cascade still
+applies.
 
 **2. Model pinned to the Standard tier.** Every phase uses the **resolved
 Standard tier model** (Sonnet family, falling back to Haiku family only if
@@ -567,12 +576,17 @@ Phase 4  → Code-Level OWASP Analysis    [skippable: --skip owasp]
            └─ Uses tech_stack to skip irrelevant checks (no DB → no SQLi, etc.)
            └─ Uses API flag from Phase 2 to decide whether to run API Top 10
            └─ AUTO-SKIPPED when is_skill_repo: true (no runtime code to scan)
-Phase 4b → LLM / AI Skill Security      [auto-activated: has_skill_files: true]
+Phase 4b → LLM / AI Skill Security      [conditional — see below]
            └─ Reads skill_files list from tech-stack.json
            └─ Checks against OWASP LLM Top 10 (LLM01/02/05/06/07/08)
-           └─ Skippable: --skip skill-security
-           └─ Pure skill repos: runs after Phase 2 (3, 4, 5 auto-skipped)
-           └─ Mixed repos: runs after Phase 4, before Phase 5
+           └─ Pure skill repos (is_skill_repo: true): auto-activated, runs
+              after Phase 2 (3, 4, 5 auto-skipped). Skippable: --skip skill-security.
+           └─ Mixed repos (is_skill_repo: false): opt-in only — runs after
+              Phase 4, before Phase 5, ONLY when --skill-security is passed.
+              has_skill_files: true alone does not trigger it here — that's
+              a structural signal (skill/agent-instruction files exist), not
+              an auto-run condition, for a repo whose primary content isn't
+              those files.
 Phase 5  → Validation (+ optional PoC)  [skippable: --skip validation]
            └─ Validates each Phase 4 finding independently. Also merges in any
               standalone Phase 2 (architecture) finding Phase 4 didn't already
@@ -610,11 +624,27 @@ if is_skill_repo: true:
   Otherwise ask: "Confirm? [Y/n]:"
   If confirmed (or evidence is unambiguous — SKILL.md present at repo root):
     Skip Phases 3, 4, 5. Run Phase 4b.
-  If declined: run the full pipeline. Phase 4b still runs if has_skill_files is true.
+  If declined: run the full pipeline. Phase 4b still auto-runs — declining the
+  cascade only affects whether Phases 3/4/5 are skipped, not whether this is
+  still a pure skill repo.
 
 if has_skill_files: true AND is_skill_repo: false:
-  Do not skip any phases. Run the full pipeline, then run Phase 4b after Phase 4.
-  Print: "ℹ️  Skill files detected — Phase 4b (LLM security) will run after Phase 4."
+  Do not skip any phases. This is a mixed repo — has_skill_files here just
+  means Phase 2 found a SKILL.md or .claude/commands/ alongside real
+  application code; it is not itself a reason to run Phase 4b by default.
+
+  If --vendor was passed: run Phase 4b after Phase 4 unconditionally —
+    Vendor mode auto-runs it regardless of --skill-security (see Vendor Mode).
+  Else if --skill-security was passed:
+    Run Phase 4b after Phase 4.
+    Print: "ℹ️  Skill files detected and --skill-security passed — Phase 4b
+            (LLM security) will run after Phase 4."
+  Otherwise:
+    Do not run Phase 4b.
+    Print: "ℹ️  Skill/agent-instruction files detected ({N} files) but
+            --skill-security was not passed — Phase 4b skipped by default.
+            Pass --skill-security to run the OWASP LLM Top 10 analysis on
+            these files."
 ```
 
 ### Multi-repo mode (`--repos` flag)
@@ -707,7 +737,10 @@ from having the validator's full reasoning in context while it's still fresh.
      `--debug` for Phases 2, 4, 5, and 6 — they append to the execution log,
      `is_multi_repo` for Phase 5 — true when `--repos` is set; controls
      whether standalone Phase 2 findings validate locally or defer to Phase 7,
-     see Phase Execution Order → Multi-repo mode)
+     see Phase Execution Order → Multi-repo mode; `--skill-security` and
+     `--vendor` for Phase 2 — decide whether Phase 2 runs the broader
+     content-pattern search when building `skill_files` for a mixed repo, see
+     `phase2-architecture.md` → Skill detection rules)
 
 3. **The orchestrator's only job** is sequencing, path management, and
    printing progress summaries. It must not accumulate findings across phases.
@@ -737,7 +770,7 @@ Read the agent instructions for each phase from `references/` before spawning:
 | 2 | `references/phase2-architecture.md` | always (full pipeline) |
 | 3 + 3b | `references/phase3-dependencies.md` | always (full pipeline) |
 | 4 | `references/phase4-owasp.md` | always (full pipeline) |
-| 4b (LLM Security) | `references/phase-llm-security.md` | when `has_skill_files: true` |
+| 4b (LLM Security) | `references/phase-llm-security.md` | when `is_skill_repo: true`, or a mixed repo (`is_skill_repo: false`) with `has_skill_files: true` AND (`--skill-security` or `--vendor`) |
 | 5 (Validation + PoC) | `references/phase5-validate-and-poc.md` | always (full pipeline) — also reused by PR mode's Step 6 (validation only, no PoC) |
 | 6 (Report) | `references/phase6-report.md` | always (full pipeline) — also reused by PR mode's Step 7 for the PR Review Report format |
 | 7 (Synthesis) | `references/phase7-synthesis.md` | multi-repo only |
@@ -762,7 +795,8 @@ Each phase writes its findings to a working directory inside the repo:
 │                                   was triggered, deleted once phase4-owasp.json
 │                                   is written. Present only if a run was
 │                                   interrupted mid-multi-pass.
-├── phase-llm-security.json   ← only if has_skill_files: true
+├── phase-llm-security.json   ← only if Phase 4b ran (is_skill_repo: true, or
+│                                mixed repo with --skill-security/--vendor)
 ├── phase5-validated.json
 ├── phase5-pocs.json           ← only if --poc was passed
 ├── pocs/                     ← only if --poc was passed; individual PoC scripts

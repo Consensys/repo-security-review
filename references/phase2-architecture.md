@@ -134,18 +134,18 @@ grep -rn "multer\|multipart\|file_upload\|FileField\|upload\|FormData" \
   --exclude-dir="node_modules" | head -10
 
 # --- AI Skill / Agent file detection ---
+# Structural check ONLY — always run, cheap, low false-positive rate. This is
+# what sets has_skill_files. Do NOT grep .md content for agent-instruction
+# *patterns* here (no "claude-opus"/"## Goal"/"subagent" scanning) — that
+# fires on ordinary AI-coding-assistant docs (CLAUDE.md, AGENTS.md) that are
+# near-universal in AI-assisted projects and are not themselves a security-
+# relevant skill/agent-instruction surface. See "Skill detection rules" below
+# for why this was narrowed and where the broader content search still runs.
 
-# Check for Claude Code skill markers
 find {repo_path} -maxdepth 6 \( \
   -name "SKILL.md" \
   -o -name "*.md" -path "*/.claude/commands/*" \
-  -o -name "*.md" -path "*/references/phase*" \
 \) -not -path "*/.git/*" -not -path "*/node_modules/*"
-
-# Check for agent instruction patterns in .md files
-grep -rln "subagent\|spawn.*agent\|claude-fable\|claude-sonnet\|claude-opus\|thinking.*adaptive\|## Goal" \
-  {repo_path} --include="*.md" \
-  --exclude-dir=".git" --exclude-dir="node_modules" | head -20
 
 # Count total non-config files and .md files to determine skill-repo ratio
 find {repo_path} -maxdepth 5 -type f \
@@ -340,15 +340,42 @@ Based on findings, write `{repo_path}/.security-review/tech-stack.json`:
 > under `skill_detection_evidence` so the orchestrator and the user can verify
 > the detection was not triggered by planted markers.
 
-`has_skill_files: true` — set when **any** of:
+`has_skill_files: true` — set when **either** of these **structural**
+signals fires (narrow on purpose — see the note below):
 - A file named `SKILL.md` exists anywhere in the repo
 - `.md` files exist under `.claude/commands/`
-- `.md` files with agent instruction patterns are found (grep matched
-  `subagent`, `claude-fable`, `claude-sonnet`, `claude-opus`,
-  `thinking.*adaptive`, `## Goal` — indicating orchestration docs)
 
-`skill_files` — list every `.md` file path that matches the skill detection
-criteria above (relative to repo root), up to 50 files.
+> **Do not** set this from content-pattern matching (grepping any `.md` file
+> for `subagent`, `claude-opus`, `thinking.*adaptive`, `## Goal`, etc.). That
+> broader search used to be part of this signal and it over-fired: an
+> ordinary `CLAUDE.md`/`AGENTS.md` written for an AI coding assistant — near-
+> universal in AI-assisted projects — routinely mentions model names or has a
+> `## Goal` heading without being an actual security-relevant skill/agent-
+> instruction surface. That false-positive rate is exactly why Phase 4b is no
+> longer auto-run on a mixed repo just because `has_skill_files` is true (see
+> SKILL.md → Argument Parsing Rules → `--skill-security`) — this field is now
+> a structural signal only, not an auto-run trigger, for a mixed repo.
+
+`skill_files` — the candidate list Phase 4b will read if it runs. Built
+differently depending on why Phase 4b is running:
+- **`has_skill_files` (above) is true** (this repo has an actual `SKILL.md`
+  or `.claude/commands/`): list every `.md` file in the same directory tree
+  as the found `SKILL.md` (its sibling directories — `references/`,
+  `scripts/`, `commands/`, etc.) plus every `.md` under `.claude/commands/`,
+  up to 50 files. This is deliberately broader than the structural trigger
+  itself — once a repo is confirmed to genuinely be (or contain) a skill,
+  its substantive instruction content usually lives in files that don't
+  individually match the narrow trigger (e.g. `references/phase2-architecture.md`
+  in this very skill).
+- **`has_skill_files` is false but `--skill-security` was explicitly
+  passed** (the user is asking to check a mixed repo anyway): now run the
+  broader content-pattern search — grep every `.md` file for `subagent`,
+  `spawn.*agent`, `claude-fable`, `claude-sonnet`, `claude-opus`,
+  `thinking.*adaptive`, `## Goal` — and list every match, up to 50 files.
+  This search's higher false-positive rate is acceptable here because the
+  user explicitly opted in; it only affects which files Phase 4b reads, not
+  whether the whole phase runs.
+- **Neither condition holds**: `skill_files` stays `[]`.
 
 `skill_frameworks` — derive from content:
 - `"claude-code"` if `SKILL.md` is present or `.claude/commands/` exists

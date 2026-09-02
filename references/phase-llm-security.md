@@ -28,9 +28,18 @@ tool output could hijack, redirect, or exfiltrate data from the agent pipeline.
 
 ## When this phase runs
 
-Auto-activated by the orchestrator when Phase 2 writes `has_skill_files: true`
-in `tech-stack.json`. The orchestrator reads that flag after Phase 2 completes
-and spawns this phase only when it is set.
+The orchestrator reads `tech-stack.json` after Phase 2 completes and decides:
+- **`is_skill_repo: true`** (this repo is entirely skill/agent-instruction
+  content) — auto-activated. `has_skill_files` is true by definition here, and
+  there's no other meaningful analysis to run instead.
+- **`is_skill_repo: false`, `has_skill_files: true`** (a mixed repo that also
+  contains a `SKILL.md`/`.claude/commands/`) — activated **only** when
+  `--skill-security` or `--vendor` was passed. `has_skill_files: true` alone
+  no longer auto-activates this phase on a mixed repo — see SKILL.md →
+  Argument Parsing Rules → `--skill-security` for why (ordinary AI-assisted-
+  coding docs like `CLAUDE.md`/`AGENTS.md` used to over-trigger this phase by
+  default).
+- Otherwise: does not run.
 
 ## Model Guidance
 

@@ -85,6 +85,18 @@ Options:
                         and token consumption. Standard tier is unaffected
                         (already Sonnet). No effect in --vendor or --pr mode
                         (neither has a Deep tier).
+  --skill-security      Opt-in: run Phase 4b (LLM/AI skill security) on a
+                        mixed repo that also contains a SKILL.md or
+                        .claude/commands/. Without this flag, a mixed repo
+                        never runs Phase 4b by default — has_skill_files:
+                        true alone is a structural signal, not an auto-run
+                        trigger, for a repo whose primary content isn't skill
+                        files (ordinary CLAUDE.md/AGENTS.md docs are common
+                        in AI-assisted projects and would otherwise trigger
+                        it every time). Redundant on a pure skill repo
+                        (is_skill_repo: true — Phase 4b auto-runs there
+                        regardless) and in --vendor mode (already auto-runs
+                        it there).
   --help                Show this help
 
 Phases you can skip (--skip <name>):
@@ -120,11 +132,14 @@ Phases you can skip (--skip <name>):
                     Skipping this means --poc has no effect (nothing to
                     validate).
 
-  skill-security    Phase 4b · LLM / AI skill security analysis. Only
-                    runs when Phase 2 detects skill/agent instruction files
-                    in the repo (has_skill_files: true in tech-stack.json).
-                    Analyses instruction files against OWASP LLM Top 10.
-                    Auto-activated — no flag needed to turn it on.
+  skill-security    Phase 4b · LLM / AI skill security analysis. Analyses
+                    instruction files against OWASP LLM Top 10. Auto-
+                    activated only when the repo is entirely skill/agent
+                    content (is_skill_repo: true). On a mixed repo that also
+                    has a SKILL.md/.claude/commands/ (has_skill_files: true
+                    but is_skill_repo: false), it does NOT auto-run — pass
+                    --skill-security explicitly (or --vendor, which already
+                    auto-runs it) to opt in.
 
 Cascade rules:
   --skip owasp        → also skips validation (nothing to validate); --poc
@@ -133,6 +148,7 @@ Cascade rules:
   --runtime           → implies --poc (runtime validation needs a PoC to run)
   --skip architecture → also skips skill-security (skill detection
                         requires tech-stack.json from Phase 2)
+  --skip skill-security + --skill-security together → the skip wins
 
 Phase that always runs:
   Report Builder    Aggregates all completed phases into a structured
@@ -222,6 +238,13 @@ Parse `$ARGUMENTS` for:
   A/B'd against a normal Opus run. Standard tier is unaffected. No effect in
   `--vendor` or `--pr` mode — neither has a Deep tier to override. Record
   `sonnet_flag` in `run-metadata.json`.
+- `--skill-security` → opt-in: on a mixed repo (`is_skill_repo: false`) that
+  also has `has_skill_files: true`, run Phase 4b anyway. Without it, Phase 4b
+  does not run on a mixed repo — `has_skill_files: true` alone is a
+  structural signal only there, not an auto-run trigger (see the
+  `skill-security` phase description above for why). Redundant on a pure
+  skill repo (`is_skill_repo: true` — auto-runs regardless) and in `--vendor`
+  mode (already auto-runs it there).
 
 Abort with a clear error if any skip value is not in the allowed list above:
 `❌ Unknown --skip value: "{value}". Allowed: secrets, architecture, dependencies, owasp, validation, skill-security`
@@ -325,13 +348,21 @@ After Phase 2: read tech-stack.json.
   if is_skill_repo: true →
     Print detection evidence and ask for confirmation (see SKILL.md auto-skip cascade).
     If confirmed: add phases 3, 4, 5 to the skip list. Run Phase 4b. Run Phase 6.
-    If declined: run full pipeline; Phase 4b still runs if has_skill_files is true.
+    If declined: run full pipeline; Phase 4b still auto-runs regardless
+      (declining only affects whether phases 3/4/5 are skipped).
   else:
     Run Phase 3 (unless skipped).
     Run Phase 4 (unless skipped).
     if has_skill_files: true →
-      Print "ℹ️  Skill files detected — Phase 4b (LLM security) will run."
-      Run Phase 4b (unless --skip skill-security).
+      if --vendor →
+        Print "ℹ️  Skill files detected — Phase 4b (LLM security) will run (vendor mode)."
+        Run Phase 4b (unless --skip skill-security).
+      else if --skill-security →
+        Print "ℹ️  Skill files detected and --skill-security passed — Phase 4b (LLM security) will run."
+        Run Phase 4b (unless --skip skill-security).
+      else →
+        Print "ℹ️  Skill files detected but --skill-security was not passed — Phase 4b skipped by default."
+        Do not run Phase 4b.
     Run Phase 5 (unless skipped).
     Run Phase 6.
 ```

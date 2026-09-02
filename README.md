@@ -78,6 +78,7 @@ In any Claude Code session (CLI or Desktop), point the skill at a local repo pat
 | `--yes` | off | Non-interactive / CI mode — auto-confirms prompts (safety path checks still apply). |
 | `--debug` | off | Write `.security-review/execution-log.md` showing how Phases 2, 4, 5, and 6 actually ran, plus per-phase token consumption. |
 | `--sonnet` | off | Experimental A/B flag: runs Phase 2 (architecture) on the Sonnet family instead of Opus, to compare scan quality and token consumption. No effect in `--vendor` or `--pr` mode (both already pin to Sonnet with no Deep tier). |
+| `--skill-security` | off | Opt-in: run Phase 4b (LLM/AI skill security) on a mixed repo that also contains a `SKILL.md`/`.claude/commands/`. Without it, a mixed repo never runs Phase 4b by default — just having those files present isn't reason enough, since ordinary `CLAUDE.md`/`AGENTS.md` docs are common in AI-assisted projects. Redundant on a repo that's *entirely* skill/agent content (Phase 4b auto-runs there regardless) and in `--vendor` mode (already auto-runs it). |
 | `--help` | — | Show usage. |
 
 **Skip cascades** (applied silently): `--skip owasp` also skips `validation` (and PoC generation has nothing left to run against); `--skip validation` means `--poc` has no effect; `--skip architecture` also skips `skill-security`. `--vendor` forces skip of `secrets` and `dependencies`, and forces PoC generation off regardless of `--poc`. In `--pr` mode the same skip names apply but target its own steps instead of numbered phases, and `architecture` cannot be skipped (its diff-scoped context is load-bearing for every other step); `--poc` has no effect in `--pr` mode.
@@ -101,7 +102,7 @@ flowchart TD
         P3[Phase 3 · Dependency CVEs<br/>osv-scanner]
         P3b[Phase 3b · Reachability Validation]
         P4[Phase 4 · OWASP Code Scan<br/>semgrep + LLM]
-        P4b[Phase 4b · LLM / AI Skill Security<br/>standard-tier model<br/>auto-activated when skill files detected]
+        P4b[Phase 4b · LLM / AI Skill Security<br/>standard-tier model<br/>auto-activated for pure skill repos<br/>opt-in via --skill-security for mixed repos]
 
         P1 --> P2
         P2 --> TS
