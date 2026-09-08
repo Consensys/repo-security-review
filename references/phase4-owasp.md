@@ -101,9 +101,6 @@ SOURCE_FILES=$(find {repo_path} \( \
 \) -not -path "*/.git/*" -not -path "*/node_modules/*" \
    -not -path "*/vendor/*"  -not -path "*/dist/*" -not -path "*/build/*" \
 | wc -l | tr -d ' ')
-
-PHASE2_HIGH_CRITICAL=$(jq '[.findings[] | select(.severity == "CRITICAL" or .severity == "HIGH")] | length' \
-  {repo_path}/.security-review/phase2-architecture.json 2>/dev/null || echo 0)
 ```
 
 ## Step 1: Determine Which Checks to Run
@@ -194,24 +191,33 @@ decision auditable in the report.
 
 ### Multi-Pass Decision
 
-Count the items in your `checks_run` list → `APPLICABLE_CHECKS`.
-
-Enable multi-pass if **any** of these is true:
+Enable multi-pass if **and only if**:
 
 | Criterion | Threshold | Rationale |
 |-----------|-----------|-----------|
-| `APPLICABLE_CHECKS` | `>= 10` | API Top 10 or multiple injection vectors — wide attack surface |
-| `SOURCE_FILES` | `> 200` | Codebase too large for one reliable pass |
-| `PHASE2_HIGH_CRITICAL` | `>= 2` | Structural security debt signals more code-level issues |
+| `SOURCE_FILES` | `> 200` | Codebase too large for one reliable pass — this is a coverage/attention-span limit on examining hundreds of files in one continuous pass, not a hedge against the model under-reporting what it noticed |
+
+> **Removed as of 2026-09-08**: `APPLICABLE_CHECKS >= 10` ("wide attack
+> surface") and `PHASE2_HIGH_CRITICAL >= 2` ("structural security debt")
+> used to also trigger multi-pass. Evidence across 3 real multi-pass runs
+> (all triggered by these two criteria, none by `SOURCE_FILES > 200`) showed
+> round 1 alone captured 100%, 100%, and 9/10 (with the 10th folded into an
+> existing finding's family, not a new class) of the final finding set —
+> every subsequent round was dry. These two criteria measure "there's a lot
+> to look for," not "a single pass will miss something," and a thorough
+> model pass already covers the former. `SOURCE_FILES > 200` remains the
+> sole trigger because it targets the latter — genuine attention-span
+> pressure across a large file count — which these samples didn't test
+> (none exceeded 200 files) and so hasn't been ruled out.
 
 Log the outcome:
 ```
-# Criteria met:
-🔁 Multi-pass enabled — {reason(s)} (e.g. "847 source files, 12 applicable checks")
-   Will run until dry, max 3 rounds.
+# Criterion met:
+🔁 Multi-pass enabled — {source_files} source files > 200
+   Will run until dry, max 2 rounds.
 
-# Criteria not met:
-▶️  Single-pass — {source_files} files · {applicable_checks} checks · {phase2_high_critical} Phase 2 HIGH/CRITICAL findings
+# Criterion not met:
+▶️  Single-pass — {source_files} files (<= 200)
 ```
 
 ## Multi-Pass Execution
@@ -229,7 +235,7 @@ Log the outcome:
 | `NEW_THIS_ROUND` | 0 | New findings added in the current round |
 
 **Durability — persist this state to disk, don't rely on conversational
-memory across rounds.** A multi-pass run (up to 3 rounds, potentially hundreds
+memory across rounds.** A multi-pass run (up to 2 rounds, potentially hundreds
 of files) is exactly the kind of long-running work a context-compaction event
 can hit mid-loop; a compacted summary is unlikely to precisely reconstruct
 "which exact files were covered" or the finding objects already accumulated.
@@ -254,7 +260,7 @@ conversation in between.
 
 1. Run Steps 2 and 3.
    - **Round 1**: analyze the full codebase normally.
-   - **Round 2+**: focus on files not yet in `COVERED_FILES` and on check
+   - **Round 2**: focus on files not yet in `COVERED_FILES` and on check
      categories that produced findings last round (examine adjacent files and
      unexplored patterns for those categories). Do not re-examine files already
      in `COVERED_FILES` unless a prior finding points directly into them.
@@ -274,11 +280,22 @@ conversation in between.
 
 5. If `NEW_THIS_ROUND == 0`: increment `DRY_ROUNDS`. Otherwise reset `DRY_ROUNDS` to 0.
 
-6. **Stop** if `DRY_ROUNDS >= 2` OR `ROUND >= 3`. Log:
+6. **Stop** if `DRY_ROUNDS >= 1` OR `ROUND >= 2`. Log:
    ```
    ✅ Multi-pass complete — {N} round(s), {total} findings
    ```
    Then proceed to Output Format.
+
+   > **Changed as of 2026-09-08** (from `DRY_ROUNDS >= 2` OR `ROUND >= 3`,
+   > i.e. max 3 rounds requiring 2 consecutive dry rounds to stop early):
+   > across every real multi-pass run reviewed, round 1 was never dry
+   > (it's the full-codebase pass) and round 2 was dry in 100% of samples —
+   > meaning the old rule always had to run a 3rd round just to confirm a
+   > 2nd consecutive dry round, and that 3rd round was itself dry every
+   > time it ran. A 2-round cap with a single dry round as the early-stop
+   > signal reaches the same outcome for less cost; it still allows an
+   > (unlikely) round-1-dry case to stop immediately rather than wasting
+   > round 2.
 
 7. Otherwise increment `ROUND` and repeat from step 1.
 
