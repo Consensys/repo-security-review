@@ -73,7 +73,7 @@ Parse these from `$ARGUMENTS` using the format:
 | `--sonnet` | false | Experimental / comparison flag: overrides Deep tier's primary family from Opus to Sonnet for this run (falls back to Haiku family only if Sonnet is entirely unavailable — Standard tier is unaffected, it already uses Sonnet). Exists to A/B scan quality and token consumption between Opus and Sonnet on Phase 2, not for routine use. Has no effect in Vendor mode (already pinned to Standard/Sonnet, no Deep tier at all) or PR mode (no Phase 2 / Deep tier in that mode). |
 | `--skill-security` | false | Opt-in: run Phase 4b (LLM/AI skill security) on a **mixed repo** (`is_skill_repo: false`) even though Phase 2 detected skill/agent-instruction files (`has_skill_files: true`). Without this flag, a mixed repo never runs Phase 4b by default in the **default report mode** — `has_skill_files: true` alone is a structural signal, not an auto-run trigger, for mixed repos. Redundant (already going to run) on a **pure skill repo** (`is_skill_repo: true`, e.g. this skill's own repo — use `--skip skill-security` to suppress it there instead) and in **Vendor mode** (`--vendor` already auto-runs Phase 4b on `has_skill_files: true` regardless of `is_skill_repo`, since assessing a vendor's AI-tooling risk is the point of that mode — see Vendor Mode below). No effect in PR mode (Phase 4b never runs there). |
 | `--yes` | false | Non-interactive mode. Auto-confirms all user-facing prompts: the `--output` copy confirmation, the Docker runtime gate (`--runtime`), and the pure-skill-repo auto-skip cascade. Path-validation safety checks (rejecting sensitive `--output` destinations) are never bypassed. Use in CI or scripted runs. |
-| `--debug` | false | Write a paste-friendly execution log to `{repo_path}/.security-review/execution-log.md` recording how the file-reading phases actually ran — every file read with its line range and a full/partial flag, which files were classified security-relevant and whether they were read whole, the greps/tools run, and checks run vs skipped. For inspecting skill behaviour; independent of report mode. See [Execution Log](#execution-log---debug). |
+| `--cost` | false | Write a paste-friendly cost report to `{repo_path}/.security-review/cost-report.md` recording each phase's (and named subphase's) duration and estimated token consumption. Scoped strictly to time/tokens — no file-read tables, coverage, greps, or checks-run detail. Independent of report mode. Renamed from `--debug`. See [Cost Report](#cost-report---cost) below. |
 
 If no repo path is provided and `--repos` is not set, ask the user before proceeding.
 Exception: if `--yes` is set and no repo path is provided, abort with a clear error rather than prompting — interactive input is not available.
@@ -487,7 +487,7 @@ full-repository review, which is exactly what `--pr` exists to avoid. If
 either is also passed, abort with a clear error naming the conflicting flags.
 `--pr` composes normally with `--skip` (reinterpreted against `pr-review.md`'s
 steps — see Argument Parsing Rules above), `--runtime`, `--context`, `--yes`,
-and `--debug`.
+and `--cost`.
 
 **2. Execution.**
 
@@ -734,7 +734,8 @@ from having the validator's full reasoning in context while it's still fresh.
    - The repo path and working directory path
    - Any flags relevant to it (`--poc` and `--runtime` for Phase 5,
      `--vendor` for Phase 6 **and** Phase 7 — selects the vendor report format,
-     `--debug` for Phases 2, 4, 5, and 6 — they append to the execution log,
+     `--cost` for every phase that runs — each appends its own duration +
+     token section to the cost report,
      `is_multi_repo` for Phase 5 — true when `--repos` is set; controls
      whether standalone Phase 2 findings validate locally or defer to Phase 7,
      see Phase Execution Order → Multi-repo mode; `--skill-security` and
@@ -808,6 +809,7 @@ Each phase writes its findings to a working directory inside the repo:
 │   ├── docker-compose.yml    ← only if has_database: true
 │   ├── synthesis-notes.md
 │   └── startup.log
+├── cost-report.md            ← only if --cost was passed
 └── final-report.md           ← copied to --output path at end
 ```
 
@@ -822,6 +824,10 @@ PoCs are copied into per-service subdirectories under `{output_dir}`:
 ├── service-topology.json             ← Phase 0 output
 ├── system-findings.json              ← Phase 7 cross-repo findings
 ├── system-report.md                  ← Phase 7 synthesis report
+├── cost-report.md                    ← only if --cost was passed; Phase 0 + Phase 7
+│                                        sections only — per-repo phases (1-6) write
+│                                        their own cost-report.md inside each repo's
+│                                        own .security-review/, not here
 ├── {service-name-1}/                 ← directory name = repo directory name
 │   ├── final-report.md
 │   └── pocs/
@@ -914,73 +920,83 @@ unrecognized/unsearched stack, must be listed in `low_confidence_signals`. See
 If Phase 2 is skipped, Phase 3 and Phase 4 must run their own lightweight
 tech-stack detection before proceeding (see each phase's reference file).
 
-## Execution Log (`--debug`)
+## Cost Report (`--cost`)
 
-When `--debug` is set, the orchestrator passes it to Phases 2, 4, 5, and 6.
-Each of those phases **appends** a section to `{repo_path}/.security-review/execution-log.md`
-recording how it actually ran. The file is created (empty) by the orchestrator
-before Phase 1 when `--debug` is set. This is a self-report by each phase agent —
-useful and structured, but the authoritative record of tool calls remains the
-Claude Code session transcript. To keep the self-report accurate, each phase must
-write each file-read row **at the moment it reads the file**, and mark a read
-`PARTIAL` whenever it used an offset/limit window rather than reading the whole file.
+**Renamed from `--debug`/`execution-log.md`.** The old flag also captured
+file-read tables, security-relevant-file lists, per-directory coverage,
+greps/tools run, and checks run/skipped — all of that instrumentation is
+gone. `--cost` is scoped strictly to **duration and token consumption**,
+nothing else. If you want to inspect *how* a phase read the repo, that
+information no longer exists in a skill-produced artifact — read the Claude
+Code session transcript directly.
+
+When `--cost` is set, the orchestrator creates (empty)
+`{repo_path}/.security-review/cost-report.md` before Phase 1, and **every
+phase that actually runs** appends one section recording its own duration
+and token consumption. This is a self-report by each phase agent; the
+authoritative record of tool calls remains the Claude Code session
+transcript.
+
+**Multi-repo mode**: Phase 0 and Phase 7 are system-level (not per-repo) —
+they append to a separate `{output_dir}/cost-report.md`, created before
+Phase 0. Each repo's own Phases 1–6 append to that repo's own
+`{repo_path}/.security-review/cost-report.md`, exactly as in single-repo
+mode. There is no cross-file grand-total — the output-dir file's Total Cost
+covers only Phase 0 + Phase 7; each per-repo file's Total Cost covers only
+that repo's own phases.
 
 **Canonical format** — each phase appends one section in exactly this shape:
 
 ```markdown
 ## Phase {N} — {phase name}   (model: {resolved_model})
 
-### Files read
-| File | Lines | Coverage | Reason |
-|------|-------|----------|--------|
-| src/controllers/OrdersController.ts | 1-401 | FULL | route/controller |
-| src/auth/middleware.ts | 1-88 | FULL | auth middleware |
-| src/util/helpers.ts | 272-401 | PARTIAL (window around grep hit L300) | grep: exec() |
-
-### Security-relevant files
-Files classified security-relevant (routes, controllers, handlers, auth,
-middleware, or the locus of a candidate finding) and whether each was read whole:
-- src/controllers/OrdersController.ts — FULL ✓
-- src/controllers/UsersController.ts — NOT READ ⚠️ (no grep hit pointed here)
-
-### Directory coverage   (Phase 2 only)
-One row per directory containing security-relevant files, reconciled against the
-per-directory inventory count. A directory with `read: 0` must carry a reason —
-never omit it or fold it into a summary line. (See Phase 2 Step 0.5.)
-| Directory | Files | Read | Reason if unread |
-|-----------|-------|------|------------------|
-| src/auth | 5 | 5 | |
-| src/validation | 12 | 12 | |
-| src/db/migrations | 9 | 0 | schema migrations; runtime entities + query services read instead |
-
-### Tools / greps run
-- `grep -rnE "app\.(get|post)" ...` → 12 hits
-- `semgrep p/owasp-top-ten,p/security-audit,...` → 6 seed findings   (Phase 4 only)
-
-### Checks run / skipped   (Phase 4 only)
-- SQLi: RUN (has_database=true)
-- Command Injection: SKIP (confident negative)
-- Deserialization: RUN (reduced-confidence — manifest-only signal)
-
-### Token consumption (estimated)
-| Metric | Value |
-|--------|-------|
-| Input tokens (est.) | 45,230 |
-| Output tokens (est.) | 8,920 |
-| Total tokens (est.) | 54,150 |
-| Cost (est.) | $0.32 |
+| Subphase | Duration | Input tokens (est.) | Output tokens (est.) | Total tokens (est.) |
+|----------|----------|----------------------|-----------------------|-----------------------|
+| Phase {N} | {Xm Ys} | 45,230 | 8,920 | 54,150 |
 ```
 
-> **Phase 6 variant**: Phase 6 does not read target-repo source, so the "Files
-> read" / "Security-relevant files" / "Directory coverage" / "Tools / greps run" /
-> "Checks run / skipped" tables above do not apply to it. Its section replaces
-> them with an "### Input files read" list (which phase-output JSON files it
-> read, e.g. `phase2-architecture.json`, `phase4-owasp.json`,
-> `phase5-validated.json`) followed by the same "### Token consumption" block —
-> see `references/phase6-report.md` → Execution Log.
+**Multi-row phases** — a phase with a named, independently-optional internal
+part gets one row per part plus a bolded Total row summing them (Duration
+sums directly; tokens sum per the invariant below):
 
-Keep it factual and terse — this is instrumentation, not narrative. If `--debug`
+```markdown
+## Phase 3 — Dependency CVE Scanning   (model: {resolved_model})
+
+| Subphase | Duration | Input tokens (est.) | Output tokens (est.) | Total tokens (est.) |
+|----------|----------|----------------------|-----------------------|-----------------------|
+| CVE Scanning | 0m 40s | 12,000 | 2,200 | 14,200 |
+| Reachability Validation (3b) | 0m 25s | 6,500 | 1,100 | 7,600 |
+| **Phase 3 Total** | **1m 05s** | **18,500** | **3,300** | **21,800** |
+```
+
+Phases with a Total row: **Phase 3** (CVE Scanning / Reachability Validation
+3b), **Phase 5** (Validation / PoC Generation — only if `--poc` was set /
+Runtime Validation — only if `--runtime` was set). Every other phase (0, 1,
+2, 4, 4b, 6, 7) has exactly one row and no Total row — a single row already
+is that phase's total, don't duplicate it.
+
+Keep it factual and terse — this is a cost log, not a narrative. If `--cost`
 is not set, write nothing and do not create the file.
+
+### Duration Methodology
+
+Unlike token counts, duration **is** directly measurable — this is real
+wall-clock time, not an estimate, and should never carry an `(est.)` suffix.
+Each phase (or subphase) runs a shell timestamp immediately before starting
+its work and again immediately before writing its final output, and reports
+the difference:
+
+```bash
+START=$(date +%s)
+# ... do the phase's work ...
+END=$(date +%s)
+echo "$(( (END - START) / 60 ))m $(( (END - START) % 60 ))s"
+```
+
+Round to the nearest second. This covers only that phase's own subagent
+turn — it does not include time spent queued behind a prior phase in the
+orchestrator's sequential dispatch, since phases run one at a time and that
+gap is already implicit between one phase's end and the next phase's start.
 
 ### Token Consumption Methodology
 
@@ -1001,29 +1017,30 @@ not comparable to each other, which defeats the only reason to record them.
 comparable across phases and across runs:**
 
 ```
-Input tokens (est.)  ≈ (total characters read this phase, summed across every
-                        row in "Files read" + every file listed under "Input
-                        files read"/"Tools / greps run" + this phase's own
-                        reference instruction file) / 4
+Input tokens (est.)  ≈ (total characters of every file/input you actually
+                        read this phase — target-repo source, other phases'
+                        JSON outputs, your own reference instruction file —
+                        summed) / 4
 
-Output tokens (est.) ≈ (total characters written this phase, summed across
-                        every output JSON artifact + this phase's own section
-                        of execution-log.md +, for Phase 6 only, final-report.md
-                        and any recap text) / 4
+Output tokens (est.) ≈ (total characters you actually wrote this phase —
+                        every output JSON artifact, your own cost-report.md
+                        section, and, for Phase 6, final-report.md and any
+                        recap text — summed) / 4
 ```
 
 The `/4` divisor is the standard rough chars-per-token heuristic — good enough
 for relative comparison (this run vs. that run, this phase vs. that phase),
-not for exact billing reconciliation. Compute it from files/rows you already
-logged in this phase's own tables — don't introduce a separate counter or
-external tool to produce it.
+not for exact billing reconciliation. `--cost` no longer logs a per-file
+table to sum from (that was `--debug`'s job, now removed) — compute this
+directly from what you actually read/wrote this phase, don't introduce a
+separate counter or external tool to produce it.
 
 Input and output are reported separately using this method; total is their
 sum (see invariant below). The `Cost (est.)` row is optional — if you have the
 resolved model's pricing from the claude-api skill or SKILL.md model table,
 multiply it against these estimated token counts; otherwise omit that row.
-Every "Token consumption" heading — per-phase and the final rollup — must
-carry the `(estimated)` suffix; never present these numbers as exact.
+Token columns carry the `(est.)` suffix everywhere they appear — per-phase
+and the final rollup — Duration never does (it's measured, not estimated).
 
 **`Total tokens` must always equal `Input tokens` + `Output tokens` — never add
 a third row (e.g. a separate "Subagent tokens" line) that changes what Total
@@ -1032,35 +1049,45 @@ subagent/tool call (e.g. an Explore-tool call Phase 2 made on its own
 initiative), fold that usage into this phase's own Input/Output figures —
 don't report it as a separate category that inflates Total beyond their sum.
 
-After all phases complete, the orchestrator **must append a final section** to
-`execution-log.md`:
+After all phases complete, the orchestrator **must append a final section**
+to `cost-report.md` (in multi-repo mode: to each repo's own `cost-report.md`
+after that repo's Phase 6 finishes, and separately to
+`{output_dir}/cost-report.md` after Phase 7 finishes):
 
 ```markdown
-## Total Token Consumption (estimated)
+## Total Cost
 
-| Phase | Input tokens (est.) | Output tokens (est.) | Total tokens (est.) |
-|-------|--------------|---------------|--------------|
-| Phase 2 | 45,230 | 8,920 | 54,150 |
-| Phase 4 | 38,100 | 7,800 | 45,900 |
-| Phase 5 | 22,400 | 4,200 | 26,600 |
-| Phase 6 | 15,600 | 3,100 | 18,700 |
-| **TOTAL** | **121,330** | **24,020** | **145,350** |
+| Phase | Duration | Input tokens (est.) | Output tokens (est.) | Total tokens (est.) |
+|-------|----------|----------------------|-----------------------|-----------------------|
+| Phase 1 | 0m 12s | 3,100 | 900 | 4,000 |
+| Phase 2 | 4m 30s | 45,230 | 8,920 | 54,150 |
+| Phase 3 (incl. 3b) | 1m 05s | 18,500 | 3,300 | 21,800 |
+| Phase 4 | 3m 10s | 38,100 | 7,800 | 45,900 |
+| Phase 5 | 2m 05s | 22,400 | 4,200 | 26,600 |
+| Phase 6 | 1m 00s | 15,600 | 3,100 | 18,700 |
+| **TOTAL** | **12m 02s** | **142,930** | **28,220** | **171,150** |
 ```
 
-> All figures above are chars/4 estimates per the Token Consumption
+> Token figures above are chars/4 estimates per the Token Consumption
 > Methodology — computed the same way for every phase and every run, so they
 > are meaningful for relative comparison (this phase vs. that phase, this run
-> vs. that run), but they are **not** exact API billing figures. Never label
-> this table, or any per-phase table above it, as "measured".
+> vs. that run), but they are **not** exact API billing figures. Duration
+> figures are real measured wall-clock time. Never label a token column as
+> "measured", and never label the Duration column as "(est.)".
 
-Only Phases 2, 4, 5, and 6 ever write a section to `execution-log.md` (Phases
-1, 3, and 7 don't take `--debug`) — **never add a row for a phase that has no
-corresponding `## Phase N` section above it**, even if that phase ran. Sum
-each column across only the phases that actually wrote a section (skip any
-that didn't run, were skipped, or don't take `--debug` at all). The `TOTAL`
-row is bold and locked at the bottom, and must equal each column's own sum —
-if a per-phase row's `Total tokens` isn't `Input + Output` for that row (see
-the invariant above), fix the row before summing, not after.
+Include a row only for phases/subphases that actually wrote a section (skip
+any that were skipped via `--skip`, or don't apply to this mode/repo — e.g.
+Phase 0/7 in single-repo mode, Phase 4b when it didn't run) — **never add a
+row for a phase that has no corresponding `## Phase N` section above it**,
+even if that phase ran under some other flag combination. A multi-row phase
+(3, 5) contributes its own already-computed **Total** row here, not each of
+its subphase rows individually. Sum each token column across the included
+rows; sum Duration across the included rows too (this run's actual
+wall-clock time is approximately this total, since phases run sequentially).
+The `TOTAL` row is bold and locked at the bottom, and must equal each
+column's own sum — if a per-phase row's `Total tokens` isn't
+`Input + Output` for that row (see the invariant above), fix the row before
+summing, not after.
 
 ## Progress Updates
 

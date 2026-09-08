@@ -337,6 +337,23 @@ Apply in order — the first matching rule wins.
 - `0.1–0.7` — moderate exploitation interest; reachability drives the call
 - `< 0.1` — rarely exploited; unreachable paths can be deprioritised aggressively
 
+## Cost Report (only if `--cost` was passed)
+
+If `--cost` is set, append a `## Phase 3` section to
+`{repo_path}/.security-review/cost-report.md` following the canonical
+multi-row format in SKILL.md → Cost Report — one row for CVE Scanning, one
+row for Reachability Validation (3b), plus a bolded **Phase 3 Total** row:
+
+| Subphase | Duration | Input tokens (est.) | Output tokens (est.) | Total tokens (est.) |
+|---|---|---|---|---|
+| CVE Scanning | ... | ... | ... | ... |
+| Reachability Validation (3b) | ... | ... | ... | ... |
+| **Phase 3 Total** | ... | ... | ... | ... |
+
+Duration is measured per SKILL.md → Duration Methodology (timestamp each
+subphase separately). Tokens are estimated per SKILL.md → Token Consumption
+Methodology. Skip entirely if `--cost` is not set.
+
 ## Final Response (chat output)
 
 Your own closing message — separate from the orchestrator's one-line progress

@@ -20,23 +20,17 @@ Find code-level vulnerabilities mapped to OWASP Top 10 and OWASP API Security
 Top 10. Scope the analysis to checks that are actually relevant to this
 project's tech stack — don't test for SQLi in a project with no database.
 
-## Execution Log (only if `--debug` was passed)
+## Cost Report (only if `--cost` was passed)
 
-If `--debug` is set, append a `## Phase 4` section to
-`{repo_path}/.security-review/execution-log.md` following the canonical format in
-SKILL.md → Execution Log. Record every file read (line range + `FULL`/`PARTIAL`),
-the security-relevant files and whether each was read whole, the greps/semgrep
-config run, and — in the **Checks run / skipped** subsection — every check with
-its decision and the confidence behind each skip (confident negative vs
-reduced-confidence run). Write rows as you go.
+If `--cost` is set, append a `## Phase 4` section to
+`{repo_path}/.security-review/cost-report.md` following the canonical format
+in SKILL.md → Cost Report: one row with Duration (measured, per SKILL.md →
+Duration Methodology) and Input/Output/Total tokens (estimated, per SKILL.md
+→ Token Consumption Methodology — chars/4 over what this phase actually read
+and wrote). No file-read table, no checks-run/skipped list, no semgrep-config
+listing — that instrumentation was removed from this flag.
 
-At the end of your phase, **before finishing**, append a `### Token consumption
-(estimated)` section with input tokens, output tokens, and total, estimated per
-SKILL.md → Execution Log → Token Consumption Methodology (chars/4 over what
-this phase actually read and wrote — never a session/budget-counter delta,
-never claimed as "measured").
-
-Skip entirely if `--debug` is not set, and never let logging change which files
+Skip entirely if `--cost` is not set, and never let logging change which files
 you read or checks you run.
 
 ## Step 0: Load Context

@@ -56,16 +56,15 @@ Options:
                         safety checks (sensitive --output destinations) are
                         never bypassed. Requires a repo path or --repos —
                         aborts if neither is provided.
-  --debug               Write an execution log to
-                        <repo>/.security-review/execution-log.md showing how
-                        Phases 2, 4, 5, and 6 actually ran: for the file-reading
-                        phases (2, 4, 5), every file read with its line range
-                        and a full/partial flag, which files were treated as
-                        security-relevant, the greps run, and checks run vs
-                        skipped; for Phase 6 (report builder), which phase
-                        output files it read. Every phase also reports its own
-                        token consumption. For inspecting skill behaviour.
-                        Paste it back for analysis.
+  --cost                Write a cost report to
+                        <repo>/.security-review/cost-report.md: duration and
+                        estimated token consumption for every phase that ran,
+                        including named subphases (3b; Phase 5's PoC/Runtime
+                        parts when --poc/--runtime were set). Scoped strictly
+                        to time/tokens — no file-read tables, coverage,
+                        greps, or checks-run detail (renamed from --debug,
+                        which used to include that). Paste it back for cost
+                        analysis.
   --context <pairs>     Optional inline threat model used to calibrate
                         severity. Format: comma-separated key=value pairs.
                         Keys: deployment_target (local|public),
@@ -174,8 +173,8 @@ Examples:
   # CI — full review including PoC generation, auto-confirm all gates
   /repo-security-review . --output ./security-report --poc --yes
 
-  # Inspect how the skill reads files — writes execution-log.md to paste back
-  /repo-security-review ~/repos/my-service --debug
+  # Get per-phase duration + token cost — writes cost-report.md to paste back
+  /repo-security-review ~/repos/my-service --cost
 
   # Skip arch (you already reviewed it) — deps + OWASP only
   /repo-security-review ~/repos/my-service --skip architecture,secrets
@@ -217,11 +216,12 @@ Parse `$ARGUMENTS` for:
   auto-skip cascade). Path-validation safety checks are never bypassed.
   If `--yes` is set and no repo path is provided, abort with:
   `❌ --yes requires a repo path or --repos — interactive input unavailable`
-- `--debug` → write an execution log to `{repo_path}/.security-review/execution-log.md`.
-  Passed to Phases 2, 4, 5, and 6, which append how they actually ran (files read
-  with line ranges + full/partial flag, security-relevant files, greps, checks
-  run/skipped — Phase 6 instead lists which phase-output files it read, since it
-  doesn't read target-repo source). See SKILL.md → Execution Log for the format.
+- `--cost` → write a cost report to `{repo_path}/.security-review/cost-report.md`.
+  Passed to every phase that runs, each of which appends its own duration
+  and estimated token consumption (multi-row for Phase 3 and Phase 5, which
+  have named subphases). No file-read tables, coverage, greps, or
+  checks-run detail — renamed from `--debug`, which used to include that.
+  See SKILL.md → Cost Report for the format.
 - `--context <pairs>` → optional inline threat model as comma-separated
   `key=value` pairs. Allowed keys: `deployment_target` (`local`|`public`),
   `auth_required_to_reach` (`true`|`false`).
@@ -320,16 +320,18 @@ which semgrep     && semgrep --version || echo "⚠️  semgrep not found (Phase
 ```bash
 mkdir -p {repo_path}/.security-review
 [ -n "{output_dir}" ] && mkdir -p "{output_dir}"
-# When --debug is set, create an empty execution log for Phases 2/4/5 to append to
-[ "$DEBUG" = true ] && : > {repo_path}/.security-review/execution-log.md
+# When --cost is set, create an empty cost report for every phase to append to
+[ "$COST" = true ] && : > {repo_path}/.security-review/cost-report.md
 ```
 
 **Multi-repo mode:**
 ```bash
 mkdir -p "{output_dir}"
+# Phase 0 + Phase 7 are system-level — their cost-report.md lives at output_dir
+[ "$COST" = true ] && : > "{output_dir}/cost-report.md"
 for each repo in REPOS:
   mkdir -p "{repo_path}/.security-review"
-  [ "$DEBUG" = true ] && : > "{repo_path}/.security-review/execution-log.md"
+  [ "$COST" = true ] && : > "{repo_path}/.security-review/cost-report.md"
 done
 ```
 

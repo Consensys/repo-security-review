@@ -385,6 +385,15 @@ naming the exact cross-repo file:line or topology field that answered the
 question. "Still can't tell" is a legitimate outcome (`NEEDS_REVIEW`); an
 unsupported guess is not.
 
+## Cost Report (only if `--cost` was passed)
+
+If `--cost` is set, append a `## Phase 7` section to
+`{output_dir}/cost-report.md` (not a per-repo path — Phase 7 is system-level)
+following the canonical format in SKILL.md → Cost Report: one row with
+Duration (measured, per SKILL.md → Duration Methodology) and
+Input/Output/Total tokens (estimated, per SKILL.md → Token Consumption
+Methodology). Skip entirely if `--cost` is not set.
+
 ## Final Response (chat output)
 
 Your own closing message — separate from the orchestrator's one-line progress

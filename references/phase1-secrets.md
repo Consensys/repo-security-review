@@ -120,6 +120,14 @@ Write to `{repo_path}/.security-review/phase1-secrets.json`:
   ```
   If deletion fails, log a warning — do not abort the phase.
 
+## Cost Report (only if `--cost` was passed)
+
+If `--cost` is set, append a `## Phase 1` section to
+`{repo_path}/.security-review/cost-report.md` following the canonical format
+in SKILL.md → Cost Report: one row with Duration (measured, per SKILL.md →
+Duration Methodology) and Input/Output/Total tokens (estimated, per SKILL.md
+→ Token Consumption Methodology). Skip entirely if `--cost` is not set.
+
 ## Final Response (chat output)
 
 Your own closing message — separate from the orchestrator's one-line progress

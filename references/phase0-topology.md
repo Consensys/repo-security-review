@@ -139,6 +139,14 @@ Write to `{output_dir}/service-topology.json`:
   callers, etc.) and incorporates this into its architecture analysis.
 - **Phase 7** reads it as the authoritative service graph for cross-repo synthesis.
 
+## Cost Report (only if `--cost` was passed)
+
+If `--cost` is set, append a `## Phase 0` section to
+`{output_dir}/cost-report.md` following the canonical format in SKILL.md →
+Cost Report: one row with Duration (measured, per SKILL.md → Duration
+Methodology) and Input/Output/Total tokens (estimated, per SKILL.md → Token
+Consumption Methodology). Skip entirely if `--cost` is not set.
+
 ## Final Response (chat output)
 
 Your own closing message — separate from the orchestrator's one-line progress

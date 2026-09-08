@@ -35,21 +35,17 @@ since this is a diff and not a snapshot — for **removed security controls**,
 using the smallest amount of full-file reading that still lets each finding
 be judged with real context rather than pattern-matched against bare hunks.
 
-## Execution Log (only if `--debug` was passed)
+## Cost Report (only if `--cost` was passed)
 
-If `--debug` is set, append a `## PR Review` section to
-`{repo_path}/.security-review/execution-log.md` following the canonical
-format in SKILL.md → Execution Log. Record: the resolved diff range, every
-file read with FULL/PARTIAL, every grep run (including the repo-wide auth/
-route greps — these are tool calls, not reads, but should still be logged so
-the auth-inference trail is auditable), and the checks run/skipped table.
+If `--cost` is set, append a `## PR Review` section to
+`{repo_path}/.security-review/cost-report.md` following the canonical format
+in SKILL.md → Cost Report: one row with Duration (measured, per SKILL.md →
+Duration Methodology) and Input/Output/Total tokens (estimated, per SKILL.md
+→ Token Consumption Methodology — chars/4 over what was actually read and
+written). No file-read table, no grep list, no checks-run table — that
+instrumentation was removed from this flag.
 
-At the end, append a `### Token consumption (estimated)` section as in other
-phases, per SKILL.md → Execution Log → Token Consumption Methodology (chars/4
-over what was actually read and written — never a session/budget-counter
-delta, never claimed as "measured").
-
-Skip entirely if `--debug` is not set.
+Skip entirely if `--cost` is not set.
 
 ## Step 0: Resolve the Diff
 

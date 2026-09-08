@@ -56,40 +56,28 @@ The orchestrator owns the final copy step — Phase 6 must not write to
 
 ---
 
-## Execution Log (only if `--debug` was passed)
+## Cost Report (only if `--cost` was passed)
 
-If `--debug` is set, append a `## Phase 6` section to
-`{repo_path}/.security-review/execution-log.md` following the canonical
-format in SKILL.md → Execution Log, using the Phase 6 variant noted there:
-you don't read target-repo source, so skip the "Files read" / "Security-
-relevant files" / "Directory coverage" / "Tools / greps run" / "Checks run /
-skipped" tables entirely. Instead write:
+If `--cost` is set, append a `## Phase 6` section to
+`{repo_path}/.security-review/cost-report.md` following the canonical
+format in SKILL.md → Cost Report:
 
 ```markdown
 ## Phase 6 — Report Builder   (model: {resolved_model})
 
-### Input files read
-- run-metadata.json
-- phase2-architecture.json
-- phase4-owasp.json
-- phase5-validated.json
-{list only the files actually present and read, per Input Files to Read above}
-
-### Token consumption (estimated)
-| Metric | Value |
-|--------|-------|
-| Input tokens (est.) | 15,600 |
-| Output tokens (est.) | 3,100 |
-| Total tokens (est.) | 18,700 |
+| Subphase | Duration | Input tokens (est.) | Output tokens (est.) | Total tokens (est.) |
+|----------|----------|----------------------|-----------------------|-----------------------|
+| Phase 6 | 1m 00s | 15,600 | 3,100 | 18,700 |
 ```
 
-Estimate per SKILL.md → Execution Log → Token Consumption Methodology
-(chars/4 over the input files read above plus `final-report.md` and this
-section itself — never a session/budget-counter delta, never claimed as
-"measured"). `Total tokens` must equal `Input tokens` + `Output tokens` — same
-invariant as every other phase; never add an extra row. Skip this entire
-section if `--debug` is not set — do not create or append to
-`execution-log.md`.
+Duration is measured per SKILL.md → Duration Methodology. Tokens are
+estimated per SKILL.md → Token Consumption Methodology (chars/4 over the
+input files listed in Input Files to Read above, plus `final-report.md` and
+this section itself). `Total tokens` must equal `Input tokens` +
+`Output tokens` — same invariant as every other phase; never add an extra
+row. No "Input files read" list — that instrumentation was removed from
+this flag. Skip this entire section if `--cost` is not set — do not create
+or append to `cost-report.md`.
 
 ---
 

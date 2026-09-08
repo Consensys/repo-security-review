@@ -25,21 +25,17 @@ Two outputs from this phase:
 Use extended thinking if available — architectural analysis requires reasoning
 about intent, missing controls, and design decisions holistically.
 
-## Execution Log (only if `--debug` was passed)
+## Cost Report (only if `--cost` was passed)
 
-If `--debug` is set, append a `## Phase 2` section to
-`{repo_path}/.security-review/execution-log.md` following the canonical format in
-SKILL.md → Execution Log. Record **every file you read** with its line range and
-a `FULL`/`PARTIAL` flag, write each row at the moment you read the file, and list
-which files you classified as security-relevant and whether each was read whole.
+If `--cost` is set, append a `## Phase 2` section to
+`{repo_path}/.security-review/cost-report.md` following the canonical format
+in SKILL.md → Cost Report: one row with Duration (measured, per SKILL.md →
+Duration Methodology) and Input/Output/Total tokens (estimated, per SKILL.md
+→ Token Consumption Methodology — chars/4 over what this phase actually read
+and wrote). No file-read table, no security-relevant-file list, no directory
+coverage — that instrumentation was removed from this flag.
 
-At the end of your phase, **before finishing**, append a `### Token consumption
-(estimated)` section with input tokens, output tokens, and total, estimated per
-SKILL.md → Execution Log → Token Consumption Methodology (chars/4 over what
-this phase actually read and wrote — never a session/budget-counter delta,
-never claimed as "measured").
-
-If `--debug` is not set, skip this entirely. Do not let logging alter your
+If `--cost` is not set, skip this entirely. Do not let logging alter your
 analysis — read whatever you would have read regardless.
 
 ## Step 0: Build the Tech Stack Profile FIRST
@@ -493,11 +489,10 @@ Record the accounting:
   `{ "security_relevant_files": [...], "read_full": [...], "read_chunked": [...], "not_read": [{"file": "...", "reason": "..."}], "directories": [{"dir": "...", "files": N, "read": N, "reason_if_unread": "..."}] }`.
   Include one `directories` entry per directory that contains security-relevant
   files; `reason_if_unread` is required (non-empty) whenever `read` is `0`.
-- If `--debug` is set, this is the roster the execution log's "Security-relevant
-  files" section must reflect — including the `not_read` entries with reasons and
-  the per-directory accounting (every directory with `read: 0` named with its
-  reason). Do not write a summary line that implies fuller coverage than the
-  per-directory roster shows.
+- This `coverage` block is written to `phase2-architecture.json` regardless
+  of `--cost` — it's read downstream by Phase 5 (boundary gate) and Phase 6
+  (scope-limitations line), not gated by any flag. Do not write a summary
+  line that implies fuller coverage than the per-directory roster shows.
 
 ---
 

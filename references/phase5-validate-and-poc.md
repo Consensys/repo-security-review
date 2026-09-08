@@ -101,22 +101,27 @@ is also set (`--runtime` implies `--poc` — see SKILL.md).
 
 ---
 
-## Execution Log (only if `--debug` was passed)
+## Cost Report (only if `--cost` was passed)
 
-If `--debug` is set, append a `## Phase 5` section to
-`{repo_path}/.security-review/execution-log.md` following the canonical format in
-SKILL.md → Execution Log. Since you re-read source independently per finding,
-record each file you open with its line range and a `FULL`/`PARTIAL` flag — this
-is the clearest signal of whether validation re-read the whole implementation or
-only a window. Write rows as you go.
+If `--cost` is set, append a `## Phase 5` section to
+`{repo_path}/.security-review/cost-report.md` following the canonical
+multi-row format in SKILL.md → Cost Report — one row per part that actually
+ran, plus a bolded **Phase 5 Total** row:
 
-At the end of your phase, **before finishing**, append a `### Token consumption
-(estimated)` section with input tokens, output tokens, and total, estimated per
-SKILL.md → Execution Log → Token Consumption Methodology (chars/4 over what
-this phase actually read and wrote — never a session/budget-counter delta,
-never claimed as "measured").
+| Subphase | Duration | Input tokens (est.) | Output tokens (est.) | Total tokens (est.) |
+|---|---|---|---|---|
+| Validation (Part 1) | ... | ... | ... | ... |
+| PoC Generation (Part 2) — only if `--poc` was set | ... | ... | ... | ... |
+| Runtime Validation (Part 3) — only if `--runtime` was set | ... | ... | ... | ... |
+| **Phase 5 Total** | ... | ... | ... | ... |
 
-Skip entirely if `--debug` is not set, and never let logging change your
+Duration is measured per SKILL.md → Duration Methodology (timestamp each
+part separately — Part 1 ends when every finding has a validation verdict,
+Part 2 ends when all PoC files are written, Part 3 ends at teardown). Tokens
+are estimated per SKILL.md → Token Consumption Methodology. No file-read
+table — that instrumentation was removed from this flag.
+
+Skip entirely if `--cost` is not set, and never let logging change your
 validation reads or verdicts.
 
 ## Workflow Per Finding
