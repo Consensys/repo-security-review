@@ -77,7 +77,7 @@ In any Claude Code session (CLI or Desktop), point the skill at a local repo pat
 | `--context <pairs>` | none | Inline threat model to calibrate severity: `deployment_target=local\|public`, `auth_required_to_reach=true\|false`. Softens only — never sharpens. |
 | `--yes` | off | Non-interactive / CI mode — auto-confirms prompts (safety path checks still apply). |
 | `--cost` | off | Write `.security-review/cost-report.md` — duration and estimated token consumption for every phase that ran (and named subphases, e.g. 3b, Phase 5's PoC/Runtime parts). Renamed from `--debug`; no longer includes file-read/coverage/checks detail. |
-| `--sonnet` | off | Experimental A/B flag: runs Phase 2 (architecture) on the Sonnet family instead of Opus, to compare scan quality and token consumption. No effect in `--vendor` or `--pr` mode (both already pin to Sonnet with no Deep tier). |
+| `--sonnet` | off | Experimental A/B flag: runs Phase 2 (architecture) on the Sonnet family instead of Opus, to compare scan quality and token consumption. No effect on Phase 2a (tech-stack detection, already Standard/Sonnet tier) or in `--vendor`/`--pr` mode (both already pin to Sonnet with no Deep tier). |
 | `--skill-security` | off | Opt-in: run Phase 4b (LLM/AI skill security) on a mixed repo that also contains a `SKILL.md`/`.claude/commands/`. Without it, a mixed repo never runs Phase 4b by default — just having those files present isn't reason enough, since ordinary `CLAUDE.md`/`AGENTS.md` docs are common in AI-assisted projects. Redundant on a repo that's *entirely* skill/agent content (Phase 4b auto-runs there regardless) and in `--vendor` mode (already auto-runs it). |
 | `--help` | — | Show usage. |
 
@@ -97,16 +97,19 @@ flowchart TD
 
     subgraph FINDER["FINDER LAYER (sequential subagents)"]
         P1[Phase 1 · Secret Scanning<br/>gitleaks + grep]
-        P2[Phase 2 · Architectural Analysis<br/>deep-tier model · extended thinking]
+        P2a[Phase 2a · Tech Stack Detection<br/>standard-tier model<br/>manifest/grep extraction, not judgment]
         TS[(tech-stack.json)]
+        P2[Phase 2 · Architectural Analysis<br/>deep-tier model · extended thinking<br/>reads tech-stack.json from Phase 2a]
         P3[Phase 3 · Dependency CVEs<br/>osv-scanner]
         P3b[Phase 3b · Reachability Validation]
         P4[Phase 4 · OWASP Code Scan<br/>semgrep + LLM]
         P4b[Phase 4b · LLM / AI Skill Security<br/>standard-tier model<br/>auto-activated for pure skill repos<br/>opt-in via --skill-security for mixed repos]
 
-        P1 --> P2
-        P2 --> TS
-        TS --> P3
+        P1 --> P2a
+        P2a --> TS
+        TS --> P2
+        P2 --> P3
+        TS -. also read by .-> P3
         P3 --> P3b
         P3b --> P4
         TS -. also read by .-> P4
@@ -132,7 +135,7 @@ flowchart TD
     classDef judgment fill:#fff4e6,stroke:#e0883a,color:#1a1a1a
     classDef report fill:#e8f5e9,stroke:#5a9a5a,color:#1a1a1a
     classDef store fill:#f5f5f5,stroke:#888,color:#1a1a1a,stroke-dasharray: 3 3
-    class P1,P2,P3,P3b,P4,P4b finder
+    class P1,P2a,P2,P3,P3b,P4,P4b finder
     class P5 judgment
     class R report
     class TS store

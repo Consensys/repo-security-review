@@ -37,8 +37,8 @@ you read or checks you run.
 
 **tech-stack.json** (required — gates all checks):
 - Read `{repo_path}/.security-review/tech-stack.json`
-- If absent (Phase 2 was skipped), run the lightweight detection from
-  `phase2-architecture.md` Step 0 to reconstruct it before continuing.
+- If absent (Phase 2a was skipped), run the lightweight detection from
+  `phase2a-tech-stack.md` Step 0 to reconstruct it before continuing.
 
 **phase2-architecture.json** (optional — improves prioritization and cuts
 re-derivation cost):

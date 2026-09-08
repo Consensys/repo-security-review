@@ -818,7 +818,7 @@ DBS=$(jq -r '.database_types[]?' $TS)
 ```
 
 If `entry_point` or `listen_port` is missing, re-run the heuristics from
-[phase2-architecture.md](phase2-architecture.md) "Runtime hints" block.
+[phase2a-tech-stack.md](phase2a-tech-stack.md) "Runtime hints" block.
 Use framework defaults if still unknown:
 Flask 5000, Django 8000, FastAPI/Uvicorn 8000, Express 3000, Rails 3000.
 

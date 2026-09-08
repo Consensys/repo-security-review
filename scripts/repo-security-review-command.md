@@ -70,7 +70,7 @@ Options:
                         Keys: deployment_target (local|public),
                         auth_required_to_reach (true|false).
                         data_sensitivity is not a key — always defaults to pii.
-                        README is always read by Phase 2 for context — it is
+                        README is always read by Phase 2a for context — it is
                         not a --context key.
                         All keys optional; omitted keys use strict defaults.
                         Omit the flag entirely for default behavior (no
@@ -106,11 +106,13 @@ Phases you can skip (--skip <name>):
                     passwords, and private keys — including git history.
                     Tools: gitleaks + grep patterns.
 
-  architecture      Phase 2 · Analyzes the codebase at design level:
+  architecture      Phase 2a + Phase 2 (skipping this alias skips both).
+                    Phase 2a builds the tech-stack profile used by all
+                    downstream phases (manifest/grep detection, Standard
+                    tier). Phase 2 analyzes the codebase at design level:
                     trust boundaries, auth model, data flow, infra config,
-                    missing security controls. Also produces the tech-stack
-                    profile used by all downstream phases.
-                    Model: most capable available (tier-dependent).
+                    missing security controls (Deep tier — most capable
+                    available).
 
   dependencies      Phase 3 · Finds known CVEs in project dependencies
                     using lockfiles. Only scans ecosystems present in the
@@ -145,8 +147,9 @@ Cascade rules:
                         then has no effect
   --skip validation   → --poc has no effect (PoC requires a validation verdict)
   --runtime           → implies --poc (runtime validation needs a PoC to run)
-  --skip architecture → also skips skill-security (skill detection
-                        requires tech-stack.json from Phase 2)
+  --skip architecture → skips both Phase 2a and Phase 2, and also skips
+                        skill-security (skill detection requires
+                        tech-stack.json from Phase 2a)
   --skip skill-security + --skill-security together → the skip wins
 
 Phase that always runs:
@@ -226,7 +229,7 @@ Parse `$ARGUMENTS` for:
   `key=value` pairs. Allowed keys: `deployment_target` (`local`|`public`),
   `auth_required_to_reach` (`true`|`false`).
   `data_sensitivity` is not an accepted key — reject it with a clear error.
-  README.md is always read by Phase 2 for context, regardless of `--context`.
+  README.md is always read by Phase 2a for context, regardless of `--context`.
   When set, the orchestrator validates the pairs and writes a normalized
   `threat-model.json` to the working directory. When unset, the skill
   behaves exactly as before — no calibration logic runs anywhere. Any
@@ -254,7 +257,7 @@ Apply cascade rules silently:
 - `--skip validation` → `--poc` has no effect (PoC requires a validation verdict)
 - `--runtime` without `--poc` → treat `--poc` as set (runtime validation needs a PoC to run)
 - `--poc` not set → pass no PoC flag to Phase 5; it validates every finding but writes no PoC files
-- `--skip architecture` → add `skill-security` to skip list (skill detection requires Phase 2 output)
+- `--skip architecture` → also skip Phase 2a and add `skill-security` to skip list (skill detection requires Phase 2a's output)
 
 **Multi-repo validation:** if `--repos` is set with only one path, warn:
 `⚠️  Only one repo path provided to --repos. Use the positional arg for single-repo mode.`
@@ -344,9 +347,10 @@ isolated subagent, passing only file paths (never in-memory content) between pha
 
 ```
 Run Phase 1.
-Run Phase 2.
+Run Phase 2a (writes tech-stack.json).
+Run Phase 2 (reads tech-stack.json from Phase 2a).
 
-After Phase 2: read tech-stack.json.
+After Phase 2a: read tech-stack.json.
   if is_skill_repo: true →
     Print detection evidence and ask for confirmation (see SKILL.md auto-skip cascade).
     If confirmed: add phases 3, 4, 5 to the skip list. Run Phase 4b. Run Phase 6.

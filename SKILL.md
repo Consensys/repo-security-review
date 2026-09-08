@@ -71,7 +71,7 @@ Parse these from `$ARGUMENTS` using the format:
 | `--pr` | none | PR Review mode. `--pr <base>...<head>` (or `--pr <base>` shorthand for `<base>...HEAD`) reviews only a pull request's diff instead of the whole repository — replaces the 6/7-phase pipeline with `references/pr-review.md`, pins to the resolved Standard tier model, and writes `pr-report.md` instead of `final-report.md`. Mutually exclusive with `--repos` and `--vendor`. See [PR Review Mode](#pr-review-mode---pr) below. |
 | `--context` | none | Inline `key=value,key=value` threat model used to calibrate severity. Optional — omit for default behavior. See [`--context`](#--context-threat-model-calibration) below. |
 | `--sonnet` | false | Experimental / comparison flag: overrides Deep tier's primary family from Opus to Sonnet for this run (falls back to Haiku family only if Sonnet is entirely unavailable — Standard tier is unaffected, it already uses Sonnet). Exists to A/B scan quality and token consumption between Opus and Sonnet on Phase 2, not for routine use. Has no effect in Vendor mode (already pinned to Standard/Sonnet, no Deep tier at all) or PR mode (no Phase 2 / Deep tier in that mode). |
-| `--skill-security` | false | Opt-in: run Phase 4b (LLM/AI skill security) on a **mixed repo** (`is_skill_repo: false`) even though Phase 2 detected skill/agent-instruction files (`has_skill_files: true`). Without this flag, a mixed repo never runs Phase 4b by default in the **default report mode** — `has_skill_files: true` alone is a structural signal, not an auto-run trigger, for mixed repos. Redundant (already going to run) on a **pure skill repo** (`is_skill_repo: true`, e.g. this skill's own repo — use `--skip skill-security` to suppress it there instead) and in **Vendor mode** (`--vendor` already auto-runs Phase 4b on `has_skill_files: true` regardless of `is_skill_repo`, since assessing a vendor's AI-tooling risk is the point of that mode — see Vendor Mode below). No effect in PR mode (Phase 4b never runs there). |
+| `--skill-security` | false | Opt-in: run Phase 4b (LLM/AI skill security) on a **mixed repo** (`is_skill_repo: false`) even though Phase 2a detected skill/agent-instruction files (`has_skill_files: true`). Without this flag, a mixed repo never runs Phase 4b by default in the **default report mode** — `has_skill_files: true` alone is a structural signal, not an auto-run trigger, for mixed repos. Redundant (already going to run) on a **pure skill repo** (`is_skill_repo: true`, e.g. this skill's own repo — use `--skip skill-security` to suppress it there instead) and in **Vendor mode** (`--vendor` already auto-runs Phase 4b on `has_skill_files: true` regardless of `is_skill_repo`, since assessing a vendor's AI-tooling risk is the point of that mode — see Vendor Mode below). No effect in PR mode (Phase 4b never runs there). |
 | `--yes` | false | Non-interactive mode. Auto-confirms all user-facing prompts: the `--output` copy confirmation, the Docker runtime gate (`--runtime`), and the pure-skill-repo auto-skip cascade. Path-validation safety checks (rejecting sensitive `--output` destinations) are never bypassed. Use in CI or scripted runs. |
 | `--cost` | false | Write a paste-friendly cost report to `{repo_path}/.security-review/cost-report.md` recording each phase's (and named subphase's) duration and estimated token consumption. Scoped strictly to time/tokens — no file-read tables, coverage, greps, or checks-run detail. Independent of report mode. Renamed from `--debug`. See [Cost Report](#cost-report---cost) below. |
 
@@ -88,7 +88,8 @@ Exception: if `--yes` is set and no repo path is provided, abort with a clear er
 
 **Skip phase aliases**:
 - `secrets` → Phase 1
-- `architecture` → Phase 2
+- `architecture` → Phase 2a + Phase 2 (both — Phase 2a exists only to feed
+  Phase 2; skipping one without the other would leave a dangling dependency)
 - `dependencies` → Phase 3 + 3b
 - `owasp` → Phase 4
 - `validation` → Phase 5 entirely (validation, and PoC if `--poc` was set, both skipped)
@@ -123,17 +124,23 @@ Two tiers are used across all phases:
 
 | Tier | Used by | Purpose |
 |------|---------|---------|
-| **Deep** | Phase 2 | Extended reasoning: architecture |
-| **Standard** | Phase 0, 1, 3, 4, 4b, 5, 6, 7 | Focused analysis: topology extraction, secrets, CVEs, OWASP, LLM/AI skill security, validation, report, cross-repo synthesis |
+| **Deep** | Phase 2 | Extended reasoning: architecture (Security Analysis) |
+| **Standard** | Phase 0, 1, 2a, 3, 4, 4b, 5, 6, 7 | Focused analysis: topology extraction, tech-stack detection, secrets, CVEs, OWASP, LLM/AI skill security, validation, report, cross-repo synthesis |
 
 > **Only Phase 2 uses Deep tier — a deliberate, explicit choice, not a
 > fallback.** Phase 0 was moved to Standard on 2026-07-30 (topology mapping is
 > structural extraction, not security judgment). Phase 4b and Phase 7 were
 > moved to Standard as well, so Deep tier is now reserved for architecture
-> analysis alone. Revisit if LLM-security or cross-repo-synthesis quality
-> regresses without it. `--sonnet` (see Fallback Chains below) can override
-> Phase 2's family to Sonnet for A/B comparison — that's a per-run experiment
-> flag, not a change to this default.
+> analysis alone. **Phase 2a (tech-stack detection) was split out of Phase 2
+> onto Standard tier on 2026-09-08** for the identical reason — it's
+> manifest/grep-based structural extraction (languages, frameworks, capability
+> booleans, skill-file detection, surface classification), not architectural
+> judgment; that judgment is what stays on Phase 2/Deep, consuming Phase 2a's
+> `tech-stack.json` rather than re-deriving it. Revisit if LLM-security or
+> cross-repo-synthesis quality regresses without it. `--sonnet` (see Fallback
+> Chains below) can override Phase 2's family to Sonnet for A/B comparison —
+> that's a per-run experiment flag, not a change to this default. It has no
+> effect on Phase 2a, which is already Standard tier.
 
 #### Fallback Chains
 
@@ -277,6 +284,7 @@ as easily be a different Opus or Sonnet snapshot than shown here).
   "deep_tier_thinking": true,
   "phase0_model":  "claude-sonnet-4-6 (only present in multi-repo mode)",
   "phase1_model":  "claude-sonnet-4-6",
+  "phase2a_model": "claude-sonnet-4-6",
   "phase2_model":  "claude-opus-4-8",
   "phase3_model":  "claude-sonnet-4-6",
   "phase4_model":  "claude-sonnet-4-6",
@@ -349,7 +357,7 @@ enum-valued or boolean), so inline is the only input format.
 (worst-case) for all runs. All findings are scored as if sensitive data is
 always at risk.
 
-> **README is always read.** Phase 2 reads the repo's `README.md` for project
+> **README is always read.** Phase 2a reads the repo's `README.md` for project
 > context on every run, independent of `--context`. It is not a configurable key.
 
 #### Strict defaults — applied to any missing key
@@ -389,7 +397,7 @@ TM_OUT={repo_path}/.security-review/threat-model.json
 #    }
 ```
 
-README handling is not part of `--context`. Phase 2 always reads `README.md`
+README handling is not part of `--context`. Phase 2a always reads `README.md`
 (when present) for project context, whether or not `--context` was passed.
 
 All validation errors must abort the run with a clear message that names the
@@ -426,7 +434,8 @@ When `--vendor` is set:
   one-line notice and continue without it). **Validation (Phase 5) still
   runs** so findings are confirmed, not raw candidates; no `pocs/` output.
 
-Phases that still run: **Phase 2** (architecture — still produces the
+Phases that still run: **Phase 2a** (tech-stack detection — still needed to
+gate Phase 4/4b/5), **Phase 2** (architecture — still produces the
 `project_overview` used for the "What This Tool Does" summary), **Phase 4**
 (OWASP / API Top 10), **Phase 4b** (LLM / AI security — auto-runs whenever
 `has_skill_files: true`, regardless of `is_skill_repo`; unlike the default
@@ -469,7 +478,7 @@ switches the skill from a full-repository audit to a fast, diff-scoped review
 of a single pull request. **This is a distinct mode from the 6/7-phase
 pipeline**, not a variant of it — it runs one reference file,
 `references/pr-review.md`, end to end instead of Phases 1–6. That file reuses
-pieces of Phase 1/2/4/5 logic **by reference**, never duplicated, but bounds
+pieces of Phase 1/2a/2/4/5 logic **by reference**, never duplicated, but bounds
 all full-file reads to the diff plus whatever a repo-wide grep specifically
 points to — see `pr-review.md` → "Confidence and Scope Disclaimers" for
 exactly what is and isn't covered by a PR review.
@@ -495,7 +504,7 @@ and `--cost`.
 PR Review Agent → runs references/pr-review.md
   Step 0: Resolve diff (git diff --name-status, three-dot merge-base range)
   Step 1: Cheap structural context (tech-stack + surface_map — reused from
-          Phase 2 Step 0 and its surface-classification rules, unmodified)
+          Phase 2a Step 0 and its surface-classification rules, unmodified)
   Step 2: Scoped auth/trust context (grep repo-wide for free; read only the
           diff's files plus whatever those greps specifically point to)
   Step 3: Diff-scoped secret scan             [skip alias: secrets]
@@ -565,16 +574,21 @@ Skip any phase present in the `--skip` list.
 
 ```
 Phase 1  → Secret Scanning              [skippable: --skip secrets]
-Phase 2  → Architectural Analysis       [skippable: --skip architecture]
-           └─ Produces: tech_stack profile used by Phase 3 and Phase 4
+Phase 2a → Tech Stack Detection         [skippable: --skip architecture — see below]
+           └─ Standard tier — manifest/grep-based structural extraction, not
+              security judgment (same rationale as Phase 0)
+           └─ Produces: tech_stack profile used by Phase 2, Phase 3, and Phase 4
            └─ Sets has_skill_files and is_skill_repo in tech-stack.json
+Phase 2  → Architectural Analysis       [skippable: --skip architecture]
+           └─ Deep tier — reads tech-stack.json from Phase 2a rather than
+              re-deriving it; does the actual architectural security reasoning
 Phase 3  → Dependency CVE Scanning      [skippable: --skip dependencies]
-           └─ Uses tech_stack from Phase 2 to select correct package ecosystems
+           └─ Uses tech_stack from Phase 2a to select correct package ecosystems
            └─ AUTO-SKIPPED when is_skill_repo: true (no package deps in skill repos)
 Phase 3b → Reachability Validation      [runs as part of Phase 3, not separately skippable]
 Phase 4  → Code-Level OWASP Analysis    [skippable: --skip owasp]
            └─ Uses tech_stack to skip irrelevant checks (no DB → no SQLi, etc.)
-           └─ Uses API flag from Phase 2 to decide whether to run API Top 10
+           └─ Uses API flag from Phase 2a to decide whether to run API Top 10
            └─ AUTO-SKIPPED when is_skill_repo: true (no runtime code to scan)
 Phase 4b → LLM / AI Skill Security      [conditional — see below]
            └─ Reads skill_files list from tech-stack.json
@@ -605,14 +619,16 @@ Phase 5  → Validation (+ optional PoC)  [skippable: --skip validation]
 Phase 6  → Report Builder               [always runs]
 ```
 
-**Auto-skip cascade for skill repositories** (applied after Phase 2 completes):
+**Auto-skip cascade for skill repositories** (applied after Phase 2a
+completes — tech-stack.json exists from that point on, before the more
+expensive Phase 2 Deep-tier dispatch even starts):
 
 ```
-Read tech-stack.json after Phase 2.
+Read tech-stack.json after Phase 2a.
 
 if is_skill_repo: true:
   Print the detection evidence:
-  "ℹ️  Phase 2 detected a skill/agent-instruction repository based on:
+  "ℹ️  Phase 2a detected a skill/agent-instruction repository based on:
        {skill_detection_evidence list}
    Propose: auto-skip Phases 3, 4, 5 (no package deps or runtime code)
             and run Phase 4b (LLM security) instead."
@@ -630,7 +646,7 @@ if is_skill_repo: true:
 
 if has_skill_files: true AND is_skill_repo: false:
   Do not skip any phases. This is a mixed repo — has_skill_files here just
-  means Phase 2 found a SKILL.md or .claude/commands/ alongside real
+  means Phase 2a found a SKILL.md or .claude/commands/ alongside real
   application code; it is not itself a reason to run Phase 4b by default.
 
   If --vendor was passed: run Phase 4b after Phase 4 unconditionally —
@@ -657,7 +673,10 @@ Phase 0  → Service Topology Mapping     [runs once; multi-repo only]
 
 For each repo in --repos (run all phases for repo N before starting repo N+1):
   Phase 1  → Secret Scanning            [skippable: --skip secrets]
+  Phase 2a → Tech Stack Detection       [skippable: --skip architecture — see below]
+             └─ Standard tier; produces tech-stack.json for this repo
   Phase 2  → Architectural Analysis     [skippable: --skip architecture]
+             └─ Deep tier; reads tech-stack.json from Phase 2a
              └─ Receives service-topology.json for system-level context
   Phase 3  → Dependency CVE Scanning    [skippable: --skip dependencies]
   Phase 3b → Reachability Validation
@@ -706,7 +725,7 @@ designated directories. This boundary defends against prompt injection,
 output manipulation, and excessive agency triggered by hostile repo content.
 
 **Boundary 2 — Finder agents → judgment layer (inter-agent context boundary)**
-The finder layer (Phase 2, Phase 4) is isolated from the judgment layer
+The finder layer (Phase 2a, Phase 2, Phase 4) is isolated from the judgment layer
 (Phase 5) by passing only file paths between them. Phase 5 reads its inputs
 as "untrusted data from a potentially overly-confident finder" and re-validates
 from scratch. This boundary defends against a confident but wrong finder
@@ -739,9 +758,9 @@ from having the validator's full reasoning in context while it's still fresh.
      `is_multi_repo` for Phase 5 — true when `--repos` is set; controls
      whether standalone Phase 2 findings validate locally or defer to Phase 7,
      see Phase Execution Order → Multi-repo mode; `--skill-security` and
-     `--vendor` for Phase 2 — decide whether Phase 2 runs the broader
+     `--vendor` for Phase 2a — decide whether Phase 2a runs the broader
      content-pattern search when building `skill_files` for a mixed repo, see
-     `phase2-architecture.md` → Skill detection rules)
+     `phase2a-tech-stack.md` → Skill detection rules)
 
 3. **The orchestrator's only job** is sequencing, path management, and
    printing progress summaries. It must not accumulate findings across phases.
@@ -768,6 +787,7 @@ Read the agent instructions for each phase from `references/` before spawning:
 |-------|---------------|------|
 | 0 (Topology) | `references/phase0-topology.md` | multi-repo only |
 | 1 | `references/phase1-secrets.md` | always (full pipeline) |
+| 2a (Tech Stack Detection) | `references/phase2a-tech-stack.md` | always (full pipeline) — also reused by PR mode's Step 1, unmodified |
 | 2 | `references/phase2-architecture.md` | always (full pipeline) |
 | 3 + 3b | `references/phase3-dependencies.md` | always (full pipeline) |
 | 4 | `references/phase4-owasp.md` | always (full pipeline) |
@@ -785,7 +805,7 @@ Each phase writes its findings to a working directory inside the repo:
 ```
 {repo_path}/.security-review/
 ├── run-metadata.json         ← written by orchestrator before Phase 1; model IDs + tier
-├── tech-stack.json           ← written by Phase 2, read by Phase 3, 4, and 4b
+├── tech-stack.json           ← written by Phase 2a, read by Phase 2, 3, 4, and 4b
 ├── threat-model.json         ← only if --context was provided
 ├── phase1-secrets.json
 ├── phase2-architecture.json
@@ -862,10 +882,11 @@ If the repo already has `phase2-architecture.json` / `phase4-owasp.json` /
 `final-report.md` from a prior full scan, PR mode does not read, write, or
 delete them — the two file sets coexist without interaction.
 
-## Tech Stack Profile (Phase 2 → downstream phases)
+## Tech Stack Profile (Phase 2a → downstream phases)
 
-Phase 2 must write `{repo_path}/.security-review/tech-stack.json` in addition
-to its normal output. This is the key handoff document:
+Phase 2a must write `{repo_path}/.security-review/tech-stack.json` as its
+sole output. This is the key handoff document — Phase 2, Phase 3, Phase 4,
+and Phase 4b all read it:
 
 ```json
 {
@@ -898,10 +919,16 @@ to its normal output. This is the key handoff document:
   "has_skill_files": false,
   "skill_files": [],
   "skill_frameworks": [],
+  "skill_detection_evidence": [],
   "detection": {
     "low_confidence_signals": [],
     "truncated_signals": [],
     "notes": ""
+  },
+  "surface_map": {
+    "classification_confidence": "medium",
+    "classification_confidence_reason": "tests/ directory present with *.spec.ts files",
+    "non_production": []
   }
 }
 ```
@@ -915,10 +942,12 @@ reads it to decide whether a `false` gating boolean is a *confident* negative
 (skip allowed) or a *low-confidence* negative (run the check anyway). A gating
 boolean set `true` only by a dependency-manifest backstop, or set `false` on an
 unrecognized/unsearched stack, must be listed in `low_confidence_signals`. See
-`references/phase2-architecture.md` → "Detection reliability".
+`references/phase2a-tech-stack.md` → "Detection reliability".
 
-If Phase 2 is skipped, Phase 3 and Phase 4 must run their own lightweight
-tech-stack detection before proceeding (see each phase's reference file).
+If Phase 2a is skipped (`--skip architecture` skips both Phase 2a and Phase 2 —
+see Skip phase aliases above), Phase 3 and Phase 4 must run their own
+lightweight tech-stack detection before proceeding (see each phase's
+reference file).
 
 ## Cost Report (`--cost`)
 
@@ -972,8 +1001,8 @@ sums directly; tokens sum per the invariant below):
 Phases with a Total row: **Phase 3** (CVE Scanning / Reachability Validation
 3b), **Phase 5** (Validation / PoC Generation — only if `--poc` was set /
 Runtime Validation — only if `--runtime` was set). Every other phase (0, 1,
-2, 4, 4b, 6, 7) has exactly one row and no Total row — a single row already
-is that phase's total, don't duplicate it.
+2a, 2, 4, 4b, 6, 7) has exactly one row and no Total row — a single row
+already is that phase's total, don't duplicate it.
 
 Keep it factual and terse — this is a cost log, not a narrative. If `--cost`
 is not set, write nothing and do not create the file.
@@ -1060,12 +1089,13 @@ after that repo's Phase 6 finishes, and separately to
 | Phase | Duration | Input tokens (est.) | Output tokens (est.) | Total tokens (est.) |
 |-------|----------|----------------------|-----------------------|-----------------------|
 | Phase 1 | 0m 12s | 3,100 | 900 | 4,000 |
+| Phase 2a | 0m 20s | 8,400 | 1,600 | 10,000 |
 | Phase 2 | 4m 30s | 45,230 | 8,920 | 54,150 |
 | Phase 3 (incl. 3b) | 1m 05s | 18,500 | 3,300 | 21,800 |
 | Phase 4 | 3m 10s | 38,100 | 7,800 | 45,900 |
 | Phase 5 | 2m 05s | 22,400 | 4,200 | 26,600 |
 | Phase 6 | 1m 00s | 15,600 | 3,100 | 18,700 |
-| **TOTAL** | **12m 02s** | **142,930** | **28,220** | **171,150** |
+| **TOTAL** | **12m 22s** | **151,330** | **29,820** | **181,150** |
 ```
 
 > Token figures above are chars/4 estimates per the Token Consumption
@@ -1121,6 +1151,7 @@ skip reason if skipped) is all a progress line may contain:
 
 ```
 ✅ Phase 1 (Secret Scanning) complete
+✅ Phase 2a (Tech Stack Detection) complete
 ✅ Phase 2 (Architectural Analysis) complete
 ⏭️  Phase 3 (Dependency CVE Scanning) skipped — --skip dependencies
 ✅ Phase 4 (Code-Level OWASP Analysis) complete

@@ -11,7 +11,7 @@ pure Python project.
 
 Read `{repo_path}/.security-review/tech-stack.json`.
 
-If that file doesn't exist (Phase 2 was skipped), run lightweight detection
+If that file doesn't exist (Phase 2a was skipped), run lightweight detection
 and **write a minimal substitute** before continuing. Step 2's bash scripts
 open `tech-stack.json` directly and will throw `FileNotFoundError` if it
 is absent.

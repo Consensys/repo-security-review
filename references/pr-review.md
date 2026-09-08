@@ -85,19 +85,20 @@ resolved diff range — nothing to review."
 ## Step 1: Cheap Whole-Repo Structural Context
 
 This step is intentionally **not** a scaled-down Phase 2 — it reuses exactly
-the parts of Phase 2 that are already cheap (glob/manifest-based, no
-per-file content reads), because there's no reason to redo cheap work worse.
+what Phase 2a already does (glob/manifest-based, no per-file content reads),
+because there's no reason to redo cheap work worse.
 
-1. Run the tech-stack detection from `phase2-architecture.md` Step 0
+1. Run the tech-stack detection from `phase2a-tech-stack.md` Step 0
    unchanged, writing `{repo_path}/.security-review/tech-stack.json` if it
    doesn't already exist (skip re-detection if a prior scan already left one).
 2. Run the surface-classification `find`-based rules from
-   `phase2-architecture.md` → "Surface classification rules" unchanged. This
+   `phase2a-tech-stack.md` → "Surface classification rules" unchanged. This
    produces the same `surface_map` shape (`non_production` patterns +
-   `classification_confidence`) — again, no per-file reads, purely path/
-   naming-convention driven. Do **not** run the rest of Phase 2 (Security
-   Analysis narrative, `auth_coverage` full-repo enumeration) — that is the
-   expensive part this mode exists to avoid.
+   `classification_confidence`), written into `tech-stack.json` — again, no
+   per-file reads, purely path/naming-convention driven. Do **not** run
+   Phase 2 (Architecture Analysis's Security Analysis narrative,
+   `auth_coverage` full-repo enumeration) — that is the expensive part this
+   mode exists to avoid.
 
 Both outputs are needed by Step 4 (tech-stack gates check selection;
 surface_map classifies each changed file as production/test/fixture/etc.
