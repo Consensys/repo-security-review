@@ -77,7 +77,7 @@ In any Claude Code session (CLI or Desktop), point the skill at a local repo pat
 | `--context <pairs>` | none | Inline threat model to calibrate severity: `deployment_target=local\|public`, `auth_required_to_reach=true\|false`. Softens only — never sharpens. |
 | `--yes` | off | Non-interactive / CI mode — auto-confirms prompts (safety path checks still apply). |
 | `--cost` | off | Write `.security-review/cost-report.md` — duration and estimated token consumption for every phase that ran (and named subphases, e.g. 3b, Phase 5's PoC/Runtime parts). Renamed from `--debug`; no longer includes file-read/coverage/checks detail. |
-| `--sonnet` | off | Experimental A/B flag: runs Phase 2 (architecture) on the Sonnet family instead of Opus, to compare scan quality and token consumption. No effect on Phase 2a (tech-stack detection, already Standard/Sonnet tier) or in `--vendor`/`--pr` mode (both already pin to Sonnet with no Deep tier). |
+| `--sonnet` | off | Apply Sonnet instead of Opus for phase2 to save some tokens in default scan mode. Often increases false negative and decreases false positive.|
 | `--skill-security` | off | Opt-in: run Phase 4b (LLM/AI skill security) on a mixed repo that also contains a `SKILL.md`/`.claude/commands/`. Without it, a mixed repo never runs Phase 4b by default — just having those files present isn't reason enough, since ordinary `CLAUDE.md`/`AGENTS.md` docs are common in AI-assisted projects. Redundant on a repo that's *entirely* skill/agent content (Phase 4b auto-runs there regardless) and in `--vendor` mode (already auto-runs it). |
 | `--help` | — | Show usage. |
 
