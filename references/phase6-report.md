@@ -141,6 +141,29 @@ Any standalone (non-matched) Phase 2 finding in this fallback path has no
 validation verdict at all — render it in Findings at face value, same as
 today's pre-existing behavior when Phase 5 doesn't run.
 
+### Phase 1 vs Phase 2 (secrets/PII)
+
+Phase 1 (secrets) findings (`S-XXX`) never pass through Phase 5 validation, so
+this match is always derived directly here — the `phase5-validated.json` path
+above does not cover this pair.
+
+Phase 2 is instructed to report an exposed secret or PII value if it happens
+to observe one while reading files for architecture analysis (see
+`phase2-architecture.md` → Security Constraints), which can produce a
+`data_exposure`-category Phase 2 finding describing the same leak Phase 1
+already found. When both ran, check every Phase 2 `data_exposure` finding
+against Phase 1's findings using the same criterion as above (same file +
+overlapping/nearby line range, or an unmistakably identical secret/pattern).
+On a match: treat the Phase 1 finding (`S-XXX`) as canonical — it's the
+dedicated tool's result (gitleaks + regex, git-history-aware) — fold in one
+sentence of Phase 2's architectural framing if it adds context, and omit the
+Phase 2 finding from the unified Findings list.
+
+A Phase 2 `data_exposure` finding with no Phase 1 match is not a duplicate —
+render it at face value. This is the expected case whenever `--skip secrets`
+was used (nothing to match against) or Phase 1's tooling simply didn't cover
+that file/pattern.
+
 ---
 
 ## Report Modes
