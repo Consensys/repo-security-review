@@ -288,9 +288,6 @@ verbatim at the referenced point rather than re-deriving the wording. Modes
 may append a short mode-specific line on top of a fragment (noted inline
 where that happens); the base wording stays the same everywhere it's used.
 
-**Fragment — Severity table footnote:**
-All four severity rows must always appear in the table, even when the count is 0. Never omit a row because its count is zero.
-
 **Fragment — Needs Review table** (Default/Vendor mode):
 {One unified `## Needs Review` section, rendered between Findings and False
 Positives (this ordering — Confirmed, then Needs Review, then Rejected —
@@ -374,7 +371,9 @@ No mention of calibration or context.}
 | 🟡 Medium | N |
 | 🟢 Low | N |
 
-{Fragment: Severity table footnote}
+{All four rows above always render, even when N is 0 — never omit a
+zero-count row. This is an instruction to you; no footnote or note about it
+appears in the actual report.}
 
 **Fix immediately**: {bullet list — P0 and P1 findings only, one line each}
 
@@ -649,7 +648,9 @@ risk if any CRITICAL/HIGH findings exist.}
 | 🟡 Medium | N |
 | 🟢 Low | N |
 
-**All four severity rows must always appear, even when the count is 0.**
+{All four rows above always render, even when N is 0 — never omit a
+zero-count row. This is an instruction to you; no footnote or note about it
+appears in the actual report.}
 
 {If any CRITICAL/HIGH findings exist:}
 **Recommendation**: 🚫 Do not merge until addressed — {one-line reason naming the finding(s)}.
