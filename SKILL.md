@@ -36,6 +36,7 @@ Before running, ensure these CLI tools are available (install if missing):
 - `grype` — supplementary Java/Maven CVE pass. Optional (Java repos only).
 - `poetry` — exports `poetry.lock` so pip-audit can read it. Optional (Poetry projects only).
 - `docker` — runtime PoC validation. Optional (`--runtime` flag only).
+- `curl` — live deployment check. Optional (`--verify-deployment` flag only); present on virtually every system by default.
 
 `npm audit` is not listed — it is bundled with npm and available automatically in any Node.js project.
 
@@ -51,6 +52,7 @@ The user provides:
 2. **Skip flags** (optional): comma-separated phases to skip
 3. **Report output path** (optional): where to write the final report
 4. **Runtime validation** (optional): whether to spin up Docker for PoC testing
+5. **Deployment verification** (optional): a live URL to check for an auth gate/WAF
 
 Parse these from `$ARGUMENTS` using the format:
 ```
@@ -70,9 +72,10 @@ Parse these from `$ARGUMENTS` using the format:
 | `--vendor` | false | Vendor / open-source audit mode. Audits a third-party repo the company is considering adopting; audience is the internal security team, deliverable is an adoption risk judgment (not a fix-list for the vendor). Forces skip of `secrets`, `dependencies`, and `poc`; pins every phase to the resolved Standard tier model (never Opus); and switches Phase 6 to the vendor report format. See [Vendor Mode](#vendor-mode---vendor) below. |
 | `--pr` | none | PR Review mode. `--pr <base>...<head>` (or `--pr <base>` shorthand for `<base>...HEAD`) reviews only a pull request's diff instead of the whole repository — replaces the 6/7-phase pipeline with `references/pr-review.md`, pins to the resolved Standard tier model, and writes `pr-report.md` instead of `final-report.md`. Mutually exclusive with `--repos` and `--vendor`. See [PR Review Mode](#pr-review-mode---pr) below. |
 | `--context` | none | Inline `key=value,key=value` threat model used to calibrate severity. Optional — omit for default behavior. See [`--context`](#--context-threat-model-calibration) below. |
+| `--verify-deployment` | none | Opt-in: `--verify-deployment <url>` sends one live, passive HTTP check to a real deployment URL so Phase 5 can derive `auth_required_to_reach` from an actual observation instead of a declared claim. Gated behind an explicit confirmation prompt (auto-confirmed by `--yes`). No effect in PR mode or when `validation` is skipped. See [Verify Deployment](#verify-deployment---verify-deployment) below. |
 | `--sonnet` | false | Experimental / comparison flag: overrides Deep tier's primary family from Opus to Sonnet for this run (falls back to Haiku family only if Sonnet is entirely unavailable — Standard tier is unaffected, it already uses Sonnet). Exists to A/B scan quality and token consumption between Opus and Sonnet on Phase 2, not for routine use. Has no effect in Vendor mode (already pinned to Standard/Sonnet, no Deep tier at all) or PR mode (no Phase 2 / Deep tier in that mode). |
 | `--skill-security` | false | Opt-in: run Phase 4b (LLM/AI skill security) on a **mixed repo** (`is_skill_repo: false`) even though Phase 2a detected skill/agent-instruction files (`has_skill_files: true`). Without this flag, a mixed repo never runs Phase 4b by default in the **default report mode** — `has_skill_files: true` alone is a structural signal, not an auto-run trigger, for mixed repos. Redundant (already going to run) on a **pure skill repo** (`is_skill_repo: true`, e.g. this skill's own repo — use `--skip skill-security` to suppress it there instead) and in **Vendor mode** (`--vendor` already auto-runs Phase 4b on `has_skill_files: true` regardless of `is_skill_repo`, since assessing a vendor's AI-tooling risk is the point of that mode — see Vendor Mode below). No effect in PR mode (Phase 4b never runs there). |
-| `--yes` | false | Non-interactive mode. Auto-confirms all user-facing prompts: the `--output` copy confirmation, the Docker runtime gate (`--runtime`), and the pure-skill-repo auto-skip cascade. Path-validation safety checks (rejecting sensitive `--output` destinations) are never bypassed. Use in CI or scripted runs. |
+| `--yes` | false | Non-interactive mode. Auto-confirms all user-facing prompts: the `--output` copy confirmation, the Docker runtime gate (`--runtime`), the deployment-verification gate (`--verify-deployment`), and the pure-skill-repo auto-skip cascade. Path-validation safety checks (rejecting sensitive `--output` destinations) are never bypassed. Use in CI or scripted runs. |
 | `--cost` | false | Write a paste-friendly cost report to `{repo_path}/.security-review/cost-report.md` recording each phase's (and named subphase's) duration and estimated token consumption. Scoped strictly to time/tokens — no file-read tables, coverage, greps, or checks-run detail. Independent of report mode. Renamed from `--debug`. See [Cost Report](#cost-report---cost) below. |
 
 If no repo path is provided and `--repos` is not set, ask the user before proceeding.
@@ -336,22 +339,28 @@ that don't find it behave exactly as today.
 
 #### Inline syntax
 
-Comma-separated `key=value` pairs. All four keys are optional and order does
-not matter. Whitespace around `=` and `,` is trimmed.
+Comma-separated `key=value` pairs. The one key is optional; whitespace around
+`=` and `,` is trimmed.
 
 ```
---context deployment_target=local,auth_required_to_reach=true
+--context deployment_target=local
 ```
 
-There is no file-path form. The schema is small and fixed (two keys, both
-enum-valued or boolean), so inline is the only input format.
+There is no file-path form. The schema is a single enum-valued key, so inline
+is the only input format.
+
+> **`auth_required_to_reach` is not a `--context` key.** A user-declared
+> boolean here was found to be unverifiable from repo content alone (see
+> [Verify Deployment](#verify-deployment---verify-deployment) below for why)
+> — it has been replaced by `--verify-deployment <url>`, which derives the
+> value from an actual live check instead of taking a claim at face value.
+> Passing `auth_required_to_reach` as a `--context` pair is rejected.
 
 #### Allowed keys and values
 
 | Key | Allowed values |
 |---|---|
 | `deployment_target` | `local` \| `public` |
-| `auth_required_to_reach` | `true` \| `false` |
 
 `data_sensitivity` is not a user-facing key — it is hardcoded to `pii`
 (worst-case) for all runs. All findings are scored as if sensitive data is
@@ -365,11 +374,13 @@ always at risk.
 | Field | Default | Rationale |
 |---|---|---|
 | `deployment_target` | `public` | Hardest reachable case |
-| `auth_required_to_reach` | `false` | Pessimistic |
 
 **Invariant: defaults are the most pessimistic value for each axis.** A
 user-provided value can only soften severity, never tighten it further.
-`contextual_severity` is never higher than `cvss_base_severity`.
+`contextual_severity` is never higher than `cvss_base_severity`. This applies
+identically to the `auth_required_to_reach` axis even though it is no longer
+set via `--context` — see [Verify Deployment](#verify-deployment---verify-deployment):
+absent a "gated" verification result, it defaults to `false`.
 
 #### Orchestrator steps when `--context` is set
 
@@ -381,19 +392,19 @@ TM_OUT={repo_path}/.security-review/threat-model.json
 # 2. For each pair:
 #    - split on '=' (exactly once); trim whitespace
 #    - reject if not exactly two non-empty parts → "❌ invalid pair: <pair>"
-#    - reject if key not in {deployment_target, auth_required_to_reach}
+#    - reject if key not in {deployment_target}
 #    - reject if key is "data_sensitivity" → "❌ data_sensitivity is not a valid key;
 #      data sensitivity is always treated as pii"
+#    - reject if key is "auth_required_to_reach" → "❌ auth_required_to_reach is not
+#      a --context key; use --verify-deployment <url> instead"
 #    - reject if value not in the allowed list for that key
 #    - reject duplicate keys
 # 3. Fill missing keys with strict defaults above.
-# 4. Coerce auth_required_to_reach value to boolean.
-# 5. Write JSON to $TM_OUT:
+# 4. Write JSON to $TM_OUT:
 #    {
 #      "source": "user",
 #      "deployment_target": "...",
-#      "data_sensitivity": "pii",
-#      "auth_required_to_reach": true|false
+#      "data_sensitivity": "pii"
 #    }
 ```
 
@@ -412,6 +423,132 @@ downstream phases skip all calibration logic.
 `{repo_path}/.security-review/threat-model.json` — present only when
 `--context` was supplied. See per-phase reference files for how each phase
 consumes it.
+
+## Verify Deployment (`--verify-deployment`)
+
+`--verify-deployment <url>` opts into a **single live HTTP check** against a
+real deployment URL, so the `auth_required_to_reach` severity axis is derived
+from an actual observation instead of a user-declared, unverifiable claim
+(which is why that key was removed from `--context` — see above). It runs
+inside **Phase 5**, immediately in Step 0 (Load Context), before any
+finding's Boundary Gate is evaluated — Phase 5 is the only phase that
+consumes the result, so nothing upstream needs to know about it.
+
+### Why this is not part of `--context`
+
+`--context` values are read as passive text and never independently checked
+(other than Phase 2's now-removed drift check, which could only catch a
+declared value contradicted by in-repo code — never an undeclared but real
+external control like platform-level SSO). Actually sending a request to the
+live target is a fundamentally different, active operation — it touches
+infrastructure outside the repo, can appear in the target's access logs, and
+needs explicit authorization the same way `--runtime`'s Docker execution
+does. It gets its own flag and its own confirmation gate rather than being
+folded into `--context`'s inert key=value parsing.
+
+### Confirmation gate (mirrors the `--runtime` Docker gate)
+
+**If `--yes` is NOT set**, Phase 5 prints a confirmation prompt and waits for
+explicit approval before sending anything:
+```
+⚠️  Verifying deployment requires sending a live HTTP request to an external target.
+    URL: {url}
+    This will reach a system outside the repository and may appear in its access logs.
+    Only proceed if you are authorized to test this target.
+    Proceed? [y/N]:
+```
+If the user does not confirm, skip the check entirely, write no
+`deployment-verification.json`, and continue as if `--verify-deployment` had
+not been passed (strict pessimistic default applies).
+
+**If `--yes` IS set**, skip the prompt, print
+`⚠️  Sending live request to {url} for deployment verification (--yes)`, and
+proceed directly — same rationale as the Docker gate: `--yes` is explicit
+consent that this is intentional.
+
+### What the check does
+
+One passive, read-only `GET` with redirects followed — no JavaScript
+execution, no login attempts, no credentials sent:
+```bash
+curl -sL --max-redirs 5 --max-time 15 \
+  -D {repo_path}/.security-review/.verify-headers.txt \
+  -o {repo_path}/.security-review/.verify-body.html \
+  -w '%{http_code} %{url_effective}\n' \
+  -A "repo-security-review-deployment-check/1.0" \
+  "{url}"
+```
+
+Classify from the final status code, final effective URL (post-redirect
+host), response headers, and response body:
+- **`gated`**: final status is 401/403, OR the final host matches a known
+  IdP/SSO domain pattern (`accounts.google.com`, `login.microsoftonline.com`,
+  `*.okta.com`, `*.auth0.com`, `github.com/login`, `*.cloudflareaccess.com`,
+  a platform's own protection interstitial e.g. Vercel's SSO wall), OR the
+  body contains an unmistakable login-form marker with no other plausible
+  explanation.
+- **`waf_present`**: response headers/body match a known WAF challenge
+  signature (`cf-mitigated`, "Just a moment...", "Attention Required! |
+  Cloudflare", Akamai/Sucuri markers). **Record this independently of
+  `gated`** — a WAF filters traffic patterns, it does not by itself require
+  authentication, and must never alone satisfy the `auth_required_to_reach`
+  axis.
+- **`not_gated`**: a plain 200 with no redirect to a known IdP and no login
+  markers.
+- **`inconclusive`**: request failed (timeout, DNS, TLS error, non-HTTP
+  response) or none of the above patterns matched confidently.
+
+Delete `.verify-headers.txt` / `.verify-body.html` after classification —
+they are working state, not report artifacts.
+
+### Output: `deployment-verification.json`
+
+```json
+{
+  "url": "https://example.vercel.app",
+  "checked_at": "2026-09-10T18:04:00Z",
+  "http_status": 302,
+  "final_url": "https://accounts.google.com/o/oauth2/v2/auth?...",
+  "classification": "gated",
+  "waf_present": false,
+  "signals": ["redirected to accounts.google.com (Google OAuth)"],
+  "method": "passive HTTP GET (curl -L), no JavaScript execution",
+  "confirmed_by_user": true
+}
+```
+
+### How Phase 5 uses it
+
+`effective_auth_required` (consumed by the Boundary Gate and the severity
+Axis 2 calculation — see `phase5-validate-and-poc.md`) is `true` **only**
+when `deployment-verification.json` exists and `classification == "gated"`.
+Every other case — file absent (flag not passed, user declined the
+confirmation gate, request failed), or classification `not_gated` /
+`waf_present` / `inconclusive` — resolves to `false`, the strict pessimistic
+default, same as when no context was ever provided.
+
+### Known limitations — state these plainly, never claim more confidence than the method supports
+
+- **Single GET, no JS execution**: a client-side-rendered SPA login redirect
+  (auth decided by JavaScript after a `200` response) will not be detected —
+  this will misclassify as `not_gated`. This is a known false-negative mode,
+  not a claim the deployment is unauthenticated.
+- **Snapshot in time**: the result reflects the deployment's state at the
+  moment of the check, not a durable guarantee. A gate added or removed after
+  the scan is not reflected.
+- **One URL, one path**: verifying `https://example.com/` says nothing about
+  other routes or subdomains — it does not prove every path is equally
+  gated, and does not substitute for Phase 2/4's own analysis of any
+  alternate exposure paths the repo itself documents (e.g. a bypass route
+  committed to config).
+
+### Scope notes
+
+No effect in **PR mode** (no Phase 5 boundary-gate/threat-model concept in
+that mode) or when `validation` is skipped (`--skip validation` — Phase 5
+never runs, so there is nothing to feed the result into). Works normally in
+**Vendor mode** (Phase 5 still runs there; only PoC generation is forced
+off).
 
 ## Vendor Mode (`--vendor`)
 
@@ -751,7 +888,8 @@ from having the validator's full reasoning in context while it's still fresh.
    - Its reference file from `references/`
    - The file paths of its inputs (not the content)
    - The repo path and working directory path
-   - Any flags relevant to it (`--poc` and `--runtime` for Phase 5,
+   - Any flags relevant to it (`--poc`, `--runtime`, and `--verify-deployment`
+     (plus `--yes`, for its confirmation gate) for Phase 5,
      `--vendor` for Phase 6 **and** Phase 7 — selects the vendor report format,
      `--cost` for every phase that runs — each appends its own duration +
      token section to the cost report,
@@ -807,6 +945,7 @@ Each phase writes its findings to a working directory inside the repo:
 ├── run-metadata.json         ← written by orchestrator before Phase 1; model IDs + tier
 ├── tech-stack.json           ← written by Phase 2a, read by Phase 2, 3, 4, and 4b
 ├── threat-model.json         ← only if --context was provided
+├── deployment-verification.json ← only if --verify-deployment was confirmed; written by Phase 5
 ├── phase1-secrets.json
 ├── phase2-architecture.json
 ├── phase3-cves.json

@@ -363,10 +363,12 @@ Write to `{repo_path}/.security-review/phase2-architecture.json`:
 - `poc_needed` is always `false` for architectural findings
 - Reference specific files and line numbers as evidence
 - Be concrete about impact — avoid vague "could lead to security issues"
-- `auth_coverage` is **always produced**, even when `--context` is not passed.
-  Phase 5's boundary gate reads it unconditionally — the gate only fires when
-  `threat-model.json → auth_required_to_reach` is `true`, but Phase 2 must
-  always produce the map so Phase 5 has the data if the flag is set.
+- `auth_coverage` is **always produced**, regardless of `--context` or
+  `--verify-deployment`. Phase 5's boundary gate reads it unconditionally —
+  the gate only fires when Phase 5's own deployment check classifies the
+  target as `gated` (see `SKILL.md` → Verify Deployment), but Phase 2 must
+  always produce the map so Phase 5 has the data ready if that turns out to
+  be the case.
 - When the repo has no network routes (CLI tool, library, pure batch job),
   set `coverage_confidence: "none"` and leave all pattern lists empty.
   Phase 5 will skip the boundary gate entirely when confidence is `none`.
@@ -392,75 +394,23 @@ Write to `{repo_path}/.security-review/phase2-architecture.json`:
 Skip this section entirely if `{repo_path}/.security-review/threat-model.json`
 does not exist. Existing behavior is preserved when no threat model was provided.
 
-When the file is present, read it and check the declared values against what
-the code actually shows. The goal is to prevent a user from silently softening
-findings by declaring a falsely permissive context.
+> **`auth_required_to_reach` drift detection removed (2026-09-10).** This
+> used to be Check 1 here: scan for public routes with no auth, and flag a
+> drift finding if `threat-model.json` declared `auth_required_to_reach=true`
+> anyway. It's gone because `auth_required_to_reach` is no longer a declared
+> `--context` claim to check for drift — it's now a value Phase 5 derives
+> directly from a live check (`--verify-deployment`, see `SKILL.md` → Verify
+> Deployment). There is nothing left for Phase 2 to reconcile against code: a
+> live observation isn't a claim that can silently soften severity the way an
+> unverified declaration could, so the whole "declared vs observed" drift
+> framing this section existed for no longer applies to that axis.
 
-### Check 1: `auth_required_to_reach` drift
-
-If `auth_required_to_reach` is `true`, scan for publicly reachable routes
-with no authentication middleware/decorator:
-
-```bash
-# Look for route definitions without nearby auth decorators
-# (Phase 4 will do deeper analysis; this is a coarse drift check only)
-grep -rniE "@app\.route|@router\.|app\.get\(|app\.post\(|@RequestMapping|\
-def get\(self|def post\(self" {repo_path} \
-  --include="*.py" --include="*.js" --include="*.ts" --include="*.java" \
-  --exclude-dir="node_modules" --exclude-dir=".git" | head -30
-```
-
-For each route, check whether the surrounding 10 lines contain auth markers
-(`@login_required`, `@requires_auth`, `verifyToken`, middleware references,
-etc.). If multiple unauthenticated public routes exist while
-`auth_required_to_reach` is `true`, emit a drift finding.
-
-### Check 2: `deployment_target` — no automatic drift check
-
-There is no reliable code signal for whether something is a local tool or a
-public service. Take this field at face value.
-
-### Drift finding shape
-
-Drift findings are normal Phase 2 findings with category `threat_model_drift`:
-
-```json
-{
-  "id": "A-XXX",
-  "category": "threat_model_drift",
-  "severity": "MEDIUM",
-  "title": "Declared threat model contradicts observed code",
-  "description": "Threat model declares auth_required_to_reach=true, but Phase 2 finds multiple public routes with no auth middleware.",
-  "evidence": ["routes/api.go:L34", "routes/api.go:L67", "routes/api.go:L89"],
-  "impact": "Pre-auth findings have been downgraded by −1 tier, but the service is actually reachable without authentication.",
-  "remediation": "Add auth middleware to all public routes, or set auth_required_to_reach=false in --context.",
-  "poc_needed": false,
-  "drift_dimension": "auth_required_to_reach",
-  "declared": true,
-  "observed": false
-}
-```
-
-### Side effect on the threat model
-
-When drift is detected, write a `drift_overrides` block into `threat-model.json`
-so downstream phases revert that dimension to the strict default for this run:
-
-```json
-{
-  "source": "user",
-  "deployment_target": "public",
-  "data_sensitivity": "pii",
-  "auth_required_to_reach": true,
-  "drift_overrides": {
-    "auth_required_to_reach": false
-  }
-}
-```
-
-Phase 5 reads `drift_overrides` and uses those values (not the declared ones)
-when computing `contextual_severity`. This ensures users cannot silence findings
-by passing a falsely permissive context.
+`threat-model.json` now only carries `deployment_target` (plus the hardcoded
+`data_sensitivity`), and there is no reliable code signal for whether
+something is a local tool or a public service — take `deployment_target` at
+face value, with no drift check. This section is retained only in case a
+future `--context` key needs the same "declared vs observed" treatment
+`auth_required_to_reach` used to get.
 
 ## Final Response (chat output)
 

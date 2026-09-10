@@ -34,6 +34,8 @@ reasoning/conversation, not avoiding their JSON). You receive:
 - The repo path to re-examine code independently
 - The `--runtime` flag (if set)
 - The `--poc` flag (if set) — see below
+- The `--verify-deployment <url>` flag (if set) and the `--yes` flag (whether
+  it auto-confirms the deployment-verification gate) — see Step 0.4
 - `tech-stack.json` path (includes `runtime_hints` used for Dockerfile synthesis)
 - The `is_multi_repo` flag (true when the orchestrator is running in `--repos`
   mode) — see Step 0.5 for how this changes standalone Phase 2 finding handling
@@ -135,7 +137,7 @@ For each finding in the candidate list, execute this sequence in full
 before moving to the next finding:
 
 ```
-0. SURFACE GATE (Step 0 — skip full validation for high-confidence non-production surfaces) → 1. VALIDATE (Steps 1–4) → 2. BOUNDARY GATE (Step 5, only if threat-model.json present with auth_required_to_reach=true) → 3. DECISION → 4. POC (only if confirmed AND --poc is set) → 5. RUNTIME? (per-finding, only if --runtime AND --poc are both set) → 6. WRITE OUTPUTS
+0. SURFACE GATE (Step 0 — skip full validation for high-confidence non-production surfaces) → 1. VALIDATE (Steps 1–4) → 2. BOUNDARY GATE (Step 5, only if deployment-verification.json present with classification: gated — see Step 0.4) → 3. DECISION → 4. POC (only if confirmed AND --poc is set) → 5. RUNTIME? (per-finding, only if --runtime AND --poc are both set) → 6. WRITE OUTPUTS
 ```
 
 Never batch-validate all findings first and then batch-write PoCs. Process
@@ -160,6 +162,61 @@ below) to `findings`, update the running `summary` counts, and — if a PoC was
 generated — append its entry to `phase5-pocs.json → pocs`. Do this before
 moving to the next finding, not deferred to a final pass at the end of the
 loop.
+
+---
+
+## Step 0.4: Verify Deployment (only if `--verify-deployment <url>` was passed)
+
+**Run this once, before Step 0.5, before the per-finding loop begins.** Skip
+entirely if `--verify-deployment` was not passed — proceed straight to Step
+0.5 with no `deployment-verification.json` (Step 5's Boundary Gate then never
+fires, same as today's behavior with no threat model at all).
+
+See `SKILL.md` → Verify Deployment for the full flag rationale, the exact
+confirmation-gate wording, the classification rules, and the
+`deployment-verification.json` schema — this section is only the execution
+recipe.
+
+1. **Confirmation gate first.** If `--yes` is not set, print the
+   confirmation prompt from `SKILL.md` → Verify Deployment and wait for
+   explicit approval before sending anything. If declined, write nothing and
+   proceed to Step 0.5 as if `--verify-deployment` had not been passed. If
+   `--yes` is set, print the one-line auto-confirm notice and proceed
+   directly — identical rationale to the Part 3 Docker gate below.
+
+2. **Send one passive GET:**
+```bash
+DV_OUT={repo_path}/.security-review/deployment-verification.json
+HDR={repo_path}/.security-review/.verify-headers.txt
+BODY={repo_path}/.security-review/.verify-body.html
+
+READ=$(curl -sL --max-redirs 5 --max-time 15 \
+  -D "$HDR" -o "$BODY" \
+  -w '%{http_code} %{url_effective}' \
+  -A "repo-security-review-deployment-check/1.0" \
+  "{verify_deployment_url}" 2>/tmp/verify-deployment.stderr)
+
+HTTP_STATUS=$(echo "$READ" | awk '{print $1}')
+FINAL_URL=$(echo "$READ" | awk '{print $2}')
+```
+If curl fails outright (DNS, TLS, timeout, connection refused), classify
+`inconclusive` immediately and record the stderr text in `signals` — do not
+retry.
+
+3. **Classify** using the rules in `SKILL.md` → Verify Deployment → "What the
+   check does": check `$FINAL_URL`'s host against the known IdP/SSO domain
+   list, `$HTTP_STATUS` for 401/403, and grep `$HDR` / `$BODY` for the
+   WAF-challenge and login-form markers listed there. `waf_present` is
+   recorded independently of `gated` — never let a WAF signature alone
+   satisfy `gated`.
+
+4. **Write `$DV_OUT`** per the schema in `SKILL.md` → Verify Deployment, then
+   delete `$HDR` and `$BODY` — working state, not report artifacts.
+
+`deployment-verification.json`'s `classification` field is the sole input to
+Step 5 (Boundary Gate) and Part 4's severity Axis 2 below —
+`effective_auth_required` is `true` if and only if this file exists and
+`classification == "gated"`.
 
 ---
 
@@ -339,8 +396,8 @@ paths. Note which paths are unprotected.
 
 ### Step 5: Boundary Gate
 
-**Only run this step when `threat-model.json` exists AND `auth_required_to_reach`
-is `true` after applying any `drift_overrides`.** Otherwise skip directly to the
+**Only run this step when `deployment-verification.json` exists (Step 0.4)
+AND its `classification` is `"gated"`.** Otherwise skip directly to the
 Validation Decision.
 
 This gate checks whether the finding's entry point crosses an intended
@@ -350,9 +407,9 @@ unauthenticated actors — it may still be a privilege-escalation or post-auth f
 but it should not be reported as a pre-auth issue.
 
 ```
-1. Load threat-model.json. Apply drift_overrides if present:
-     effective_auth_required = drift_overrides.auth_required_to_reach
-                               ?? threat-model.json.auth_required_to_reach
+1. Load deployment-verification.json (written by Step 0.4):
+     effective_auth_required = (deployment-verification.json exists
+                                 AND classification == "gated")
    If effective_auth_required is false: SKIP this step entirely.
 
 2. Read phase2-architecture.json → auth_coverage.
@@ -959,39 +1016,54 @@ the user can act on — include the actual Docker error in `runtime_notes`.
 
 ---
 
-## Part 4: Contextual Severity Calibration (only if `threat-model.json` exists)
+## Part 4: Contextual Severity Calibration (only if `threat-model.json` or `deployment-verification.json` exists)
 
-Skip this section entirely if `{repo_path}/.security-review/threat-model.json`
-does not exist. When the file is absent, Phase 5 emits `severity` as it always
-has and no calibration columns appear anywhere.
+Skip this section entirely if **neither** `{repo_path}/.security-review/threat-model.json`
+nor `{repo_path}/.security-review/deployment-verification.json` exists. When
+both are absent, Phase 5 emits `severity` as it always has and no calibration
+columns appear anywhere.
 
-When the file is present, every confirmed finding gets **two** severity values:
+The two axes below now have **independent** sources — `threat-model.json`
+for Axis 1 (`deployment_target`), `deployment-verification.json` (written by
+Step 0.4) for Axis 2 (`auth_required_to_reach`). Either file existing alone is
+enough to enter this section; each axis simply applies its own strict default
+when its source file is absent.
+
+When calibration is active, every confirmed finding gets **two** severity values:
 
 - `cvss_base_severity` — the technical severity assuming worst-case exposure.
   This is what Phase 4 already produces. Copy it through unchanged.
 - `contextual_severity` — the same finding's severity after applying the
-  threat-model softeners below.
+  softeners below.
 
 **Invariant: `contextual_severity` is never higher than `cvss_base_severity`.**
 Context softens; it never sharpens.
 
-### Step 1: Load the effective threat model
+### Step 1: Load the effective values
 
-Check whether `{repo_path}/.security-review/threat-model.json` exists.
-If it does **not** exist, skip Steps 2–4 of Part 4 entirely and proceed
-directly to writing output. Do not exit Phase 5.
-
-If it exists, read the effective values (drift overrides take precedence):
+Read each axis from its own source, independently. Neither file's absence
+blocks the other's axis from applying.
 
 ```bash
 TM={repo_path}/.security-review/threat-model.json
+DV={repo_path}/.security-review/deployment-verification.json
 
-# Apply drift overrides if Phase 2 wrote any — these revert specific
-# dimensions to the strict default for this run.
-DEPLOY=$(jq -r '.drift_overrides.deployment_target // .deployment_target' $TM)
-AUTH=$(jq -r '.drift_overrides.auth_required_to_reach // .auth_required_to_reach' $TM)
-# data_sensitivity is always "pii" — hardcoded, not read from the threat model
+# Axis 1 source: threat-model.json. Apply drift_overrides if Phase 2 wrote
+# any (currently only a theoretical future mechanism — see phase2-architecture.md
+# → Threat-Model Drift Detection; deployment_target has no active drift check today).
+DEPLOY="public"
+[ -f "$TM" ] && DEPLOY=$(jq -r '.drift_overrides.deployment_target // .deployment_target' "$TM")
+
+# Axis 2 source: deployment-verification.json (Step 0.4) — not threat-model.json.
+AUTH="false"
+if [ -f "$DV" ] && [ "$(jq -r '.classification' "$DV")" = "gated" ]; then
+  AUTH="true"
+fi
+# data_sensitivity is always "pii" — hardcoded, not read from either file
 ```
+
+If both files are absent, skip Steps 2–4 of Part 4 entirely and proceed
+directly to writing output. Do not exit Phase 5.
 
 ### Step 2: Apply axis softeners
 
@@ -1011,7 +1083,9 @@ Floor: nothing drops below `LOW`. Ceiling: never above `cvss_base_severity`.
 
 Pre-auth findings are those exploitable without first authenticating to the
 service. Phase 4 should flag this; if unclear, check the data flow notes from
-Step 1 of validation.
+Step 1 of validation. Derived from `deployment-verification.json`'s
+`classification` (Step 0.4) — `true` only when `classification == "gated"`,
+never from a user-declared claim.
 
 | Value | Effect on pre-auth findings |
 |---|---|
@@ -1037,16 +1111,16 @@ For each finding, capture WHY the severity changed so the report is auditable:
     "applied": true,
     "softeners": [
       {"axis": "deployment_target", "value": "local", "delta_tiers": -2},
-      {"axis": "auth_required_to_reach", "value": true, "delta_tiers": -1, "reason": "pre-auth finding gated by login"}
+      {"axis": "auth_required_to_reach", "value": true, "delta_tiers": -1, "reason": "pre-auth finding gated by login (verified live via --verify-deployment)"}
     ],
     "drift_overrides_applied": []
   }
 }
 ```
 
-When no threat model exists, omit `cvss_base_severity`, `contextual_severity`,
-and `severity_adjustment` entirely — emit only the unchanged `severity` field
-as today.
+When neither source file exists, omit `cvss_base_severity`,
+`contextual_severity`, and `severity_adjustment` entirely — emit only the
+unchanged `severity` field as today.
 
 ### Step 4: Update summary counters
 
@@ -1057,12 +1131,19 @@ When calibration is active, the summary gains:
   "...existing counters...",
   "calibrated": true,
   "downgraded_count": 0,
-  "drift_overrides_active": ["auth_required_to_reach"]
+  "drift_overrides_active": [],
+  "deployment_verification_classification": "gated"
 }
 ```
 
-When calibration is not active (no threat model), `calibrated: false` and the
-other two fields are absent.
+`drift_overrides_active` lists any active `threat-model.json` drift
+overrides (currently always empty in practice — `deployment_target` has no
+active drift check; see phase2-architecture.md). `deployment_verification_classification`
+mirrors `deployment-verification.json → classification` when that file
+exists (omit the field entirely if `--verify-deployment` was not used).
+
+When calibration is not active (neither file exists), `calibrated: false`
+and the other fields are absent.
 
 ---
 

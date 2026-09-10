@@ -83,19 +83,21 @@ or append to `cost-report.md`.
 
 ## Calibration Step (only when threat-model.json exists)
 
-When `threat-model.json` is present, compute `contextual_severity` for every
-non-secret finding before building the report. Secrets are exempted — rotation
-is always required regardless of context.
+When `threat-model.json` and/or `deployment-verification.json` are present,
+compute `contextual_severity` for every non-secret finding before building
+the report. Secrets are exempted — rotation is always required regardless of
+context. The two source files are independent (see `phase5-validate-and-poc.md`
+→ Part 4) — either one existing alone is enough to trigger calibration.
 
 **Severity tier order**: CRITICAL → HIGH → MEDIUM → LOW.
 Floor: LOW (nothing drops below). Ceiling: base severity (context never sharpens).
 
 Apply softeners:
 
-| Softener | Applies to |
-|----------|-----------|
-| `deployment_target: local` (−2 tiers) | all findings |
-| `auth_required_to_reach: true` (−1 tier) | pre-auth findings only (findings that survived the Phase 5 boundary gate) |
+| Softener | Applies to | Source |
+|----------|-----------|--------|
+| `deployment_target: local` (−2 tiers) | all findings | `threat-model.json` (`--context`) |
+| `auth_required_to_reach: true` (−1 tier) | pre-auth findings only (findings that survived the Phase 5 boundary gate) | `deployment-verification.json` (`--verify-deployment`, `classification: gated`) — never a declared claim |
 
 **How calibration surfaces in the report:** `contextual_severity` is the
 displayed severity with no annotation. The dev team sees effective risk — no
@@ -324,9 +326,10 @@ run):
 (Vendor mode uses its own adopter-framed variant of this part — see Vendor Report Structure.)
 
 *Part C — Post-Auth Code Vulnerabilities* (`validation_status: BOUNDARY_NOT_CROSSED`,
-only occurs when `--context auth_required_to_reach=true` was set):
+only occurs when `--verify-deployment` confirmed the deployment is gated —
+`deployment-verification.json → classification: gated`):
 
-> Vulnerabilities confirmed in code but not reachable by unauthenticated actors per Phase 2 boundary analysis. Real code defects — excluded from the main findings list because the effective threat model (`auth_required_to_reach=true`) places them behind a verified auth gate. If that auth gate is ever bypassed, these become immediately exploitable.
+> Vulnerabilities confirmed in code but not reachable by unauthenticated actors per Phase 2 boundary analysis. Real code defects — excluded from the main findings list because a live check of the deployment (`--verify-deployment`) found it sits behind a verified auth gate. If that auth gate is ever bypassed, these become immediately exploitable.
 
 | ID | Type | File | Auth Gate | Action |
 |----|------|------|-----------|--------|

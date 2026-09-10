@@ -51,11 +51,12 @@ Options:
   --runtime             Enable Docker-based runtime PoC validation. Implies
                         --poc.
   --yes                 Non-interactive / CI mode. Auto-confirms all prompts:
-                        the --output copy gate, the Docker runtime gate, and
-                        the pure-skill-repo auto-skip cascade. Path-validation
-                        safety checks (sensitive --output destinations) are
-                        never bypassed. Requires a repo path or --repos —
-                        aborts if neither is provided.
+                        the --output copy gate, the Docker runtime gate, the
+                        deployment-verification gate (--verify-deployment),
+                        and the pure-skill-repo auto-skip cascade.
+                        Path-validation safety checks (sensitive --output
+                        destinations) are never bypassed. Requires a repo
+                        path or --repos — aborts if neither is provided.
   --cost                Write a cost report to
                         <repo>/.security-review/cost-report.md: duration and
                         estimated token consumption for every phase that ran,
@@ -67,18 +68,31 @@ Options:
                         analysis.
   --context <pairs>     Optional inline threat model used to calibrate
                         severity. Format: comma-separated key=value pairs.
-                        Keys: deployment_target (local|public),
-                        auth_required_to_reach (true|false).
+                        Keys: deployment_target (local|public).
                         data_sensitivity is not a key — always defaults to pii.
+                        auth_required_to_reach is not a key either — it was
+                        removed because a user-declared claim about it can't
+                        be verified from repo content; use --verify-deployment
+                        <url> instead, which derives it from a live check.
                         README is always read by Phase 2a for context — it is
                         not a --context key.
                         All keys optional; omitted keys use strict defaults.
                         Omit the flag entirely for default behavior (no
                         calibration).
-                        Examples:
+                        Example:
                         --context deployment_target=local
-                        --context auth_required_to_reach=true
-                        --context deployment_target=local,auth_required_to_reach=true
+  --verify-deployment <url>
+                        Opt-in: send one live, passive HTTP GET to a real
+                        deployment URL so Phase 5 derives auth_required_to_reach
+                        from an actual observation (login/SSO redirect, 401/403,
+                        WAF challenge) instead of a declared claim. Runs inside
+                        Phase 5 (Step 0.4), gated behind an explicit
+                        confirmation prompt before anything is sent (--yes
+                        auto-confirms, same as the --runtime Docker gate).
+                        Writes <repo>/.security-review/deployment-verification.json.
+                        No effect in --pr mode or when validation is skipped.
+                        Example:
+                        --verify-deployment https://app.example.com
   --sonnet              Experimental: overrides Phase 2 (Deep tier) from Opus
                         to Sonnet family for this run, to A/B scan quality
                         and token consumption. Standard tier is unaffected
@@ -185,8 +199,8 @@ Examples:
   # Full review with severity calibrated to a local CLI tool
   /repo-security-review ~/repos/my-service --context deployment_target=local
 
-  # Full review calibrated to an internal (auth-required) service
-  /repo-security-review ~/repos/my-service --context auth_required_to_reach=true
+  # Full review, verifying the live deployment is actually auth-gated
+  /repo-security-review ~/repos/my-service --verify-deployment https://my-service.example.com
 
   # Multi-repo: review three microservices and get a system-level report
   /repo-security-review --repos ~/svcs/auth,~/svcs/gateway,~/svcs/users --output ~/reports/my-system
@@ -226,15 +240,25 @@ Parse `$ARGUMENTS` for:
   checks-run detail — renamed from `--debug`, which used to include that.
   See SKILL.md → Cost Report for the format.
 - `--context <pairs>` → optional inline threat model as comma-separated
-  `key=value` pairs. Allowed keys: `deployment_target` (`local`|`public`),
-  `auth_required_to_reach` (`true`|`false`).
+  `key=value` pairs. Allowed key: `deployment_target` (`local`|`public`).
   `data_sensitivity` is not an accepted key — reject it with a clear error.
+  `auth_required_to_reach` is not an accepted key either — reject it and
+  point to `--verify-deployment` instead (a declared claim here can't be
+  verified from repo content; see below).
   README.md is always read by Phase 2a for context, regardless of `--context`.
   When set, the orchestrator validates the pairs and writes a normalized
   `threat-model.json` to the working directory. When unset, the skill
   behaves exactly as before — no calibration logic runs anywhere. Any
   unknown key, unknown enum value, malformed pair, or duplicate key aborts
   the run with a clear error message.
+- `--verify-deployment <url>` → opt-in: Phase 5 (Step 0.4) sends one live,
+  passive HTTP GET to `<url>`, gated behind an explicit confirmation prompt
+  (auto-confirmed by `--yes`, same as the Docker runtime gate). Classifies
+  the result as `gated` / `waf_present` / `not_gated` / `inconclusive` and
+  writes `deployment-verification.json`. `auth_required_to_reach` for
+  Phase 5's Boundary Gate and severity Axis 2 is `true` only when this file
+  exists and `classification == "gated"`. No effect in `--pr` mode or when
+  `validation` is skipped.
 - `--sonnet` → experimental: for this run, Phase 2 (Deep tier) resolves
   against the Sonnet family instead of Opus (falls back to Haiku only if
   Sonnet is entirely unavailable), so quality/token consumption can be
@@ -315,6 +339,8 @@ which osv-scanner                      || echo "⚠️  osv-scanner not found (P
 which semgrep     && semgrep --version || echo "⚠️  semgrep not found (Phase 4 limited)"
 [ "$RUNTIME" = true ] && \
   { which docker && docker --version   || echo "⚠️  docker not found (runtime validation disabled)"; }
+[ -n "$VERIFY_DEPLOYMENT_URL" ] && \
+  { which curl && curl --version | head -1 || echo "⚠️  curl not found (--verify-deployment disabled)"; }
 ```
 
 ## Step 6: Create working directories
@@ -369,7 +395,9 @@ After Phase 2a: read tech-stack.json.
       else →
         Print "ℹ️  Skill files detected but --skill-security was not passed — Phase 4b skipped by default."
         Do not run Phase 4b.
-    Run Phase 5 (unless skipped).
+    Run Phase 5 (unless skipped) — passes --verify-deployment's URL and the
+      --yes flag if set; Phase 5's own Step 0.4 handles the confirmation
+      gate and the live check before its per-finding loop begins.
     Run Phase 6.
 ```
 
