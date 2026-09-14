@@ -92,17 +92,6 @@ re-derivation cost):
   actively reachable.
 - If absent (Phase 3 was skipped), continue without it.
 
-**Codebase size** — used by the multi-pass decision below:
-```bash
-SOURCE_FILES=$(find {repo_path} \( \
-  -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.tsx" \
-  -o -name "*.go" -o -name "*.java" -o -name "*.rb" -o -name "*.php" \
-  -o -name "*.cs" -o -name "*.rs" \
-\) -not -path "*/.git/*" -not -path "*/node_modules/*" \
-   -not -path "*/vendor/*"  -not -path "*/dist/*" -not -path "*/build/*" \
-| wc -l | tr -d ' ')
-```
-
 ## Step 1: Determine Which Checks to Run
 
 Use tech-stack.json to build your check list BEFORE scanning. Log what you're
@@ -189,123 +178,17 @@ Every skip line must state that the negative was confident. Every ⚠️ line na
 the signal and why it was treated as low-confidence. This makes the coverage
 decision auditable in the report.
 
-### Multi-Pass Decision
-
-Enable multi-pass if **and only if**:
-
-| Criterion | Threshold | Rationale |
-|-----------|-----------|-----------|
-| `SOURCE_FILES` | `> 200` | Codebase too large for one reliable pass — this is a coverage/attention-span limit on examining hundreds of files in one continuous pass, not a hedge against the model under-reporting what it noticed |
-
-> **Removed as of 2026-09-08**: `APPLICABLE_CHECKS >= 10` ("wide attack
-> surface") and `PHASE2_HIGH_CRITICAL >= 2` ("structural security debt")
-> used to also trigger multi-pass. Evidence across 3 real multi-pass runs
-> (all triggered by these two criteria, none by `SOURCE_FILES > 200`) showed
-> round 1 alone captured 100%, 100%, and 9/10 (with the 10th folded into an
-> existing finding's family, not a new class) of the final finding set —
-> every subsequent round was dry. These two criteria measure "there's a lot
-> to look for," not "a single pass will miss something," and a thorough
-> model pass already covers the former. `SOURCE_FILES > 200` remains the
-> sole trigger because it targets the latter — genuine attention-span
-> pressure across a large file count — which these samples didn't test
-> (none exceeded 200 files) and so hasn't been ruled out.
-
-Log the outcome:
-```
-# Criterion met:
-🔁 Multi-pass enabled — {source_files} source files > 200
-   Will run until dry, max 2 rounds.
-
-# Criterion not met:
-▶️  Single-pass — {source_files} files (<= 200)
-```
-
-## Multi-Pass Execution
-
-**If single-pass:** skip this section and proceed directly to Step 2. Run it once.
-
-**If multi-pass:** Steps 2 and 3 run as a loop. Track the following state across rounds:
-
-| Variable | Initial value | Description |
-|----------|--------------|-------------|
-| `ROUND` | 1 | Current round number |
-| `DRY_ROUNDS` | 0 | Consecutive rounds with zero new findings |
-| `COVERED_FILES` | empty set | All files examined across all rounds |
-| `ALL_FINDING_KEYS` | empty set | Dedup keys: `(file, line_start, vulnerability_type)` |
-| `NEW_THIS_ROUND` | 0 | New findings added in the current round |
-
-**Durability — persist this state to disk, don't rely on conversational
-memory across rounds.** A multi-pass run (up to 2 rounds, potentially hundreds
-of files) is exactly the kind of long-running work a context-compaction event
-can hit mid-loop; a compacted summary is unlikely to precisely reconstruct
-"which exact files were covered" or the finding objects already accumulated.
-Write `{repo_path}/.security-review/.phase4-multipass-state.json` after every
-round:
-```json
-{
-  "round": 2,
-  "dry_rounds": 0,
-  "covered_files": ["src/a.go", "src/b.go"],
-  "finding_keys": ["src/a.go:42:sql-injection"],
-  "findings_so_far": [ /* full finding objects accumulated across all rounds so far */ ]
-}
-```
-At the start of **every** round (including round 1, in case a prior attempt at
-this phase left state behind), read this file if it exists and resume from its
-values instead of trusting only what's in context. This makes each round begin
-from a disk-verified state regardless of whether compaction touched the
-conversation in between.
-
-**Each round:**
-
-1. Run Steps 2 and 3.
-   - **Round 1**: analyze the full codebase normally.
-   - **Round 2**: focus on files not yet in `COVERED_FILES` and on check
-     categories that produced findings last round (examine adjacent files and
-     unexplored patterns for those categories). Do not re-examine files already
-     in `COVERED_FILES` unless a prior finding points directly into them.
-
-2. Count findings whose `(file, line_start, vulnerability_type)` key is not
-   already in `ALL_FINDING_KEYS` → set `NEW_THIS_ROUND`.
-
-3. Update `COVERED_FILES`, `ALL_FINDING_KEYS`, and `findings_so_far` with this
-   round's results, then **immediately overwrite
-   `.phase4-multipass-state.json` with the updated state** — do not defer this
-   write until the loop ends.
-
-4. Log the round outcome:
-   ```
-   🔁 Round {N} complete — {NEW_THIS_ROUND} new findings ({total_so_far} total across all rounds)
-   ```
-
-5. If `NEW_THIS_ROUND == 0`: increment `DRY_ROUNDS`. Otherwise reset `DRY_ROUNDS` to 0.
-
-6. **Stop** if `DRY_ROUNDS >= 1` OR `ROUND >= 2`. Log:
-   ```
-   ✅ Multi-pass complete — {N} round(s), {total} findings
-   ```
-   Then proceed to Output Format.
-
-   > **Changed as of 2026-09-08** (from `DRY_ROUNDS >= 2` OR `ROUND >= 3`,
-   > i.e. max 3 rounds requiring 2 consecutive dry rounds to stop early):
-   > across every real multi-pass run reviewed, round 1 was never dry
-   > (it's the full-codebase pass) and round 2 was dry in 100% of samples —
-   > meaning the old rule always had to run a 3rd round just to confirm a
-   > 2nd consecutive dry round, and that 3rd round was itself dry every
-   > time it ran. A 2-round cap with a single dry round as the early-stop
-   > signal reaches the same outcome for less cost; it still allows an
-   > (unlikely) round-1-dry case to stop immediately rather than wasting
-   > round 2.
-
-7. Otherwise increment `ROUND` and repeat from step 1.
-
-Build the final `findings` array from `.phase4-multipass-state.json →
-findings_so_far` (its content already reflects every round, deduplicated as
-each round updated it) — not from an in-context recollection of all rounds.
-Deduplicate by `(file, line_start, vulnerability_type)` — keep the entry with
-the higher severity if the same location appears more than once. Delete
-`.phase4-multipass-state.json` after `phase4-owasp.json` is written
-successfully; it is working state, not a report artifact.
+> **Multi-pass removed entirely (2026-09-14).** Phase 4 used to run a second
+> pass on codebases over 200 source files, on the theory that a single
+> continuous pass couldn't reliably cover that many files. It never paid for
+> itself: across every real run checked — the original 3-sample review that
+> narrowed the trigger down to `SOURCE_FILES > 200` alone (2026-09-08), and
+> every subsequent run against a repo over that threshold since — round 1
+> alone consistently captured the full finding set; round 2 was dry every
+> single time, with no exception found. Phase 4 now always runs a single
+> pass, regardless of codebase size. Revisit only if a future run is found
+> where a genuine finding was missed that a second pass would have caught —
+> no such case has occurred yet.
 
 ## Step 2: Run Semgrep (scoped to relevant rules)
 
@@ -969,11 +852,6 @@ Write to `{repo_path}/.security-review/phase4-owasp.json`:
 ```json
 {
   "phase": "owasp_analysis",
-  "multi_pass": {
-    "enabled": true,
-    "rounds_completed": 2,
-    "trigger_reasons": ["source_files=847", "applicable_checks=12"]
-  },
   "checks_run": ["A01", "A02", "A03-SQLi", "A07", "A09", "API1", "API2"],
   "checks_run_reduced_confidence": ["A08-Deser"],
   "checks_skipped": [

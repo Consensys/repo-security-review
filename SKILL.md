@@ -1099,11 +1099,7 @@ Each phase writes its findings to a working directory inside the repo:
 ├── phase2-architecture.json
 ├── phase3-cves.json
 ├── phase3b-reachability.json
-├── phase4-owasp.json
-├── .phase4-multipass-state.json ← transient; only exists mid-run if multi-pass
-│                                   was triggered, deleted once phase4-owasp.json
-│                                   is written. Present only if a run was
-│                                   interrupted mid-multi-pass.
+├── phase4-owasp.json         ← always single-pass (multi-pass removed 2026-09-14 — round 2 was dry in every real run checked)
 ├── phase-llm-security.json   ← only if Phase 4b ran (is_skill_repo: true, or
 │                                mixed repo with --skill-security/--vendor)
 ├── phase5-validated.json
