@@ -480,21 +480,41 @@ curl -sL --max-redirs 5 --max-time 15 \
 ```
 
 Classify from the final status code, final effective URL (post-redirect
-host), response headers, and response body:
-- **`gated`**: final status is 401/403, OR the final host matches a known
-  IdP/SSO domain pattern (`accounts.google.com`, `login.microsoftonline.com`,
-  `*.okta.com`, `*.auth0.com`, `github.com/login`, `*.cloudflareaccess.com`,
-  a platform's own protection interstitial e.g. Vercel's SSO wall), OR the
-  body contains an unmistakable login-form marker with no other plausible
-  explanation.
+host **and path**), response headers, and response body:
+- **`gated`**: any of —
+  - final status is 401/403;
+  - the final URL's **host** matches a known external IdP/SSO domain pattern
+    (`accounts.google.com`, `login.microsoftonline.com`, `*.okta.com`,
+    `*.auth0.com`, `github.com/login`, `*.cloudflareaccess.com`, a platform's
+    own protection interstitial e.g. Vercel's SSO wall);
+  - the final URL's **path** (host unchanged — same-origin) *contains* one of
+    these segments, as a substring, anywhere in the path (case-insensitive —
+    covers nested paths like `/accounts/login/` or `/app/sso`, not just an
+    exact match on the whole path): `login`, `signin`, `sign-in`, `sso`,
+    `/auth`, `authenticate`, `oauth`, `session/new`. **This is not redundant
+    with the host check above** — it catches the common case of an app fronting Okta/SAML/OIDC
+    through its *own* login page rather than redirecting the browser to an
+    external IdP domain at the HTTP layer (e.g. a Django app with
+    `LOGIN_URL = "/login/"`: unauthenticated GET → `302` to
+    `/login/?next=/` → `200`, entirely on the original host, Okta only
+    appears once the user clicks through). A domain-only check misses this
+    every time — confirmed against a live example (`GET /` → 301 https
+    upgrade → 302 to `/login/?next=/` → 200, final host identical to the
+    request, body containing "Okta"/"Login"/"sign-in") that a domain-only
+    rule classified as `not_gated`, the wrong answer.
+  - the final body contains a concrete auth-form signal: a
+    `<input type="password"` field, OR an IdP/SSO keyword ("Okta", "SAML",
+    "Single Sign-On", "OIDC", "Auth0", "Azure AD") co-occurring with a
+    sign-in verb ("Sign in", "Log in", "Continue to"). Record the specific
+    matched string in `signals` — never just "login markers found."
 - **`waf_present`**: response headers/body match a known WAF challenge
   signature (`cf-mitigated`, "Just a moment...", "Attention Required! |
   Cloudflare", Akamai/Sucuri markers). **Record this independently of
   `gated`** — a WAF filters traffic patterns, it does not by itself require
   authentication, and must never alone satisfy the `auth_required_to_reach`
   axis.
-- **`not_gated`**: a plain 200 with no redirect to a known IdP and no login
-  markers.
+- **`not_gated`**: a plain 200, same-origin, non-login-shaped final path, no
+  known IdP host, and none of the body markers above.
 - **`inconclusive`**: request failed (timeout, DNS, TLS error, non-HTTP
   response) or none of the above patterns matched confidently.
 
@@ -533,6 +553,13 @@ default, same as when no context was ever provided.
   (auth decided by JavaScript after a `200` response) will not be detected —
   this will misclassify as `not_gated`. This is a known false-negative mode,
   not a claim the deployment is unauthenticated.
+- **Login-path pattern list is finite**: the same-origin login-path check
+  (above) covers the common names (`login`, `signin`, `sso`, `/auth`, ...)
+  but a custom path outside that list (e.g. `/enter`, `/portal`,
+  a company-specific route name) will not match and falls through to the
+  body-marker check; if that also finds nothing recognizable, the result is
+  `not_gated` even though a gate exists. Same false-negative mode as above,
+  just a different trigger.
 - **Snapshot in time**: the result reflects the deployment's state at the
   moment of the check, not a durable guarantee. A gate added or removed after
   the scan is not reflected.

@@ -204,11 +204,19 @@ If curl fails outright (DNS, TLS, timeout, connection refused), classify
 retry.
 
 3. **Classify** using the rules in `SKILL.md` → Verify Deployment → "What the
-   check does": check `$FINAL_URL`'s host against the known IdP/SSO domain
-   list, `$HTTP_STATUS` for 401/403, and grep `$HDR` / `$BODY` for the
-   WAF-challenge and login-form markers listed there. `waf_present` is
-   recorded independently of `gated` — never let a WAF signature alone
-   satisfy `gated`.
+   check does": check `$HTTP_STATUS` for 401/403, `$FINAL_URL`'s **host**
+   against the known IdP/SSO domain list, `$FINAL_URL`'s **path** (even when
+   the host is unchanged) against the common login-path patterns
+   (`/login`, `/signin`, `/sso`, `/auth`, `/authenticate`, `/oauth`, ...),
+   and grep `$HDR` / `$BODY` for the WAF-challenge and concrete auth-form
+   markers listed there (password input field, or an IdP keyword + sign-in
+   verb co-occurrence). **Do not skip the same-origin login-path check** —
+   an app that fronts SSO through its own `/login` page (redirecting there
+   without ever touching an external IdP domain at the HTTP layer) is a real,
+   common pattern that the host-only check misses entirely; treating a
+   same-origin login-path redirect as `not_gated` is a confirmed false
+   negative, not a safe default. `waf_present` is recorded independently of
+   `gated` — never let a WAF signature alone satisfy `gated`.
 
 4. **Write `$DV_OUT`** per the schema in `SKILL.md` → Verify Deployment, then
    delete `$HDR` and `$BODY` — working state, not report artifacts.
