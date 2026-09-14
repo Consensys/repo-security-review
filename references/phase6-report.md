@@ -97,7 +97,7 @@ Apply softeners:
 | Softener | Applies to | Source |
 |----------|-----------|--------|
 | `deployment_target: local` (−2 tiers) | all findings | `threat-model.json` (`--context`) |
-| `auth_required_to_reach: true` (−1 tier) | pre-auth findings only (findings that survived the Phase 5 boundary gate) | `deployment-verification.json` (`--verify-deployment`, `classification: gated`) — never a declared claim |
+| `auth_required_to_reach: true` (−1 tier) | pre-auth findings with a genuine network entry point only (findings that survived the Phase 5 boundary gate) — never findings with `boundary_gate.ran: false` (hardcoded secrets, crypto choices, CI/CD injection, etc. — the auth wall doesn't gate their exposure) | `deployment-verification.json` (`--verify-deployment`, `classification: gated`) — never a declared claim |
 
 **How calibration surfaces in the report:** `contextual_severity` is the
 displayed severity with no annotation. The dev team sees effective risk — no

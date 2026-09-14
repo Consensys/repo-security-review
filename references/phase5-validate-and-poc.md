@@ -539,10 +539,24 @@ but it should not be reported as a pre-auth issue.
    If absent or coverage_confidence is "none": SKIP (annotate finding with
    "boundary status unknown — auth_coverage absent or not applicable").
 
+2.5. **Not every finding has a network entry point — don't manufacture one.**
+   A hardcoded secret, a weak crypto algorithm choice, a CI/CD YAML
+   injection, a missing audit log, or a missing security header with no
+   specific route context is not reached *through* the deployment's HTTP
+   surface at all — an SSO wall in front of the app has no bearing on
+   whether a secret is sitting in the repo or a workflow file is
+   injectable. If the finding is one of these — no HTTP/RPC/API surface is
+   involved in reaching it — **skip this step entirely**: set
+   `boundary_gate: {"ran": false, "reason": "no network entry point — this
+   finding type is not reached through the deployment's auth wall"}` and
+   move on to the Validation Decision. Do not force Step 3 below to derive
+   a route for a finding that structurally doesn't have one.
+
 3. Identify the finding's entry point: use `data_flow.entrypoint` (the HTTP
    method + path, or equivalent external input surface) as established in
    Step 1's trace. If `data_flow.entrypoint` is absent, derive it from Phase 4's
-   `file`/`line_start` by reading the surrounding route registration. Record the
+   `file`/`line_start` by reading the surrounding route registration — only
+   when the finding genuinely has one to find (see 2.5). Record the
    confirmed entry point as `entry_point` in `boundary_gate`.
 
 4. Classify the entry point against auth_coverage:
@@ -1378,15 +1392,38 @@ Floor: nothing drops below `LOW`. Ceiling: never above `cvss_base_severity`.
 | `public` | no change (default) | all findings |
 | `local` | −2 tiers | all findings |
 
-#### Axis 2: `auth_required_to_reach` (only for pre-auth findings)
+#### Axis 2: `auth_required_to_reach` (only for pre-auth findings **with a
+genuine network entry point**)
 
-Pre-auth findings are those exploitable without first authenticating to the
-service. Phase 4 should flag this; if unclear, check the data flow notes from
-Step 1 of validation. Derived from `deployment-verification.json`'s
-`classification` (Step 0.4) — `true` only when `classification == "gated"`,
-never from a user-declared claim.
+Derived from `deployment-verification.json`'s `classification` (Step 0.4) —
+`true` only when `classification == "gated"`, never from a user-declared
+claim.
 
-| Value | Effect on pre-auth findings |
+**This axis is not a blanket discount for every finding once a gate is
+detected.** It only softens a finding when *that specific finding* is
+something the gate actually stands in front of — anchor the eligibility test
+to the same structural check Step 5 (Boundary Gate) already made, don't
+re-derive a looser one:
+
+- **Eligible** (may get the −1 tier): the finding has a genuine network
+  entry point and Step 5 either left it standing as reachable pre-auth
+  (`boundary_gate` is absent because `auth_required_to_reach` was false at
+  the time, or `entry_point_classification` came back `public`/`unknown`),
+  or Step 5 ran but at `medium` confidence capped it at
+  `CONFIRMED_LOW_CONFIDENCE` rather than suppressing it outright — the
+  finding is still a live pre-auth claim, just an uncertain one, and remains
+  eligible for the axis. A finding fully suppressed to `BOUNDARY_NOT_CROSSED`
+  never reaches Axis 2 as `CONFIRMED` in the first place, so there's nothing
+  to soften.
+- **Not eligible** (never gets this tier, regardless of `auth_required_to_reach`):
+  any finding Step 5 marked `boundary_gate.ran: false` (no network entry
+  point at all — see Step 5 → 2.5) — a hardcoded secret, a weak crypto
+  algorithm choice, a CI/CD YAML injection, a missing audit log, a missing
+  security header with no specific route. The live deployment's auth wall
+  has no bearing on whether these are exposed; discounting them because
+  *some other, unrelated* route happens to be gated would understate them.
+
+| Value | Effect on eligible pre-auth findings |
 |---|---|
 | `false` | no change (default) |
 | `true` | −1 tier |
@@ -1396,6 +1433,12 @@ never from a user-declared claim.
 Softeners stack. Example: a CRITICAL pre-auth SQLi on a `local` deployment
 (−2) with `auth_required_to_reach: true` (−1, pre-auth) =
 CRITICAL − 3 tiers → LOW (clamped at floor).
+
+Counter-example — a HIGH hardcoded-secret finding in the same run
+(`boundary_gate.ran: false`, no network entry point) with `deployment_target:
+public` and `auth_required_to_reach: true`: only Axis 1 could apply here
+(it doesn't, `deployment_target` is `public`), and Axis 2 does not apply at
+all regardless of the gate — `contextual_severity` stays HIGH.
 
 ### Step 3: Record the adjustment per finding
 
