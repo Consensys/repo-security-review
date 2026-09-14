@@ -73,7 +73,7 @@ Parse these from `$ARGUMENTS` using the format:
 | `--runtime` | false | Opt-in: **dynamically verify** eligible findings (including ones static analysis alone couldn't resolve) by constructing the concrete exploit and executing it against the repo stood up in Docker. The skill chooses the tool per finding type on its own — curl-based requests for most types, a headless Chromium browser for XSS/CSRF/clickjacking — no separate flag needed for that choice. A clean result can strengthen or soften the finding's verdict (never straight to rejected). No longer implies `--poc` — the constructed exploit is discarded after use unless `--poc` is also set. See `phase5-validate-and-poc.md` → "Exploit Construction vs. Dynamic Verification." |
 | `--vendor` | false | Vendor / open-source audit mode. Audits a third-party repo the company is considering adopting; audience is the internal security team, deliverable is an adoption risk judgment (not a fix-list for the vendor). Forces skip of `secrets`, `dependencies`, and `poc`; pins every phase to the resolved Standard tier model (never Opus); and switches Phase 6 to the vendor report format. See [Vendor Mode](#vendor-mode---vendor) below. |
 | `--pr` | none | PR Review mode. `--pr <base>...<head>` (or `--pr <base>` shorthand for `<base>...HEAD`) reviews only a pull request's diff instead of the whole repository — replaces the 6/7-phase pipeline with `references/pr-review.md`, pins to the resolved Standard tier model, and writes `pr-report.md` instead of `final-report.md`. Mutually exclusive with `--repos` and `--vendor`. See [PR Review Mode](#pr-review-mode---pr) below. |
-| `--context` | none | Inline `key=value,key=value` threat model used to calibrate severity. Optional — omit for default behavior. See [`--context`](#--context-threat-model-calibration) below. |
+| `--local` | false | Opt-in: assert this is a local-only tool, not a publicly reachable service — softens severity by −2 tiers (Axis 1), but only for findings with a genuine network entry point (`data_flow.entrypoint` set) — a hardcoded secret or similar code-level finding gets no discount from this flag. Omit for the pessimistic default (`deployment_target: "public"`). See [`--local`](#--local-deployment-target-calibration) below. |
 | `--verify-deployment` | none | Opt-in: `--verify-deployment <url>` sends one live, passive HTTP check to a real deployment URL so Phase 5 can derive `auth_required_to_reach` from an actual observation instead of a declared claim. If that check is inconclusive, the skill automatically escalates to a headless-browser recheck (no separate flag) — gated behind its own confirmation prompt (auto-confirmed by `--yes`). No effect in PR mode or when `validation` is skipped. See [Verify Deployment](#verify-deployment---verify-deployment) below. |
 | `--sonnet` | false | Experimental / comparison flag: overrides Deep tier's primary family from Opus to Sonnet for this run (falls back to Haiku family only if Sonnet is entirely unavailable — Standard tier is unaffected, it already uses Sonnet). Exists to A/B scan quality and token consumption between Opus and Sonnet on Phase 2, not for routine use. Has no effect in Vendor mode (already pinned to Standard/Sonnet, no Deep tier at all) or PR mode (no Phase 2 / Deep tier in that mode). |
 | `--skill-security` | false | Opt-in: run Phase 4b (LLM/AI skill security) on a **mixed repo** (`is_skill_repo: false`) even though Phase 2a detected skill/agent-instruction files (`has_skill_files: true`). Without this flag, a mixed repo never runs Phase 4b by default in the **default report mode** — `has_skill_files: true` alone is a structural signal, not an auto-run trigger, for mixed repos. Redundant (already going to run) on a **pure skill repo** (`is_skill_repo: true`, e.g. this skill's own repo — use `--skip skill-security` to suppress it there instead) and in **Vendor mode** (`--vendor` already auto-runs Phase 4b on `has_skill_files: true` regardless of `is_skill_repo`, since assessing a vendor's AI-tooling risk is the point of that mode — see Vendor Mode below). No effect in PR mode (Phase 4b never runs there). |
@@ -327,103 +327,81 @@ resolved model name and the dispatch mechanism are never in question together.
 - Phase 2: `"Phase 2: Architectural analysis ({deep_tier_model} + extended thinking)"`
 - Other phases: `"Phase N: {phase name} ({standard_tier_model})"`
 
-### --context: Threat-Model Calibration
+### --local: Deployment Target Calibration
 
-Calibration is **fully opt-in**. When `--context` is **not** passed, the skill
+Calibration is **fully opt-in**. When `--local` is **not** passed, the skill
 runs unchanged — no `threat-model.json` is written, no new logic runs in any
 downstream phase, no new report sections appear. Existing users see zero
 behavior change.
 
-When `--context` **is** passed, the orchestrator parses the inline value,
-validates it, and writes `{repo_path}/.security-review/threat-model.json`.
-Downstream phases that find this file present apply the calibration; phases
-that don't find it behave exactly as today.
+When `--local` **is** passed, the orchestrator writes
+`{repo_path}/.security-review/threat-model.json`. Downstream phases that find
+this file present apply the calibration; phases that don't find it behave
+exactly as today.
 
-#### Inline syntax
+> **Why a plain boolean and not a generic `key=value` mechanism.** This used
+> to be `--context deployment_target=local|public` (plus, briefly,
+> `auth_required_to_reach` as a second key). That axis turned out to be
+> fundamentally unverifiable from repo content and was replaced by a
+> dedicated, purpose-built flag — `--verify-deployment <url>` — rather than
+> another `--context` key (see [Verify Deployment](#verify-deployment---verify-deployment)).
+> With only one real axis left, and one of its two values (`public`) already
+> the no-op default, the comma/`key=value` parser, duplicate-key detection,
+> and per-key rejection branches it required were pure overhead for a single
+> boolean. If a genuinely new calibration axis ever earns its way in, the
+> precedent set by `--verify-deployment` is to give it its own dedicated
+> flag, not to resurrect a generic parser.
 
-Comma-separated `key=value` pairs. The one key is optional; whitespace around
-`=` and `,` is trimmed.
+#### What it does
 
+```text
+--local
 ```
---context deployment_target=local
-```
 
-There is no file-path form. The schema is a single enum-valued key, so inline
-is the only input format.
+Sets `deployment_target: "local"` in `threat-model.json` — asserting this is
+a local-only tool, not a publicly reachable service, which softens severity
+by −2 tiers (Axis 1, see `phase5-validate-and-poc.md` → Part 4) **for
+findings with a genuine network entry point only** — a hardcoded secret,
+weak crypto choice, CI/CD injection, or similar code-level finding is not
+reached through the deployment at all, so it gets no discount regardless of
+this flag. Omitting the flag leaves `deployment_target: "public"`, the
+pessimistic default — the hardest reachable case.
 
-> **`auth_required_to_reach` is not a `--context` key.** A user-declared
-> boolean here was found to be unverifiable from repo content alone (see
-> [Verify Deployment](#verify-deployment---verify-deployment) below for why)
-> — it has been replaced by `--verify-deployment <url>`, which derives the
-> value from an actual live check instead of taking a claim at face value.
-> Passing `auth_required_to_reach` as a `--context` pair is rejected.
-
-#### Allowed keys and values
-
-| Key | Allowed values |
-|---|---|
-| `deployment_target` | `local` \| `public` |
-
-`data_sensitivity` is not a user-facing key — it is hardcoded to `pii`
-(worst-case) for all runs. All findings are scored as if sensitive data is
-always at risk.
+`data_sensitivity` is not user-facing — it is hardcoded to `pii` (worst-case)
+for every run, `--local` or not. All findings are scored as if sensitive data
+is always at risk.
 
 > **README is always read.** Phase 2a reads the repo's `README.md` for project
-> context on every run, independent of `--context`. It is not a configurable key.
-
-#### Strict defaults — applied to any missing key
-
-| Field | Default | Rationale |
-|---|---|---|
-| `deployment_target` | `public` | Hardest reachable case |
+> context on every run, independent of `--local`. It is not conditioned on
+> this flag.
 
 **Invariant: defaults are the most pessimistic value for each axis.** A
 user-provided value can only soften severity, never tighten it further.
 `contextual_severity` is never higher than `cvss_base_severity`. This applies
-identically to the `auth_required_to_reach` axis even though it is no longer
-set via `--context` — see [Verify Deployment](#verify-deployment---verify-deployment):
+identically to the `auth_required_to_reach` axis, which isn't set by this
+flag at all — see [Verify Deployment](#verify-deployment---verify-deployment):
 absent a "gated" verification result, it defaults to `false`.
 
-#### Orchestrator steps when `--context` is set
+#### Orchestrator steps when `--local` is set
 
 ```text
-RAW="<value passed after --context>"
 TM_OUT={repo_path}/.security-review/threat-model.json
 
-# 1. Split RAW on commas → list of pairs
-# 2. For each pair:
-#    - split on '=' (exactly once); trim whitespace
-#    - reject if not exactly two non-empty parts → "❌ invalid pair: <pair>"
-#    - reject if key not in {deployment_target}
-#    - reject if key is "data_sensitivity" → "❌ data_sensitivity is not a valid key;
-#      data sensitivity is always treated as pii"
-#    - reject if key is "auth_required_to_reach" → "❌ auth_required_to_reach is not
-#      a --context key; use --verify-deployment <url> instead"
-#    - reject if value not in the allowed list for that key
-#    - reject duplicate keys
-# 3. Fill missing keys with strict defaults above.
-# 4. Write JSON to $TM_OUT:
-#    {
-#      "source": "user",
-#      "deployment_target": "...",
-#      "data_sensitivity": "pii"
-#    }
+Write JSON to $TM_OUT:
+{
+  "source": "user",
+  "deployment_target": "local",
+  "data_sensitivity": "pii"
+}
 ```
 
-README handling is not part of `--context`. Phase 2a always reads `README.md`
-(when present) for project context, whether or not `--context` was passed.
-
-All validation errors must abort the run with a clear message that names the
-offending key, value, and the allowed alternatives. Do not silently fall back
-to defaults on validation errors.
-
-If `--context` is absent: do nothing. `threat-model.json` is not created and
+If `--local` is absent: do nothing. `threat-model.json` is not created and
 downstream phases skip all calibration logic.
 
 #### Output structure addition
 
 `{repo_path}/.security-review/threat-model.json` — present only when
-`--context` was supplied. See per-phase reference files for how each phase
+`--local` was supplied. See per-phase reference files for how each phase
 consumes it.
 
 ## Verify Deployment (`--verify-deployment`)
@@ -431,22 +409,21 @@ consumes it.
 `--verify-deployment <url>` opts into a **single live HTTP check** against a
 real deployment URL, so the `auth_required_to_reach` severity axis is derived
 from an actual observation instead of a user-declared, unverifiable claim
-(which is why that key was removed from `--context` — see above). It runs
-inside **Phase 5**, immediately in Step 0 (Load Context), before any
-finding's Boundary Gate is evaluated — Phase 5 is the only phase that
-consumes the result, so nothing upstream needs to know about it.
+(which is why that axis was retired rather than ever becoming a flag of its
+own kind — see above). It runs inside **Phase 5**, immediately in Step 0
+(Load Context), before any finding's Boundary Gate is evaluated — Phase 5 is
+the only phase that consumes the result, so nothing upstream needs to know
+about it.
 
-### Why this is not part of `--context`
+### Why this is not folded into `--local`
 
-`--context` values are read as passive text and never independently checked
-(other than Phase 2's now-removed drift check, which could only catch a
-declared value contradicted by in-repo code — never an undeclared but real
-external control like platform-level SSO). Actually sending a request to the
-live target is a fundamentally different, active operation — it touches
-infrastructure outside the repo, can appear in the target's access logs, and
-needs explicit authorization the same way `--runtime`'s Docker execution
-does. It gets its own flag and its own confirmation gate rather than being
-folded into `--context`'s inert key=value parsing.
+`--local` is read as a passive boolean and never independently checked.
+Actually sending a request to the live target is a fundamentally different,
+active operation — it touches infrastructure outside the repo, can appear in
+the target's access logs, and needs explicit authorization the same way
+`--runtime`'s Docker execution does. It gets its own flag and its own
+confirmation gate rather than being folded into a calibration flag that's
+otherwise just inert boolean state.
 
 ### Confirmation gate (mirrors the `--runtime` Docker gate)
 
@@ -776,7 +753,7 @@ repo-wide `auth_coverage` map a full Phase 2 run produces.
 full-repository review, which is exactly what `--pr` exists to avoid. If
 either is also passed, abort with a clear error naming the conflicting flags.
 `--pr` composes normally with `--skip` (reinterpreted against `pr-review.md`'s
-steps — see Argument Parsing Rules above), `--runtime`, `--context`, `--yes`,
+steps — see Argument Parsing Rules above), `--runtime`, `--local`, `--yes`,
 and `--cost`.
 
 **2. Execution.**
@@ -1092,7 +1069,7 @@ Each phase writes its findings to a working directory inside the repo:
 {repo_path}/.security-review/
 ├── run-metadata.json         ← written by orchestrator before Phase 1; model IDs + tier
 ├── tech-stack.json           ← written by Phase 2a, read by Phase 2, 3, 4, and 4b
-├── threat-model.json         ← only if --context was provided
+├── threat-model.json         ← only if --local was provided
 ├── deployment-verification.json ← only if --verify-deployment was confirmed; written by Phase 5
 ├── deployment-verification-screenshot.png ← only if the browser escalation above ran (automatic, not flag-gated)
 ├── phase1-secrets.json

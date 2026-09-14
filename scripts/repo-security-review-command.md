@@ -78,21 +78,21 @@ Options:
                         greps, or checks-run detail (renamed from --debug,
                         which used to include that). Paste it back for cost
                         analysis.
-  --context <pairs>     Optional inline threat model used to calibrate
-                        severity. Format: comma-separated key=value pairs.
-                        Keys: deployment_target (local|public).
-                        data_sensitivity is not a key — always defaults to pii.
-                        auth_required_to_reach is not a key either — it was
-                        removed because a user-declared claim about it can't
-                        be verified from repo content; use --verify-deployment
-                        <url> instead, which derives it from a live check.
-                        README is always read by Phase 2a for context — it is
-                        not a --context key.
-                        All keys optional; omitted keys use strict defaults.
-                        Omit the flag entirely for default behavior (no
-                        calibration).
-                        Example:
-                        --context deployment_target=local
+  --local               Opt-in: assert this is a local-only tool, not a
+                        publicly reachable service. Softens severity by -2
+                        tiers. Omit for the pessimistic default
+                        (deployment_target: public). Writes
+                        <repo>/.security-review/threat-model.json with
+                        deployment_target and the hardcoded data_sensitivity
+                        (always "pii", not user-facing). Replaced the old
+                        --context key=value mechanism (which had shrunk to
+                        this one enum-valued key, one of whose two values
+                        was already the no-op default) and
+                        auth_required_to_reach, which is not settable here
+                        or anywhere via a declared claim — it's derived from
+                        an actual live check, see --verify-deployment.
+                        README is always read by Phase 2a for context,
+                        regardless of --local.
   --verify-deployment <url>
                         Opt-in: send one live, passive HTTP GET to a real
                         deployment URL so Phase 5 derives auth_required_to_reach
@@ -219,7 +219,7 @@ Examples:
   /repo-security-review ~/repos/my-service --skip architecture,secrets
 
   # Full review with severity calibrated to a local CLI tool
-  /repo-security-review ~/repos/my-service --context deployment_target=local
+  /repo-security-review ~/repos/my-service --local
 
   # Full review, verifying the live deployment is actually auth-gated
   /repo-security-review ~/repos/my-service --verify-deployment https://my-service.example.com
@@ -268,18 +268,20 @@ Parse `$ARGUMENTS` for:
   have named subphases). No file-read tables, coverage, greps, or
   checks-run detail — renamed from `--debug`, which used to include that.
   See SKILL.md → Cost Report for the format.
-- `--context <pairs>` → optional inline threat model as comma-separated
-  `key=value` pairs. Allowed key: `deployment_target` (`local`|`public`).
-  `data_sensitivity` is not an accepted key — reject it with a clear error.
-  `auth_required_to_reach` is not an accepted key either — reject it and
-  point to `--verify-deployment` instead (a declared claim here can't be
-  verified from repo content; see below).
-  README.md is always read by Phase 2a for context, regardless of `--context`.
-  When set, the orchestrator validates the pairs and writes a normalized
-  `threat-model.json` to the working directory. When unset, the skill
-  behaves exactly as before — no calibration logic runs anywhere. Any
-  unknown key, unknown enum value, malformed pair, or duplicate key aborts
-  the run with a clear error message.
+- `--local` → opt-in boolean: asserts this is a local-only tool, not a
+  publicly reachable service. Softens severity by -2 tiers
+  (`deployment_target: "local"` in `threat-model.json`). Omit for the
+  pessimistic default (`"public"`). `data_sensitivity` is always hardcoded to
+  `"pii"`, not user-facing. Replaced `--context`'s `key=value` mechanism —
+  with only one real axis left (and one of its two values already the no-op
+  default), the comma/key=value parser and its per-key rejection branches
+  were pure overhead. `auth_required_to_reach` was never a candidate to move
+  here either way — it's not a declared claim at all, it's derived from an
+  actual live check; see `--verify-deployment`.
+  README.md is always read by Phase 2a for context, regardless of `--local`.
+  When set, the orchestrator writes `threat-model.json` to the working
+  directory. When unset, the skill behaves exactly as before — no
+  calibration logic runs anywhere.
 - `--verify-deployment <url>` → opt-in: Phase 5 (Step 0.4) sends one live,
   passive HTTP GET to `<url>`, gated behind an explicit confirmation prompt
   (auto-confirmed by `--yes`, same as the Docker runtime gate). Classifies

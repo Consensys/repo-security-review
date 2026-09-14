@@ -363,7 +363,7 @@ Write to `{repo_path}/.security-review/phase2-architecture.json`:
 - `poc_needed` is always `false` for architectural findings
 - Reference specific files and line numbers as evidence
 - Be concrete about impact — avoid vague "could lead to security issues"
-- `auth_coverage` is **always produced**, regardless of `--context` or
+- `auth_coverage` is **always produced**, regardless of `--local` or
   `--verify-deployment`. Phase 5's boundary gate reads it unconditionally —
   the gate only fires when Phase 5's own deployment check classifies the
   target as `gated` (see `SKILL.md` → Verify Deployment), but Phase 2 must
@@ -398,19 +398,19 @@ does not exist. Existing behavior is preserved when no threat model was provided
 > used to be Check 1 here: scan for public routes with no auth, and flag a
 > drift finding if `threat-model.json` declared `auth_required_to_reach=true`
 > anyway. It's gone because `auth_required_to_reach` is no longer a declared
-> `--context` claim to check for drift — it's now a value Phase 5 derives
-> directly from a live check (`--verify-deployment`, see `SKILL.md` → Verify
-> Deployment). There is nothing left for Phase 2 to reconcile against code: a
-> live observation isn't a claim that can silently soften severity the way an
+> claim to check for drift — it's now a value Phase 5 derives directly from a
+> live check (`--verify-deployment`, see `SKILL.md` → Verify Deployment).
+> There is nothing left for Phase 2 to reconcile against code: a live
+> observation isn't a claim that can silently soften severity the way an
 > unverified declaration could, so the whole "declared vs observed" drift
 > framing this section existed for no longer applies to that axis.
 
 `threat-model.json` now only carries `deployment_target` (plus the hardcoded
-`data_sensitivity`), and there is no reliable code signal for whether
-something is a local tool or a public service — take `deployment_target` at
-face value, with no drift check. This section is retained only in case a
-future `--context` key needs the same "declared vs observed" treatment
-`auth_required_to_reach` used to get.
+`data_sensitivity`), set by the plain boolean `--local` flag — there is no
+reliable code signal for whether something is a local tool or a public
+service, so take `deployment_target` at face value, with no drift check.
+This section is retained only in case a future calibration flag needs the
+same "declared vs observed" treatment `auth_required_to_reach` used to get.
 
 ## Final Response (chat output)
 

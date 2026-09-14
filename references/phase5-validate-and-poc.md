@@ -540,17 +540,18 @@ but it should not be reported as a pre-auth issue.
    "boundary status unknown — auth_coverage absent or not applicable").
 
 2.5. **Not every finding has a network entry point — don't manufacture one.**
-   A hardcoded secret, a weak crypto algorithm choice, a CI/CD YAML
-   injection, a missing audit log, or a missing security header with no
-   specific route context is not reached *through* the deployment's HTTP
-   surface at all — an SSO wall in front of the app has no bearing on
-   whether a secret is sitting in the repo or a workflow file is
-   injectable. If the finding is one of these — no HTTP/RPC/API surface is
-   involved in reaching it — **skip this step entirely**: set
-   `boundary_gate: {"ran": false, "reason": "no network entry point — this
-   finding type is not reached through the deployment's auth wall"}` and
-   move on to the Validation Decision. Do not force Step 3 below to derive
-   a route for a finding that structurally doesn't have one.
+   Check `data_flow.entrypoint` (established once for every finding, in Part
+   1 → Step 1 — the same signal Part 4's Axis 1 and Axis 2 severity
+   softening key off, see below). If it's `null` — a hardcoded secret, a weak
+   crypto algorithm choice, a CI/CD YAML injection, a missing audit log, or a
+   missing security header with no specific route context — the finding is
+   not reached *through* the deployment's HTTP surface at all, and an SSO
+   wall in front of the app has no bearing on whether a secret is sitting in
+   the repo or a workflow file is injectable. **Skip this step entirely**:
+   set `boundary_gate: {"ran": false, "reason": "no network entry point —
+   this finding type is not reached through the deployment's auth wall"}`
+   and move on to the Validation Decision. Do not force Step 3 below to
+   derive a route for a finding that structurally doesn't have one.
 
 3. Identify the finding's entry point: use `data_flow.entrypoint` (the HTTP
    method + path, or equivalent external input surface) as established in
@@ -1385,12 +1386,37 @@ Each axis subtracts severity tiers independently. Tiers, low to high:
 
 Floor: nothing drops below `LOW`. Ceiling: never above `cvss_base_severity`.
 
-#### Axis 1: `deployment_target`
+#### Axis 1: `deployment_target` (only for findings with a genuine network
+entry point)
 
-| Value | Effect | Applies to |
-|---|---|---|
-| `public` | no change (default) | all findings |
-| `local` | −2 tiers | all findings |
+**This axis is not a blanket discount either — same principle as Axis 2
+below, and it applies even when `--verify-deployment` was never used.**
+`deployment_target: local` asserts nobody remote can reach this tool at all
+— that only changes severity for a finding that's reached *through* the
+deployment in the first place. The shared signal for both axes is
+`data_flow.entrypoint` (established independently in Part 1 → Step 1, for
+every finding, regardless of which optional flags are set):
+
+- **Eligible** (may get the −2 tier): the finding has a real
+  `data_flow.entrypoint` — an HTTP route/handler or other external input
+  point Part 1 traced from scratch. A local-only tool has no such surface
+  reachable by anyone remote, so the discount applies whether the finding is
+  otherwise pre-auth or post-auth (unlike Axis 2, this one isn't restricted
+  to pre-auth findings — a post-auth IDOR is just as unreachable if there's
+  no network exposure to authenticate against in the first place).
+- **Not eligible** (never gets this tier, regardless of `deployment_target`):
+  a finding with `data_flow: null` — a hardcoded secret, a weak crypto
+  algorithm choice, a CI/CD YAML injection, a missing audit log, or a
+  missing security header with no specific route. These are code-level
+  properties, not something reached through the deployment's network
+  surface — whether the tool is ever run as a local-only process or a
+  public service has no bearing on whether a secret sits in the repo or a
+  workflow file is injectable.
+
+| Value | Effect on eligible findings |
+|---|---|
+| `public` | no change (default) |
+| `local` | −2 tiers |
 
 #### Axis 2: `auth_required_to_reach` (only for pre-auth findings **with a
 genuine network entry point**)
@@ -1401,23 +1427,22 @@ claim.
 
 **This axis is not a blanket discount for every finding once a gate is
 detected.** It only softens a finding when *that specific finding* is
-something the gate actually stands in front of — anchor the eligibility test
-to the same structural check Step 5 (Boundary Gate) already made, don't
-re-derive a looser one:
+something the gate actually stands in front of. Same base eligibility test
+as Axis 1 (`data_flow.entrypoint` must be present — see above), plus a
+second, finer condition specific to this axis: the finding must still be a
+*pre-auth* claim once Step 5 (Boundary Gate) has had its say, not a suppressed
+one:
 
-- **Eligible** (may get the −1 tier): the finding has a genuine network
-  entry point and Step 5 either left it standing as reachable pre-auth
-  (`boundary_gate` is absent because `auth_required_to_reach` was false at
-  the time, or `entry_point_classification` came back `public`/`unknown`),
-  or Step 5 ran but at `medium` confidence capped it at
-  `CONFIRMED_LOW_CONFIDENCE` rather than suppressing it outright — the
-  finding is still a live pre-auth claim, just an uncertain one, and remains
-  eligible for the axis. A finding fully suppressed to `BOUNDARY_NOT_CROSSED`
+- **Eligible** (may get the −1 tier): the finding has `data_flow.entrypoint`
+  set, **and** Step 5 either didn't suppress it (`boundary_gate` absent, or
+  `entry_point_classification` came back `public`/`unknown`) or ran at
+  `medium` confidence and only capped it at `CONFIRMED_LOW_CONFIDENCE` rather
+  than suppressing it outright — the finding is still a live pre-auth claim,
+  just an uncertain one. A finding fully suppressed to `BOUNDARY_NOT_CROSSED`
   never reaches Axis 2 as `CONFIRMED` in the first place, so there's nothing
-  to soften.
+  left to soften.
 - **Not eligible** (never gets this tier, regardless of `auth_required_to_reach`):
-  any finding Step 5 marked `boundary_gate.ran: false` (no network entry
-  point at all — see Step 5 → 2.5) — a hardcoded secret, a weak crypto
+  any finding with `data_flow: null` — a hardcoded secret, a weak crypto
   algorithm choice, a CI/CD YAML injection, a missing audit log, a missing
   security header with no specific route. The live deployment's auth wall
   has no bearing on whether these are exposed; discounting them because
@@ -1434,11 +1459,14 @@ Softeners stack. Example: a CRITICAL pre-auth SQLi on a `local` deployment
 (−2) with `auth_required_to_reach: true` (−1, pre-auth) =
 CRITICAL − 3 tiers → LOW (clamped at floor).
 
-Counter-example — a HIGH hardcoded-secret finding in the same run
-(`boundary_gate.ran: false`, no network entry point) with `deployment_target:
-public` and `auth_required_to_reach: true`: only Axis 1 could apply here
-(it doesn't, `deployment_target` is `public`), and Axis 2 does not apply at
-all regardless of the gate — `contextual_severity` stays HIGH.
+Counter-example — a HIGH hardcoded-secret finding in the same run (`data_flow:
+null`, `boundary_gate.ran: false` — no network entry point) with
+`deployment_target: local` **and** `auth_required_to_reach: true`: neither
+axis applies, despite both being at their most-softened value — Axis 1 needs
+`data_flow.entrypoint`, Axis 2 needs it plus a surviving pre-auth
+classification, and this finding has neither. `contextual_severity` stays
+HIGH. A live-deployment gate and a "local only" assertion both being true at
+once says nothing about whether a secret is sitting in the repo.
 
 ### Step 3: Record the adjustment per finding
 

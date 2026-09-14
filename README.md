@@ -53,7 +53,7 @@ In any Claude Code session (CLI or Desktop), point the skill at a local repo pat
 /repo-security-review . --output ./security-report --yes
 
 # Calibrate severity for a local-only tool, and verify the real deployment is auth-gated
-/repo-security-review /path/to/repo --context deployment_target=local --verify-deployment https://app.example.com
+/repo-security-review /path/to/repo --local --verify-deployment https://app.example.com
 
 # Dynamically verify AND keep the PoC scripts (including any XSS/CSRF/
 # clickjacking findings, browser-driven automatically)
@@ -80,7 +80,7 @@ In any Claude Code session (CLI or Desktop), point the skill at a local repo pat
 | `--runtime` | off | Opt-in: dynamically verify eligible findings against the app stood up in Docker (curl or headless browser, chosen automatically per finding type). A clean result can strengthen or soften the verdict. No longer implies `--poc` — the exploit is discarded after use unless `--poc` is also set. |
 | `--vendor` | off | Third-party adoption audit. Skips secrets/dependencies, forces PoC generation off, pins all phases to Sonnet, and produces an adoption-risk report (verdict + conditions + "what it does" + adopter-side controls). |
 | `--pr <base>...<head>` | none | PR review mode. Reviews only a pull request's diff — no full-repo scan needed first. `--pr <base>` is shorthand for `<base>...HEAD`. Pins to Sonnet, writes `pr-report.md`. Mutually exclusive with `--repos` and `--vendor`. |
-| `--context <pairs>` | none | Inline threat model to calibrate severity: `deployment_target=local\|public`. Softens only — never sharpens. |
+| `--local` | off | Assert this is a local-only tool, not a publicly reachable service — softens severity by −2 tiers. Omit for the pessimistic default (`public`). |
 | `--verify-deployment <url>` | none | Opt-in: send one live, passive HTTP check to a real deployment URL so Phase 5 derives `auth_required_to_reach` from an actual observation (login/SSO redirect, WAF challenge) instead of a declared claim. If inconclusive, automatically escalates to a headless-browser recheck (no separate flag). Gated behind confirmation prompt(s) (`--yes` auto-confirms). |
 | `--yes` | off | Non-interactive / CI mode — auto-confirms prompts (safety path checks still apply). |
 | `--cost` | off | Write `.security-review/cost-report.md` — duration and estimated token consumption for every phase that ran (and named subphases, e.g. 3b, Phase 5's Exploit Construction/Dynamic Verification parts). Renamed from `--debug`; no longer includes file-read/coverage/checks detail. |

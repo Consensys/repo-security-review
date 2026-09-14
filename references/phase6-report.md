@@ -10,7 +10,7 @@ Read all that exist (some may be absent if a phase was skipped):
 ```
 {repo_path}/.security-review/run-metadata.json
 {repo_path}/.security-review/tech-stack.json
-{repo_path}/.security-review/threat-model.json       ← present only if --context was used
+{repo_path}/.security-review/threat-model.json       ← present only if --local was used
 {repo_path}/.security-review/phase1-secrets.json
 {repo_path}/.security-review/phase2-architecture.json
 {repo_path}/.security-review/phase3-cves.json
@@ -96,7 +96,7 @@ Apply softeners:
 
 | Softener | Applies to | Source |
 |----------|-----------|--------|
-| `deployment_target: local` (−2 tiers) | all findings | `threat-model.json` (`--context`) |
+| `deployment_target: local` (−2 tiers) | findings with a genuine network entry point only (`data_flow.entrypoint` set) — never findings with `data_flow: null` (hardcoded secrets, crypto choices, CI/CD injection, etc. — not reached through the deployment at all) | `threat-model.json` (`--local`) |
 | `auth_required_to_reach: true` (−1 tier) | pre-auth findings with a genuine network entry point only (findings that survived the Phase 5 boundary gate) — never findings with `boundary_gate.ran: false` (hardcoded secrets, crypto choices, CI/CD injection, etc. — the auth wall doesn't gate their exposure) | `deployment-verification.json` (`--verify-deployment`, `classification: gated`) — never a declared claim |
 
 **How calibration surfaces in the report:** `contextual_severity` is the
