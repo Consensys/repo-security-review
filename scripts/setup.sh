@@ -233,11 +233,12 @@ else
   echo "   Install from: https://docs.docker.com/get-docker/"
 fi
 
-# Optional: Playwright + Chromium (for --browser mode)
+# Optional: Playwright + Chromium (used automatically by --verify-deployment
+# and --runtime when a check needs a browser — no separate flag)
 # Check-only — never auto-installed. The Chromium binary download is large
 # enough that it should be an explicit, visible step the user takes.
 echo ""
-echo "=== Optional: Playwright + Chromium (for --browser mode) ==="
+echo "=== Optional: Playwright + Chromium (auto-used by --verify-deployment / --runtime) ==="
 if python3 -c "import playwright" &>/dev/null; then
   echo "✅ playwright (Python package) installed"
   if python3 -c "
@@ -251,7 +252,7 @@ with sync_playwright() as p:
     echo "⚠️  Chromium browser binary not found — run: playwright install chromium"
   fi
 else
-  echo "⚠️  playwright not installed — headless-browser verification/PoC (--browser flag) will be unavailable"
+  echo "ℹ️  playwright not installed — browser-based verification/PoC steps will fall back to curl-only"
   echo "   Install with: pip3 install playwright --break-system-packages && playwright install chromium"
 fi
 

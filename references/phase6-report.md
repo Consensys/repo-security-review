@@ -304,8 +304,11 @@ section is empty and omitted — see Deduplication Step above).}
 
 *Part A — general Needs Review table* (`validation_status` ∈
 `NEEDS_EXTERNAL_VERIFICATION`, `PENDING_CROSS_REPO_VALIDATION`, `NEEDS_RUNTIME`
-that was never resolved because `--runtime` wasn't set or the probe didn't
-run):
+— either because `--runtime` wasn't set, dynamic verification ran but stayed
+inconclusive, or a clean dynamic result disagreed with an earlier static
+`CONFIRMED`/`CONFIRMED_LOW_CONFIDENCE` and downgraded it here for a human to
+reconcile — see `phase5-validate-and-poc.md` → Runtime Value Assessment →
+Verdict mutation):
 
 | ID | Type | File | Verdict | Reason |
 |----|------|------|---------|--------|
@@ -444,7 +447,9 @@ separate `**Also identified as**` label — fold it into the description prose.
 - **PoC**: not generated (pass `--poc` to generate PoC scripts for confirmed findings)
 
 {If runtime_status == RUNTIME_CONFIRMED:}
-> ✅ **Runtime Validated** — confirmed against a live Docker instance.
+> ✅ **Runtime Validated** — confirmed against a live Docker instance{, via a headless browser check if the finding is XSS/CSRF/clickjacking}.
+{If runtime_verdict_change is not null:}
+> ℹ️ Dynamic verification changed this finding's status: {runtime_verdict_change.from} → {runtime_verdict_change.to} ({runtime_verdict_change.reason}).
 
 ---
 

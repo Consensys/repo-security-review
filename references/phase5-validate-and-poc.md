@@ -1,4 +1,4 @@
-# Phase 5: Validation (+ optional PoC) Agent
+# Phase 5: Validation (+ optional Dynamic Verification / PoC) Agent
 
 ## Security Constraints
 
@@ -21,8 +21,11 @@ You are the **judgment layer**. You receive candidate findings from Phase 4
 Phase 4 finding already covers, and your job has two sequential parts:
 
 1. **Validate** each finding independently — challenge it, try to disprove it
-2. **Write a PoC** — only if `--poc` was passed — immediately for any finding
-   that passes, while your validation reasoning is still in context
+2. **Construct the concrete exploit** (request, script, or browser action) —
+   whenever `--poc` or `--runtime` is set — immediately for any finding that
+   needs it, while your validation reasoning is still in context. `--poc` and
+   `--runtime` are independent controls now, not one implying the other —
+   see "Exploit Construction vs. Dynamic Verification" below.
 
 You must be isolated from Phase 2 and Phase 4's agent context (you still read
 their **output files** yourself — isolation means not inheriting their
@@ -32,12 +35,16 @@ reasoning/conversation, not avoiding their JSON). You receive:
 - The path to `phase2-architecture.json` (you read it yourself — for Step 0.5's
   merge step and for validating standalone Phase 2 findings)
 - The repo path to re-examine code independently
-- The `--runtime` flag (if set)
-- The `--poc` flag (if set) — see below
+- The `--runtime` flag (if set) — enables dynamic verification; the tool
+  used (curl against Docker, or a headless browser) is chosen automatically
+  per finding type, not by a separate flag — see Runtime Value Assessment
+- The `--poc` flag (if set) — controls only whether the constructed exploit
+  is persisted to `pocs/`; see below
 - The `--verify-deployment <url>` flag (if set) and the `--yes` flag (whether
-  it auto-confirms the deployment-verification gate) — see Step 0.4
-- The `--browser` flag (if set) — unlocks the Step 0.4 escalation and the
-  browser-driven PoC variant in Part 3; has no effect on its own
+  it auto-confirms the deployment-verification gate) — see Step 0.4. The
+  browser escalation there is likewise automatic (no separate flag) — it
+  fires whenever the plain HTTP check is inconclusive, gated only by its own
+  confirmation prompt.
 - `tech-stack.json` path (includes `runtime_hints` used for Dockerfile synthesis)
 - The `is_multi_repo` flag (true when the orchestrator is running in `--repos`
   mode) — see Step 0.5 for how this changes standalone Phase 2 finding handling
@@ -84,24 +91,43 @@ searching broadly (grepping other files, tracing into shared middleware) for a
 compensating control is still required. The bound is on exhaustively reading
 one large file end-to-end, not on how far you search for a mitigation.
 
-**The PoC gate is structural**: when `--poc` is set, you only write a PoC
-immediately after a finding passes validation within the same reasoning chain.
-A finding that fails validation gets no PoC — ever. There is no separate step
-where PoCs are generated for unvalidated findings.
+**Exploit Construction vs. Dynamic Verification — two independent controls.**
+`--poc` and `--runtime` used to be coupled (`--runtime` implied `--poc`).
+They no longer are:
 
-**`--poc` flag**: PoC generation is opt-in. When `--poc` is **not** set (the
-default), run the full validation workflow (Part 1) exactly as normal —
-confirm, reject, assign verdicts. Skip Part 2 (PoC generation) and Part 3
-(runtime validation) entirely: do not write any files under `pocs/`, do not
-evaluate runtime value, do not start Docker, and **do not create the `pocs/`
-directory at all** — not even empty. Only create it lazily, immediately before
-writing the first PoC file into it. The `poc_skipped: true` flag must be set
-in `phase5-validated.json` so Phase 6 can note this in the report. Validation
-verdicts still appear in full.
+- **`--poc`** controls whether a constructed exploit is **persisted to disk**
+  under `pocs/` as a durable artifact for a human to keep or re-run later.
+- **`--runtime`** controls whether Phase 5 **dynamically executes** the
+  constructed exploit (against Docker, via curl or a headless browser —
+  chosen automatically per finding type, see Runtime Value Assessment) to
+  strengthen or weaken the validation verdict itself.
 
-When `--poc` **is** set, additionally run Part 2 for every finding that passes
-validation (CONFIRMED / CONFIRMED_LOW_CONFIDENCE), and Part 3 if `--runtime`
-is also set (`--runtime` implies `--poc` — see SKILL.md).
+Either can be set alone, both, or neither:
+- **Neither set** (the default): run Part 1 (Validation) exactly as normal —
+  confirm, reject, assign verdicts. Skip exploit construction, Part 3, and
+  Docker entirely: do not write any files under `pocs/`, and **do not create
+  the `pocs/` directory at all** — not even empty. Set `poc_skipped: true` in
+  `phase5-validated.json` so Phase 6 can note this. Validation verdicts still
+  appear in full.
+- **`--poc` only**: for every CONFIRMED / CONFIRMED_LOW_CONFIDENCE finding,
+  construct the exploit immediately after that finding's validation decision
+  (Part 2) and write it to `pocs/` — same as before, just never executed. No
+  Docker, no dynamic verdict changes.
+- **`--runtime` only** (no `--poc`): for every finding whose type earns
+  dynamic verification (Runtime Value Assessment), construct the exploit the
+  same way, execute it (Part 3), and use a **clean** result to strengthen or
+  soften the verdict — but hold the constructed exploit in a scratch location
+  only and delete it after execution; never write to `pocs/`. This is the
+  "I want a trustworthy verdict, not a script to keep" path.
+- **Both set**: construct once, execute it (Part 3), let a clean result
+  affect the verdict, **and** persist it to `pocs/` — today's original
+  combined behavior.
+
+**The construction gate is still structural**: whichever of `--poc`/
+`--runtime` triggers it, you only construct an exploit immediately after a
+finding passes validation (or lands on `NEEDS_RUNTIME` — see Runtime Value
+Assessment) within the same reasoning chain. A finding that's cleanly
+rejected gets no exploit constructed for it — ever.
 
 ---
 
@@ -115,8 +141,8 @@ ran, plus a bolded **Phase 5 Total** row:
 | Subphase | Duration | Input tokens (est.) | Output tokens (est.) | Total tokens (est.) |
 |---|---|---|---|---|
 | Validation (Part 1) | ... | ... | ... | ... |
-| PoC Generation (Part 2) — only if `--poc` was set | ... | ... | ... | ... |
-| Runtime Validation (Part 3) — only if `--runtime` was set | ... | ... | ... | ... |
+| Exploit Construction (Part 2) — only if `--poc` or `--runtime` was set | ... | ... | ... | ... |
+| Dynamic Verification (Part 3) — only if `--runtime` was set | ... | ... | ... | ... |
 | **Phase 5 Total** | ... | ... | ... | ... |
 
 Duration is measured per SKILL.md → Duration Methodology (timestamp each
@@ -139,18 +165,21 @@ For each finding in the candidate list, execute this sequence in full
 before moving to the next finding:
 
 ```
-0. SURFACE GATE (Step 0 — skip full validation for high-confidence non-production surfaces) → 1. VALIDATE (Steps 1–4) → 2. BOUNDARY GATE (Step 5, only if deployment-verification.json present with classification: gated — see Step 0.4) → 3. DECISION → 4. POC (only if confirmed AND --poc is set) → 5. RUNTIME? (per-finding, only if --runtime AND --poc are both set) → 6. WRITE OUTPUTS
+0. SURFACE GATE (Step 0 — skip full validation for high-confidence non-production surfaces) → 1. VALIDATE (Steps 1–4) → 2. BOUNDARY GATE (Step 5, only if deployment-verification.json present with classification: gated — see Step 0.4) → 3. DECISION → 4. EXPLOIT CONSTRUCTION (only if confirmed or NEEDS_RUNTIME, AND (--poc OR --runtime) is set) → 5. DYNAMIC VERIFICATION? (per-finding, only if --runtime is set; tool — curl vs. headless browser — chosen automatically by finding type; a clean result may promote or soften the verdict) → 6. PERSIST? (only if --poc is set) → 7. WRITE OUTPUTS
 ```
 
 Never batch-validate all findings first and then batch-write PoCs. Process
 one finding end-to-end at a time.
 
-Step 4 is evaluated independently for each finding — Docker is only started if
-at least one confirmed finding actually warrants runtime validation. See
-"Runtime Value Assessment" below. Steps 3 and 4 are both suppressed unless
-`--poc` is set.
+Step 5 (Dynamic Verification) is evaluated independently for each finding —
+Docker is only started if at least one finding actually warrants it. See
+"Runtime Value Assessment" below (now also covering `NEEDS_RUNTIME`
+findings, not just `CONFIRMED`/`CONFIRMED_LOW_CONFIDENCE`). Step 4 (Exploit
+Construction) runs whenever `--poc` or `--runtime` is set; Step 5 (Dynamic
+Verification) runs only if `--runtime` is set; Step 6 (Persist) runs only if
+`--poc` is set — each gate is independent of the others.
 
-**Step 5, "WRITE OUTPUTS," means write to disk now, not hold in memory for a
+**Step 7, "WRITE OUTPUTS," means write to disk now, not hold in memory for a
 single terminal write.** A repo with many candidate findings makes this loop
 exactly the kind of long-running work a context-compaction event can hit
 mid-way through; a compacted summary is unlikely to precisely reconstruct a
@@ -158,11 +187,12 @@ finding's full validated record (data flow, mitigations checked, PoC content)
 established several findings ago. Before processing the first finding,
 initialize `phase5-validated.json` with an empty `findings` array and a
 zeroed `summary`, and `phase5-pocs.json` with an empty `pocs` array. After
-**every** finding's decision (steps 1–4 complete for it), immediately
+**every** finding's decision (steps 1–6 complete for it), immediately
 read-modify-write both files: append that finding's full record (schema
-below) to `findings`, update the running `summary` counts, and — if a PoC was
-generated — append its entry to `phase5-pocs.json → pocs`. Do this before
-moving to the next finding, not deferred to a final pass at the end of the
+below) to `findings`, update the running `summary` counts, and — if the
+exploit was persisted (`--poc` set) — append its entry to
+`phase5-pocs.json → pocs`. Do this before moving to the next finding, not
+deferred to a final pass at the end of the
 loop.
 
 ---
@@ -223,11 +253,13 @@ retry.
 4. **Write `$DV_OUT`** per the schema in `SKILL.md` → Verify Deployment, then
    delete `$HDR` and `$BODY` — working state, not report artifacts.
 
-5. **Browser escalation (only if `--browser` was passed AND step 3's
-   classification is `not_gated` or `inconclusive`)**. Skip this step
-   entirely for `gated` or `waf_present` — already-confident results are
-   never re-checked. See `SKILL.md` → Browser-Based Verification & PoC for
-   the full rationale and sandboxing rules; this is the execution recipe.
+5. **Browser escalation (automatic — only if step 3's classification is
+   `not_gated` or `inconclusive`)**. There is no separate flag to check; the
+   skill decides on its own whether escalating helps, based purely on
+   whether step 3 was confident. Skip this step entirely for `gated` or
+   `waf_present` — already-confident results are never re-checked. See
+   `SKILL.md` → Browser-Based Verification & PoC for the full rationale and
+   sandboxing rules; this is the execution recipe.
 
    a. **Confirmation gate.** If `--yes` is not set, print the Verify
       Deployment escalation prompt from `SKILL.md` → Browser-Based
@@ -563,7 +595,7 @@ After the above steps (including the boundary gate if it ran), assign one of:
 | `CONFIRMED` | True positive, high confidence | Write PoC now |
 | `CONFIRMED_LOW_CONFIDENCE` | Real but exploitability uncertain | Write PoC, flag confidence |
 | `FALSE_POSITIVE` | Not exploitable or mitigated | Record reason, no PoC |
-| `NEEDS_RUNTIME` | Cannot confirm statically | Attempt runtime probe if `--runtime`, else no PoC |
+| `NEEDS_RUNTIME` | Cannot confirm statically | If `--runtime` is set: attempt dynamic verification (Runtime Value Assessment) — a clean result can resolve this to `CONFIRMED`/`CONFIRMED_LOW_CONFIDENCE`, or leave it as `NEEDS_RUNTIME` if still inconclusive. If `--runtime` is not set: stays `NEEDS_RUNTIME`, no exploit constructed |
 | `BOUNDARY_NOT_CROSSED` | Vulnerability exists in code but entry point is behind a high-confidence auth gate with no bypass | No PoC; record in output with boundary evidence |
 | `SURFACE_NOT_PRODUCTION` | Vulnerability exists in code but the file is in a non-production surface (test/fixture/example/demo) with high-confidence classification | No PoC; record in output with surface evidence |
 | `NEEDS_EXTERNAL_VERIFICATION` | Plausible finding (usually `source_phase: 2`), but confirming actual exploitability requires information this repo cannot provide — private dependency internals, infra/network configuration, IAM/trust policy, downstream service behavior | No PoC; `verdict_reason` must name the exact missing fact, e.g. "requires confirming whether the internal package's own serializer redacts this field — package source not in this repo" |
@@ -597,23 +629,33 @@ the "why." Phase 6 must know to pull the reason from whichever field is
 populated for a given `validation_status` when rendering the Needs Review
 table (see phase6-report.md → Needs Review section).
 
-### Runtime Value Assessment
+### Runtime Value Assessment (only if `--runtime` is set)
 
-After assigning a `CONFIRMED` or `CONFIRMED_LOW_CONFIDENCE` status, decide
-whether runtime validation would add meaningful evidence **for this specific
-finding**. This decision is made per-finding, before any Docker work begins.
+After assigning `CONFIRMED`, `CONFIRMED_LOW_CONFIDENCE`, **or `NEEDS_RUNTIME`**,
+decide whether dynamic verification would add meaningful evidence **for this
+specific finding**. This decision is made per-finding, before any Docker work
+begins. `NEEDS_RUNTIME` findings are now a real target of this step, not a
+dead end — "cannot confirm statically" is exactly the case dynamic evidence
+is meant to resolve.
 
-**Runtime earns its cost** — attempt Docker when the finding is confirmed:
+**Dynamic verification earns its cost** — attempt it when the finding is
+`CONFIRMED`, `CONFIRMED_LOW_CONFIDENCE`, or `NEEDS_RUNTIME`. The **Tool**
+column is chosen automatically by finding type — this used to require a
+separate `--browser` flag; it no longer does, `--runtime` alone decides:
 
-| Finding type | Why runtime adds evidence |
-|---|---|
-| BOLA / IDOR | Proves ownership bypass at the HTTP layer — needs two auth tokens and an actual 200 response to another user's resource |
-| SQL injection | Demonstrates actual data exfiltration in the response, not just a vulnerable code pattern |
-| SSRF | Requires observing an HTTP callback or metadata response — code alone only shows the URL is user-controlled |
-| Command injection | Blind variants need timing side-channel; non-blind variants benefit from response proof |
-| Broken authentication / session bypass | Proving auth bypass requires actually receiving a protected resource without credentials |
+| Finding type | Why dynamic evidence matters | Tool |
+|---|---|---|
+| BOLA / IDOR | Proves ownership bypass at the HTTP layer — needs two auth tokens and an actual 200 response to another user's resource | curl (Docker) |
+| SQL injection | Demonstrates actual data exfiltration in the response, not just a vulnerable code pattern | curl (Docker) |
+| SSRF | Requires observing an HTTP callback or metadata response — code alone only shows the URL is user-controlled | curl (Docker) |
+| Command injection | Blind variants need timing side-channel; non-blind variants benefit from response proof | curl (Docker) |
+| Broken authentication / session bypass | Proving auth bypass requires actually receiving a protected resource without credentials | curl (Docker) |
+| XSS (reflected/stored) | Proves the payload actually **executes** (a `dialog` event firing), not just that it's reflected unescaped — CSP/encoding/parsing context all affect whether reflection becomes execution | headless browser (Docker + Chromium) |
+| CSRF | Proves a cross-origin request submitted with a real session actually performs the state change server-side, not just that the request is theoretically forgeable | headless browser (Docker + Chromium) |
+| Clickjacking | Proves the target actually renders inside a frame (no `X-Frame-Options`/CSP `frame-ancestors` block) | headless browser (Docker + Chromium) |
 
-**Static analysis is conclusive** — skip Docker, set `RUNTIME_NOT_NEEDED`:
+**Static analysis is conclusive** — skip dynamic verification, set
+`RUNTIME_NOT_NEEDED`:
 
 | Finding type | Why static is enough |
 |---|---|
@@ -627,18 +669,60 @@ finding**. This decision is made per-finding, before any Docker work begins.
 | Missing security headers | Headers are set (or not) in code — unambiguous |
 | Missing rate limiting | No rate-limit middleware in the code path — runtime just confirms the absence |
 
-**Docker startup rule:** Only start Docker if at least one confirmed finding in
-this run is in the "earns its cost" list. If every confirmed finding is in the
-"static conclusive" list, skip Docker entirely for the whole run — set
+**Docker startup rule:** Only start Docker if at least one finding in this
+run (across `CONFIRMED`/`CONFIRMED_LOW_CONFIDENCE`/`NEEDS_RUNTIME`) is in the
+"earns its cost" list. If every eligible finding is in the "static
+conclusive" list, skip Docker entirely for the whole run — set
 `runtime_status: RUNTIME_NOT_NEEDED` on each finding with the specific reason.
+If the finding set includes any browser-tool row (XSS/CSRF/clickjacking),
+the Part 3 confirmation prompt says so — see Part 3.
+
+### Verdict mutation from a clean dynamic result
+
+A dynamic result may move a finding's `validation_status` **only when the
+PoC/browser action fully executed with no environment failure** — this is
+the same distinction the status table below already draws between
+`RUNTIME_CONFIRMED` and `RUNTIME_SKIPPED`/`RUNTIME_BUILD_FAILED`/
+`RUNTIME_ERROR`. An environment failure (Docker/Playwright unavailable,
+build failed, missing seed data, confirmation declined) **never** moves the
+verdict — it stays exactly what Part 1 decided, with the failure recorded as
+a neutral note.
+
+| Prior `validation_status` | Clean `RUNTIME_CONFIRMED` | Clean `RUNTIME_NOT_CONFIRMED` |
+|---|---|---|
+| `NEEDS_RUNTIME` | → `CONFIRMED` (or `CONFIRMED_LOW_CONFIDENCE` if the dynamic evidence itself leaves residual doubt) | stays `NEEDS_RUNTIME` — dynamic evidence was attempted and inconclusive, still needs a human |
+| `CONFIRMED_LOW_CONFIDENCE` | → `CONFIRMED` | → `NEEDS_RUNTIME` (static evidence said yes, clean dynamic test disagreed — a human must reconcile this, never auto-reject) |
+| `CONFIRMED` | stays `CONFIRMED` (gains stronger evidence in the record) | → `NEEDS_RUNTIME` (same reconciliation reasoning as above) |
+
+**Never auto-promote to `CONFIRMED` past a downgrade path all the way to
+`FALSE_POSITIVE`.** A clean dynamic disproof is real signal, but it is not
+grounds to unilaterally overrule code-level evidence — it downgrades to
+`NEEDS_RUNTIME` (report_tier `NEEDS_REVIEW`) so a human makes the final call,
+with `verdict_reason` stating plainly which evidence conflicts and why (e.g.
+"Code shows the ownership check is missing; a live BOLA attempt against the
+running container returned 403 rather than the other user's resource —
+reconcile manually, possible causes: seed data didn't create a second
+account, or a control exists that wasn't visible in the code read").
+
+**Record every mutation explicitly** — whenever this table changes
+`validation_status`, add a `runtime_verdict_change` object to the finding's
+record: `{"from": "CONFIRMED_LOW_CONFIDENCE", "to": "CONFIRMED", "reason":
+"RUNTIME_CONFIRMED — live SQLi exfiltrated the seeded canary row"}`. Leave it
+`null` when the dynamic result left the verdict unchanged (including every
+environment-failure case). This is what lets Phase 6 and a human reader tell
+"static analysis alone got this right" from "dynamic evidence actually
+changed the call" without re-deriving it from `runtime_notes` prose.
 
 ---
 
-## Part 2: PoC Generation (only if `--poc` is set; CONFIRMED and CONFIRMED_LOW_CONFIDENCE only)
+## Part 2: Exploit Construction (persisted to `pocs/` only if `--poc` is set)
 
-Write the PoC immediately after the validation decision, while you still
-have the full data flow context in mind. Derive all endpoint values from
-`data_flow` established in Step 1:
+Runs whenever `--poc` **or** `--runtime` is set, for every
+`CONFIRMED`/`CONFIRMED_LOW_CONFIDENCE` finding, and for `NEEDS_RUNTIME`
+findings too when `--runtime` is set (Part 3 needs something to execute).
+Construct the exploit immediately after the validation decision, while you
+still have the full data flow context in mind. Derive all endpoint values
+from `data_flow` established in Step 1:
 
 - `BASE_URL + data_flow.entrypoint` → the exact URL to call (HTTP method from entrypoint, path filled in)
 - `data_flow.sink_file:data_flow.sink_line` → the exact line the PoC is targeting (include in the script comment)
@@ -653,6 +737,18 @@ HTTP methods, field names. No unfilled placeholders.
 > constants (e.g. `YOUR_AUTH_TOKEN`, `REPLACE_WITH_SESSION_COOKIE`). Apply
 > the first-4/last-3 redaction rule if a discovered value must be referenced
 > at all. PoC files are outputs that may be shared — treat them accordingly.
+
+**Where the constructed exploit lives depends on `--poc`, not on
+`--runtime`:**
+- **`--poc` is set**: write it to `{repo_path}/.security-review/pocs/poc_{id}_{type}.{ext}`
+  as shown below — a durable artifact, same as before.
+- **`--poc` is not set** (only `--runtime` triggered construction): write it
+  to a scratch path instead — `{repo_path}/.security-review/.tmp-poc-{id}.{ext}`
+  — use it in Part 3, then **delete it** once dynamic verification for that
+  finding completes. Never create the `pocs/` directory for this case. Set
+  `poc_generated: false, poc_file: null` on the finding regardless of whether
+  dynamic verification ran — "generated" means persisted, not merely
+  constructed.
 
 ### SQL Injection PoC
 
@@ -789,32 +885,37 @@ for url in [
 
 ---
 
-## Part 3: Optional Runtime Validation (if `--runtime` flag set; requires `--poc`, which `--runtime` implies)
+## Part 3: Dynamic Verification (if `--runtime` flag set — independent of `--poc`, see Exploit Construction vs. Dynamic Verification above)
 
-Only enter this section if the current finding is in the "runtime earns its cost"
-list from the Runtime Value Assessment above. For all other confirmed findings,
-set `runtime_status: RUNTIME_NOT_NEEDED` and skip to Part 5.
+Only enter this section if the current finding is in the "earns its cost"
+list from the Runtime Value Assessment above — this now includes
+`NEEDS_RUNTIME` findings, not just `CONFIRMED`/`CONFIRMED_LOW_CONFIDENCE`.
+For all other eligible findings, set `runtime_status: RUNTIME_NOT_NEEDED`
+and skip to Part 5.
 
 ### Confirmation gate before any Docker build/run
 
 Before executing `docker build` or `docker run` on target-repo code:
 
 **If `--yes` is NOT set**, print a confirmation prompt and wait for explicit
-user approval. When `--browser` is also set, fold in one extra line rather
-than prompting twice (see `SKILL.md` → Browser-Based Verification & PoC):
+user approval. There is no separate `--browser` flag to check anymore — the
+tool (curl vs. headless browser) is chosen automatically per the Runtime
+Value Assessment table, so fold in the extra line whenever **any** finding
+in this run's candidate list uses the browser tool (XSS/CSRF/clickjacking),
+not conditioned on a flag:
 ```
 ⚠️  Runtime validation requires building and running untrusted code.
     Dockerfile: {path}
     This will execute code from the target repository on your host.
     Proceed? [y/N]:
 ```
-or, with `--browser` also set:
+or, when the run includes an XSS/CSRF/clickjacking finding:
 ```
 ⚠️  Runtime validation requires building and running untrusted code.
     Dockerfile: {path}
     This will execute code from the target repository on your host.
-    --browser is set: a headless Chromium browser will additionally be
-    driven against the running container for this finding.
+    This run includes an XSS/CSRF/clickjacking finding: a headless Chromium
+    browser will additionally be driven against the running container for it.
     Proceed? [y/N]:
 ```
 If the user does not confirm, set `runtime_status: RUNTIME_SKIPPED`,
@@ -932,29 +1033,37 @@ for i in $(seq 1 12); do
 done
 ```
 
-### Run the PoC script
+### Run the exploit — curl/code path (default tool, per Runtime Value Assessment)
 ```bash
-python3 {repo_path}/.security-review/pocs/poc_{id}_{type}.py 2>&1
+python3 {exploit_path}.py 2>&1
 ```
+Where `{exploit_path}` is `pocs/poc_{id}_{type}` if `--poc` is set, or
+`.tmp-poc-{id}` (scratch, deleted after this step) if only `--runtime` is
+set — see Part 2 → "Where the constructed exploit lives."
 
 Record outcome as `RUNTIME_CONFIRMED`, `RUNTIME_NOT_CONFIRMED`, or
-`RUNTIME_ERROR`.
+`RUNTIME_ERROR`, then apply the verdict-mutation table from the Runtime
+Value Assessment section above.
 
-This is the default path for every finding type. Skip straight to Tear Down
-unless the escalation below applies.
+This is the tool for every finding type **except** XSS, CSRF, and
+clickjacking. Skip straight to Tear Down unless the browser-driven variant
+below applies.
 
-### Run the PoC script — browser-driven variant (only if `--browser` was
-passed AND the finding's `vulnerability_type` is XSS, CSRF, or clickjacking)
+### Run the exploit — browser-driven variant (automatic tool selection: the
+finding's `vulnerability_type` is XSS, CSRF, or clickjacking — no separate
+flag needed, see Runtime Value Assessment's Tool column)
 
-The plain PoC above only proves a payload is *reflected unescaped in the
+The curl/code path above only proves a payload is *reflected unescaped in the
 response body* for XSS, or that a request *reaches* the target for CSRF —
 it cannot prove the payload actually executes, or that framing actually
 renders. See `SKILL.md` → Browser-Based Verification & PoC for the
 rationale and sandboxing rules; this is the execution recipe, run in place
-of (not in addition to) the plain PoC above for these three types.
+of (not in addition to) the curl/code path above for these three types.
 
 ```python
-# {repo_path}/.security-review/pocs/.{finding_id}-browser-poc.py — delete after use
+# Script path: pocs/.{finding_id}-browser-poc.py if --poc is set (kept
+# alongside the persisted exploit), else a scratch path deleted after this
+# step — same persist/scratch split as the curl/code path (Part 2).
 from playwright.sync_api import sync_playwright
 import json
 
@@ -962,7 +1071,12 @@ PORT = "{listen_port}"                 # from tech-stack.json → runtime_hints
 BASE_URL = f"http://localhost:{PORT}"
 FINDING_ID = "{finding_id}"
 VULN_TYPE = "{vulnerability_type}"      # "xss" | "csrf" | "clickjacking"
-SCREENSHOT = "{repo_path}/.security-review/pocs/" + FINDING_ID + "-screenshot.png"
+# Screenshot always saved as real evidence, regardless of --poc — under
+# pocs/ when that directory exists (--poc set), else directly under
+# .security-review/ (no pocs/ directory is created when --poc is not set).
+SCREENSHOT = "{repo_path}/.security-review/pocs/" + FINDING_ID + "-screenshot.png" \
+    if {poc_flag_set} else \
+    "{repo_path}/.security-review/" + FINDING_ID + "-runtime-screenshot.png"
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
@@ -1012,14 +1126,17 @@ with sync_playwright() as p:
     print(json.dumps(result))
 ```
 
-Run with `python3 {repo_path}/.security-review/pocs/.{finding_id}-browser-poc.py`,
-capture its JSON stdout as the finding's `runtime_status`/`runtime_notes`,
-save the screenshot at `pocs/{finding_id}-screenshot.png` (already the
-script's `SCREENSHOT` path), and delete the `.{finding_id}-browser-poc.py`
-script itself — working state, not a report artifact. If `playwright` or its
-Chromium binary is unavailable, or `--browser`'s confirmation was declined,
-fall back to the plain PoC path above and note in `runtime_notes` that
-browser confirmation was unavailable for this finding.
+Run the script, capture its JSON stdout as the finding's
+`runtime_status`/`runtime_notes`, and apply the verdict-mutation table from
+Runtime Value Assessment. The screenshot at `SCREENSHOT` is real evidence and
+is always kept (referenced from `runtime_notes` either way); the driver
+script itself is deleted after this step unless `--poc` is set (in which
+case it stays alongside the finding's other persisted exploit files). If
+`playwright` or its Chromium binary is unavailable, or the Docker
+confirmation gate above was declined, fall back to the curl/code path
+instead and note in `runtime_notes` that browser confirmation was
+unavailable for this finding — this is an availability fallback, not a
+separate opt-in flag to check.
 
 ### Tear down
 ```bash
@@ -1180,15 +1297,15 @@ evidence of safety and must not be presented as such.
 Every runtime path must terminate in one of these statuses. Never silently
 swallow a failure.
 
-| Status | Trigger | Required notes |
-|---|---|---|
-| `RUNTIME_CONFIRMED` | PoC ran, success indicator observed | — |
-| `RUNTIME_NOT_CONFIRMED` | PoC ran fully, success indicator not observed | Safety signal — only use when the PoC actually executed |
-| `RUNTIME_NOT_NEEDED` | Finding type is in the "static conclusive" list | Reason: which specific criterion (e.g. "fail-open auth confirmed by direct code path") |
-| `RUNTIME_SKIPPED` | Docker unavailable · stack unsupported · PoC setup step failed (`missing_seed_data`) | Reason code required; `missing_seed_data` must note the vulnerability was not tested, not ruled out |
-| `RUNTIME_BUILD_FAILED` | Docker was available and a Dockerfile was found, but `docker build` failed | Last 20 lines of build output; include the image name that failed to pull if that was the cause |
-| `RUNTIME_SYNTHESIS_FAILED` | Synthesis attempted but build / startup failed | Last 20 lines of `docker compose logs` |
-| `RUNTIME_ERROR` | Unexpected failure during PoC execution | Exception or exit code |
+| Status | Trigger | Required notes | Can move the verdict? |
+|---|---|---|---|
+| `RUNTIME_CONFIRMED` | PoC/browser action ran, success indicator observed | — | **Yes** — see Runtime Value Assessment → Verdict mutation table |
+| `RUNTIME_NOT_CONFIRMED` | PoC/browser action ran fully, success indicator not observed | Safety signal — only use when it actually executed cleanly | **Yes** — same table (downgrades toward `NEEDS_RUNTIME`, never straight to rejected) |
+| `RUNTIME_NOT_NEEDED` | Finding type is in the "static conclusive" list | Reason: which specific criterion (e.g. "fail-open auth confirmed by direct code path") | No |
+| `RUNTIME_SKIPPED` | Docker/Playwright unavailable · stack unsupported · setup step failed (`missing_seed_data`) · confirmation declined | Reason code required; `missing_seed_data` must note the vulnerability was not tested, not ruled out | No — environment failure, never treated as evidence either way |
+| `RUNTIME_BUILD_FAILED` | Docker was available and a Dockerfile was found, but `docker build` failed | Last 20 lines of build output; include the image name that failed to pull if that was the cause | No |
+| `RUNTIME_SYNTHESIS_FAILED` | Synthesis attempted but build / startup failed | Last 20 lines of `docker compose logs` | No |
+| `RUNTIME_ERROR` | Unexpected failure during execution | Exception or exit code | No |
 
 **`RUNTIME_BUILD_FAILED` is distinct from `RUNTIME_SKIPPED`**: "skipped" means
 the attempt was never made; "build failed" means Docker ran and reported an
@@ -1438,6 +1555,7 @@ their final shape, not a new write step.
       "poc_file": "poc_O-001_sqli.py",
       "runtime_status": "RUNTIME_SKIPPED",
       "runtime_notes": "Docker not available in this environment",
+      "runtime_verdict_change": null,
       "manual_validation_instructions": "Build the app locally, then: python3 .security-review/pocs/poc_O-001_sqli.py"
     },
     {

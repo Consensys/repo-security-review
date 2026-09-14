@@ -43,13 +43,24 @@ Options:
   --output <dir>        Directory to save the report and PoC scripts into.
                         Default: (single-repo: none — everything stays in
                         <repo>/.security-review/) (multi-repo: ./system-security-review/)
-  --poc                 Opt-in: generate a PoC for each finding Phase 5
-                        confirms. Without this flag (the default), Phase 5
-                        still validates every finding, but writes no PoC
-                        files. Has no effect in --pr mode; forced off in
-                        --vendor mode.
-  --runtime             Enable Docker-based runtime PoC validation. Implies
-                        --poc.
+  --poc                 Opt-in: persist the constructed exploit for each
+                        finding Phase 5 confirms as a durable script under
+                        pocs/. Independent of --runtime — does not execute
+                        anything by itself. Without this flag (the default),
+                        no files are written under pocs/ even if --runtime
+                        constructs and runs an exploit internally. Has no
+                        effect in --pr mode; forced off in --vendor mode.
+  --runtime             Opt-in: dynamically verify eligible findings
+                        (including ones static analysis alone couldn't
+                        resolve) by constructing the exploit and executing
+                        it against the repo stood up in Docker. Tool is
+                        chosen automatically per finding type — curl for
+                        most types, a headless Chromium browser for
+                        XSS/CSRF/clickjacking — no separate flag for that
+                        choice. A clean result can strengthen or soften the
+                        finding's verdict (never straight to rejected). No
+                        longer implies --poc — the constructed exploit is
+                        discarded after use unless --poc is also set.
   --yes                 Non-interactive / CI mode. Auto-confirms all prompts:
                         the --output copy gate, the Docker runtime gate, the
                         deployment-verification gate (--verify-deployment),
@@ -60,8 +71,9 @@ Options:
   --cost                Write a cost report to
                         <repo>/.security-review/cost-report.md: duration and
                         estimated token consumption for every phase that ran,
-                        including named subphases (3b; Phase 5's PoC/Runtime
-                        parts when --poc/--runtime were set). Scoped strictly
+                        including named subphases (3b; Phase 5's Exploit
+                        Construction/Dynamic Verification parts when
+                        --poc/--runtime were set). Scoped strictly
                         to time/tokens — no file-read tables, coverage,
                         greps, or checks-run detail (renamed from --debug,
                         which used to include that). Paste it back for cost
@@ -89,18 +101,16 @@ Options:
                         Phase 5 (Step 0.4), gated behind an explicit
                         confirmation prompt before anything is sent (--yes
                         auto-confirms, same as the --runtime Docker gate).
+                        If the HTTP-only check is inconclusive, automatically
+                        escalates to a headless Chromium (Playwright) recheck
+                        (no separate flag) — its own confirmation prompt
+                        first. Requires playwright + Chromium for that
+                        escalation (not auto-installed by setup.sh; falls
+                        back to the HTTP-only result if unavailable).
                         Writes <repo>/.security-review/deployment-verification.json.
                         No effect in --pr mode or when validation is skipped.
                         Example:
                         --verify-deployment https://app.example.com
-  --browser             Opt-in: unlocks a headless Chromium (Playwright)
-                        escalation on top of --verify-deployment (when the
-                        HTTP-only check is inconclusive) and --runtime PoCs
-                        (XSS/CSRF/clickjacking findings). No effect without
-                        at least one of those two flags also set. Its own
-                        confirmation prompt(s) before any browser launches
-                        (--yes auto-confirms). Requires playwright + Chromium
-                        (not auto-installed by setup.sh).
   --sonnet              Experimental: overrides Phase 2 (Deep tier) from Opus
                         to Sonnet family for this run, to A/B scan quality
                         and token consumption. Standard tier is unaffected
@@ -166,9 +176,12 @@ Phases you can skip (--skip <name>):
 
 Cascade rules:
   --skip owasp        → also skips validation (nothing to validate); --poc
-                        then has no effect
-  --skip validation   → --poc has no effect (PoC requires a validation verdict)
-  --runtime           → implies --poc (runtime validation needs a PoC to run)
+                        and --runtime then both have no effect
+  --skip validation   → --poc and --runtime both have no effect (nothing to
+                        construct an exploit for)
+  --runtime           → independent of --poc now; constructs and executes
+                        an exploit either way, but only persists it to
+                        pocs/ if --poc is also set
   --skip architecture → skips both Phase 2a and Phase 2, and also skips
                         skill-security (skill detection requires
                         tech-stack.json from Phase 2a)
@@ -189,7 +202,8 @@ Examples:
   # Architecture review only — no code-level analysis
   /repo-security-review ~/repos/my-service --skip dependencies,owasp
 
-  # Full review with runtime PoC validation via Docker (--runtime implies --poc)
+  # Full review with dynamic verification via Docker (exploit discarded after use;
+  # add --poc to also keep it in pocs/)
   /repo-security-review ~/repos/my-service --runtime --output ~/reports/my-service
 
   # CI / headless — no interactive prompts, validation only (default: no PoC files)
@@ -232,10 +246,17 @@ Parse `$ARGUMENTS` for:
   copied here at the end. Created if it doesn't exist.
   Default (single-repo): none — when omitted everything stays at `{repo_path}/.security-review/`
   Default (multi-repo): `./system-security-review/`
-- `--poc` → opt-in: generate a PoC for each finding Phase 5 confirms.
-  Without it (the default), Phase 5 validates every finding but writes no
-  PoC files. Has no effect in `--pr` mode; forced off in `--vendor` mode.
-- `--runtime` → enable Docker-based runtime PoC validation in Phase 5. Implies `--poc`.
+- `--poc` → opt-in: persist the constructed exploit for each finding Phase 5
+  confirms to `pocs/` as a durable script. Independent of `--runtime` — does
+  not execute anything by itself. Without it (the default), no files are
+  written under `pocs/` even if `--runtime` constructs and runs an exploit
+  internally. Has no effect in `--pr` mode; forced off in `--vendor` mode.
+- `--runtime` → opt-in: dynamically verify eligible findings (including ones
+  static analysis alone couldn't resolve) against the repo stood up in
+  Docker in Phase 5. Tool chosen automatically per finding type — curl for
+  most, a headless Chromium browser for XSS/CSRF/clickjacking, no separate
+  flag for that choice. A clean result can strengthen or soften the
+  finding's verdict. No longer implies `--poc`.
 - `--yes` → non-interactive mode: auto-confirm all user-facing prompts
   (the `--output` copy gate, the Docker runtime gate, the pure-skill-repo
   auto-skip cascade). Path-validation safety checks are never bypassed.
@@ -265,20 +286,20 @@ Parse `$ARGUMENTS` for:
   the result as `gated` / `waf_present` / `not_gated` / `inconclusive` and
   writes `deployment-verification.json`. `auth_required_to_reach` for
   Phase 5's Boundary Gate and severity Axis 2 is `true` only when this file
-  exists and `classification == "gated"`. No effect in `--pr` mode or when
-  `validation` is skipped.
-- `--browser` → opt-in: unlocks a headless Chromium (Playwright) escalation
-  at two points, only when the flag it augments is also set: (1) Step 0.4's
-  Verify Deployment check, when the `curl`-based classification comes back
-  `not_gated`/`inconclusive` — a client-side-rendered SPA login wall (no
-  server redirect) is invisible to `curl` by construction; (2) Part 3's
-  runtime PoC for XSS/CSRF/clickjacking findings, where a `curl`-based PoC
-  can prove reflection but not actual execution/rendering. No effect without
-  `--verify-deployment` and/or `--runtime` also set. Its own confirmation
-  gate(s) (auto-confirmed by `--yes`) — folded into the existing Docker
-  prompt for the runtime case, a separate prompt for the verify-deployment
-  case. Ephemeral, headless, origin-scoped browser context every time; never
-  persists across findings or across a run.
+  exists and `classification == "gated"`. If the classification comes back
+  `not_gated`/`inconclusive`, automatically escalates to a headless Chromium
+  (Playwright) recheck — no separate flag, a client-side-rendered SPA login
+  wall with no server redirect is invisible to `curl` by construction. The
+  escalation gets its own confirmation prompt (auto-confirmed by `--yes`)
+  and falls back to the `curl` result if Playwright is unavailable or the
+  prompt is declined. No effect in `--pr` mode or when `validation` is
+  skipped.
+
+  The same automatic browser choice applies to `--runtime`'s dynamic
+  verification for XSS/CSRF/clickjacking findings (Part 3) — a `curl`-based
+  check can prove reflection but not actual execution/rendering. Both
+  escalation points use an ephemeral, headless, origin-scoped browser
+  context every time; it never persists across findings or across a run.
 - `--sonnet` → experimental: for this run, Phase 2 (Deep tier) resolves
   against the Sonnet family instead of Opus (falls back to Haiku only if
   Sonnet is entirely unavailable), so quality/token consumption can be
@@ -297,10 +318,10 @@ Abort with a clear error if any skip value is not in the allowed list above:
 `❌ Unknown --skip value: "{value}". Allowed: secrets, architecture, dependencies, owasp, validation, skill-security`
 
 Apply cascade rules silently:
-- `--skip owasp` → add `validation` to skip list; `--poc` then has no effect
-- `--skip validation` → `--poc` has no effect (PoC requires a validation verdict)
-- `--runtime` without `--poc` → treat `--poc` as set (runtime validation needs a PoC to run)
-- `--poc` not set → pass no PoC flag to Phase 5; it validates every finding but writes no PoC files
+- `--skip owasp` → add `validation` to skip list; `--poc`/`--runtime` then both have no effect
+- `--skip validation` → `--poc`/`--runtime` both have no effect (nothing to construct an exploit for)
+- `--runtime` without `--poc` → construct and execute the exploit normally, but discard it after use instead of persisting to `pocs/`
+- `--poc` not set, `--runtime` not set → pass neither flag to Phase 5; it validates every finding, constructs nothing, writes no PoC files
 - `--skip architecture` → also skip Phase 2a and add `skill-security` to skip list (skill detection requires Phase 2a's output)
 
 **Multi-repo validation:** if `--repos` is set with only one path, warn:
@@ -361,9 +382,9 @@ which semgrep     && semgrep --version || echo "⚠️  semgrep not found (Phase
   { which docker && docker --version   || echo "⚠️  docker not found (runtime validation disabled)"; }
 [ -n "$VERIFY_DEPLOYMENT_URL" ] && \
   { which curl && curl --version | head -1 || echo "⚠️  curl not found (--verify-deployment disabled)"; }
-[ "$BROWSER" = true ] && \
-  { python3 -c "import playwright" 2>/dev/null && echo "✅ playwright installed" \
-    || echo "⚠️  playwright not found (--browser disabled; pip3 install playwright && playwright install chromium)"; }
+[ -n "$VERIFY_DEPLOYMENT_URL" -o "$RUNTIME" = true ] && \
+  { python3 -c "import playwright" 2>/dev/null && echo "✅ playwright installed (used automatically when a browser check is needed)" \
+    || echo "ℹ️  playwright not found — browser-based checks will fall back to curl-only (pip3 install playwright && playwright install chromium to enable)"; }
 ```
 
 ## Step 6: Create working directories
@@ -418,12 +439,14 @@ After Phase 2a: read tech-stack.json.
       else →
         Print "ℹ️  Skill files detected but --skill-security was not passed — Phase 4b skipped by default."
         Do not run Phase 4b.
-    Run Phase 5 (unless skipped) — passes --verify-deployment's URL, --browser,
-      and the --yes flag if set; Phase 5's own Step 0.4 handles the
-      confirmation gate and the live check (with browser escalation if
-      applicable) before its per-finding loop begins, and Part 3 handles the
-      browser-driven PoC variant for XSS/CSRF/clickjacking findings when
-      --runtime and --browser are both set.
+    Run Phase 5 (unless skipped) — passes --poc, --runtime,
+      --verify-deployment's URL, and the --yes flag if set; Phase 5's own
+      Step 0.4 handles the confirmation gate and the live check (with
+      automatic browser escalation if the HTTP-only result is inconclusive)
+      before its per-finding loop begins, and Part 3 handles dynamic
+      verification for confirmed/NEEDS_RUNTIME findings when --runtime is
+      set — automatically using a headless browser instead of curl for
+      XSS/CSRF/clickjacking findings, with no separate flag to check.
     Run Phase 6.
 ```
 

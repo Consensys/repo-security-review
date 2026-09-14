@@ -17,7 +17,7 @@ mkdir -p ~/.claude/skills
 git clone https://github.com/<your-org>/repo-security-review ~/.claude/skills/repo-security-review
 ```
 
-Install the external scanners the phases use (`gitleaks`, `osv-scanner`, `semgrep`, `jq`, `curl` for `--verify-deployment`, and optionally `docker` for `--runtime` or `playwright`+Chromium for `--browser`):
+Install the external scanners the phases use (`gitleaks`, `osv-scanner`, `semgrep`, `jq`, `curl` for `--verify-deployment`, and optionally `docker` for `--runtime` — `playwright`+Chromium is also optional and used automatically by `--runtime`/`--verify-deployment` when a check needs a browser, no separate flag):
 
 ```bash
 bash ~/.claude/skills/repo-security-review/scripts/setup.sh
@@ -41,10 +41,12 @@ In any Claude Code session (CLI or Desktop), point the skill at a local repo pat
 # Skip phases you don't need, copy the report somewhere
 /repo-security-review /path/to/repo --skip secrets,dependencies --output ~/reports/myapp
 
-# Generate PoCs for confirmed findings
+# Generate and keep a PoC script for confirmed findings (not executed)
 /repo-security-review /path/to/repo --poc
 
-# Runtime PoC validation in Docker (implies --poc)
+# Dynamically verify eligible findings against Docker — strengthens/softens
+# verdicts; tool (curl vs. headless browser) chosen automatically per finding
+# type. Exploit is discarded after use — add --poc to also keep it in pocs/
 /repo-security-review /path/to/repo --runtime
 
 # CI / headless — validation only (default: no PoC files), no prompts
@@ -53,8 +55,9 @@ In any Claude Code session (CLI or Desktop), point the skill at a local repo pat
 # Calibrate severity for a local-only tool, and verify the real deployment is auth-gated
 /repo-security-review /path/to/repo --context deployment_target=local --verify-deployment https://app.example.com
 
-# Runtime PoC validation with browser confirmation for XSS/CSRF/clickjacking
-/repo-security-review /path/to/repo --runtime --browser
+# Dynamically verify AND keep the PoC scripts (including any XSS/CSRF/
+# clickjacking findings, browser-driven automatically)
+/repo-security-review /path/to/repo --runtime --poc
 
 # Multi-repo — analyze several services, get a system-level report
 /repo-security-review --repos ~/svcs/auth,~/svcs/gateway,~/svcs/users --output ~/reports/my-system
@@ -73,20 +76,19 @@ In any Claude Code session (CLI or Desktop), point the skill at a local repo pat
 | `--repos <paths>` | none | Comma-separated repo paths → multi-repo mode (adds cross-service topology + synthesis). |
 | `--skip <phases>` | none | Comma-separated: `secrets`, `architecture`, `dependencies`, `owasp`, `skill-security`, `validation`. |
 | `--output <dir>` | none | Copy the report and PoC scripts into this directory after the run (created if needed). |
-| `--poc` | off | Opt-in: generate a PoC for each finding Phase 5 confirms. Without it, Phase 5 still validates every finding, but writes no PoC files. |
-| `--runtime` | off | Stand the app up in Docker and run each confirmed PoC against it. Implies `--poc`. |
+| `--poc` | off | Opt-in: persist the constructed exploit for each finding Phase 5 confirms as a durable script under `pocs/`. Independent of `--runtime` — doesn't execute anything by itself. |
+| `--runtime` | off | Opt-in: dynamically verify eligible findings against the app stood up in Docker (curl or headless browser, chosen automatically per finding type). A clean result can strengthen or soften the verdict. No longer implies `--poc` — the exploit is discarded after use unless `--poc` is also set. |
 | `--vendor` | off | Third-party adoption audit. Skips secrets/dependencies, forces PoC generation off, pins all phases to Sonnet, and produces an adoption-risk report (verdict + conditions + "what it does" + adopter-side controls). |
 | `--pr <base>...<head>` | none | PR review mode. Reviews only a pull request's diff — no full-repo scan needed first. `--pr <base>` is shorthand for `<base>...HEAD`. Pins to Sonnet, writes `pr-report.md`. Mutually exclusive with `--repos` and `--vendor`. |
 | `--context <pairs>` | none | Inline threat model to calibrate severity: `deployment_target=local\|public`. Softens only — never sharpens. |
-| `--verify-deployment <url>` | none | Opt-in: send one live, passive HTTP check to a real deployment URL so Phase 5 derives `auth_required_to_reach` from an actual observation (login/SSO redirect, WAF challenge) instead of a declared claim. Gated behind an explicit confirmation prompt (`--yes` auto-confirms). |
-| `--browser` | off | Opt-in: unlocks a headless Chromium (Playwright) escalation for `--verify-deployment` (when the HTTP check is inconclusive) and for `--runtime` PoCs (XSS/CSRF/clickjacking). No effect without one of those two flags also set. Own confirmation prompt (`--yes` auto-confirms). |
+| `--verify-deployment <url>` | none | Opt-in: send one live, passive HTTP check to a real deployment URL so Phase 5 derives `auth_required_to_reach` from an actual observation (login/SSO redirect, WAF challenge) instead of a declared claim. If inconclusive, automatically escalates to a headless-browser recheck (no separate flag). Gated behind confirmation prompt(s) (`--yes` auto-confirms). |
 | `--yes` | off | Non-interactive / CI mode — auto-confirms prompts (safety path checks still apply). |
-| `--cost` | off | Write `.security-review/cost-report.md` — duration and estimated token consumption for every phase that ran (and named subphases, e.g. 3b, Phase 5's PoC/Runtime parts). Renamed from `--debug`; no longer includes file-read/coverage/checks detail. |
+| `--cost` | off | Write `.security-review/cost-report.md` — duration and estimated token consumption for every phase that ran (and named subphases, e.g. 3b, Phase 5's Exploit Construction/Dynamic Verification parts). Renamed from `--debug`; no longer includes file-read/coverage/checks detail. |
 | `--sonnet` | off | Apply Sonnet instead of Opus for phase2 to save some tokens in default scan mode. Often increases false negative and decreases false positive.|
 | `--skill-security` | off | Opt-in: run Phase 4b (LLM/AI skill security) on a mixed repo that also contains a `SKILL.md`/`.claude/commands/`. Without it, a mixed repo never runs Phase 4b by default — just having those files present isn't reason enough, since ordinary `CLAUDE.md`/`AGENTS.md` docs are common in AI-assisted projects. Redundant on a repo that's *entirely* skill/agent content (Phase 4b auto-runs there regardless) and in `--vendor` mode (already auto-runs it). |
 | `--help` | — | Show usage. |
 
-**Skip cascades** (applied silently): `--skip owasp` also skips `validation` (and PoC generation has nothing left to run against); `--skip validation` means `--poc` has no effect; `--skip architecture` also skips `skill-security`. `--vendor` forces skip of `secrets` and `dependencies`, and forces PoC generation off regardless of `--poc`. In `--pr` mode the same skip names apply but target its own steps instead of numbered phases, and `architecture` cannot be skipped (its diff-scoped context is load-bearing for every other step); `--poc` has no effect in `--pr` mode.
+**Skip cascades** (applied silently): `--skip owasp` also skips `validation` (nothing left to validate); `--skip validation` means `--poc` and `--runtime` both have no effect (no findings to construct an exploit for); `--skip architecture` also skips `skill-security`. `--vendor` forces skip of `secrets` and `dependencies`, and forces PoC generation off regardless of `--poc`. In `--pr` mode the same skip names apply but target its own steps instead of numbered phases, and `architecture` cannot be skipped (its diff-scoped context is load-bearing for every other step); `--poc`/`--runtime` have no effect in `--pr` mode.
 
 ### Output
 
