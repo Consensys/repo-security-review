@@ -37,6 +37,7 @@ Before running, ensure these CLI tools are available (install if missing):
 - `poetry` — exports `poetry.lock` so pip-audit can read it. Optional (Poetry projects only).
 - `docker` — runtime PoC validation. Optional (`--runtime` flag only).
 - `curl` — live deployment check. Optional (`--verify-deployment` flag only); present on virtually every system by default.
+- `playwright` (Python package) + Chromium browser binary — headless-browser escalation for verification/PoC. Optional (`--browser` flag only). Not auto-installed by `setup.sh` — the browser binary download is large; check-only, with an install hint if missing.
 
 `npm audit` is not listed — it is bundled with npm and available automatically in any Node.js project.
 
@@ -53,6 +54,7 @@ The user provides:
 3. **Report output path** (optional): where to write the final report
 4. **Runtime validation** (optional): whether to spin up Docker for PoC testing
 5. **Deployment verification** (optional): a live URL to check for an auth gate/WAF
+6. **Browser escalation** (optional): whether to unlock headless-browser checks on top of `--verify-deployment`/`--runtime`
 
 Parse these from `$ARGUMENTS` using the format:
 ```
@@ -73,9 +75,10 @@ Parse these from `$ARGUMENTS` using the format:
 | `--pr` | none | PR Review mode. `--pr <base>...<head>` (or `--pr <base>` shorthand for `<base>...HEAD`) reviews only a pull request's diff instead of the whole repository — replaces the 6/7-phase pipeline with `references/pr-review.md`, pins to the resolved Standard tier model, and writes `pr-report.md` instead of `final-report.md`. Mutually exclusive with `--repos` and `--vendor`. See [PR Review Mode](#pr-review-mode---pr) below. |
 | `--context` | none | Inline `key=value,key=value` threat model used to calibrate severity. Optional — omit for default behavior. See [`--context`](#--context-threat-model-calibration) below. |
 | `--verify-deployment` | none | Opt-in: `--verify-deployment <url>` sends one live, passive HTTP check to a real deployment URL so Phase 5 can derive `auth_required_to_reach` from an actual observation instead of a declared claim. Gated behind an explicit confirmation prompt (auto-confirmed by `--yes`). No effect in PR mode or when `validation` is skipped. See [Verify Deployment](#verify-deployment---verify-deployment) below. |
+| `--browser` | false | Opt-in: unlocks a headless Chromium (Playwright) escalation for `--verify-deployment` (when the HTTP-only check is inconclusive) and for `--runtime` PoC execution (XSS/CSRF/clickjacking findings). No effect without at least one of those two flags also set. Gated behind its own confirmation prompt(s) (auto-confirmed by `--yes`). See [Browser-Based Verification & PoC](#browser-based-verification--poc---browser) below. |
 | `--sonnet` | false | Experimental / comparison flag: overrides Deep tier's primary family from Opus to Sonnet for this run (falls back to Haiku family only if Sonnet is entirely unavailable — Standard tier is unaffected, it already uses Sonnet). Exists to A/B scan quality and token consumption between Opus and Sonnet on Phase 2, not for routine use. Has no effect in Vendor mode (already pinned to Standard/Sonnet, no Deep tier at all) or PR mode (no Phase 2 / Deep tier in that mode). |
 | `--skill-security` | false | Opt-in: run Phase 4b (LLM/AI skill security) on a **mixed repo** (`is_skill_repo: false`) even though Phase 2a detected skill/agent-instruction files (`has_skill_files: true`). Without this flag, a mixed repo never runs Phase 4b by default in the **default report mode** — `has_skill_files: true` alone is a structural signal, not an auto-run trigger, for mixed repos. Redundant (already going to run) on a **pure skill repo** (`is_skill_repo: true`, e.g. this skill's own repo — use `--skip skill-security` to suppress it there instead) and in **Vendor mode** (`--vendor` already auto-runs Phase 4b on `has_skill_files: true` regardless of `is_skill_repo`, since assessing a vendor's AI-tooling risk is the point of that mode — see Vendor Mode below). No effect in PR mode (Phase 4b never runs there). |
-| `--yes` | false | Non-interactive mode. Auto-confirms all user-facing prompts: the `--output` copy confirmation, the Docker runtime gate (`--runtime`), the deployment-verification gate (`--verify-deployment`), and the pure-skill-repo auto-skip cascade. Path-validation safety checks (rejecting sensitive `--output` destinations) are never bypassed. Use in CI or scripted runs. |
+| `--yes` | false | Non-interactive mode. Auto-confirms all user-facing prompts: the `--output` copy confirmation, the Docker runtime gate (`--runtime`), the deployment-verification gate (`--verify-deployment`), the headless-browser gate(s) (`--browser`), and the pure-skill-repo auto-skip cascade. Path-validation safety checks (rejecting sensitive `--output` destinations) are never bypassed. Use in CI or scripted runs. |
 | `--cost` | false | Write a paste-friendly cost report to `{repo_path}/.security-review/cost-report.md` recording each phase's (and named subphase's) duration and estimated token consumption. Scoped strictly to time/tokens — no file-read tables, coverage, greps, or checks-run detail. Independent of report mode. Renamed from `--debug`. See [Cost Report](#cost-report---cost) below. |
 
 If no repo path is provided and `--repos` is not set, ask the user before proceeding.
@@ -577,6 +580,112 @@ never runs, so there is nothing to feed the result into). Works normally in
 **Vendor mode** (Phase 5 still runs there; only PoC generation is forced
 off).
 
+## Browser-Based Verification & PoC (`--browser`)
+
+`--browser` opts into a **headless Chromium browser** (Playwright) as an
+escalation on top of the plain-HTTP mechanisms above, for the two places a
+raw `curl`/`docker run` genuinely can't see far enough:
+
+1. **Verify Deployment escalation** — when `--verify-deployment <url>`'s
+   `curl`-based check (Step 0.4) comes back `not_gated` or `inconclusive`,
+   a client-side-rendered SPA that decides "not authenticated" purely in
+   JavaScript (no server-side redirect at all) is invisible to `curl` by
+   construction — see [Verify Deployment](#verify-deployment---verify-deployment)
+   → Known limitations. A real browser executes that JS and can see the
+   actual post-render URL/DOM.
+2. **Runtime PoC escalation** — when `--runtime`'s Docker-hosted PoC
+   (Part 3 of `phase5-validate-and-poc.md`) is validating an XSS, CSRF, or
+   clickjacking finding, a `curl`-based PoC can only prove a payload is
+   *reflected unescaped in the response body* — it cannot prove the payload
+   *executes* (CSP, encoding context, and browser parsing all affect that).
+   A real browser can confirm actual execution, drive a CSRF submission with
+   a real session, or attempt to frame the target and observe whether it
+   renders.
+
+**`--browser` has no effect by itself.** It only changes behavior when
+combined with `--verify-deployment` and/or `--runtime` — with neither set,
+print `ℹ️  --browser has no effect without --verify-deployment or --runtime`
+and continue; there is nothing for it to escalate.
+
+### Why this is not automatic
+
+Rendering live, untrusted JavaScript in a real browser engine is a distinct
+and larger attack surface than either existing mechanism it augments —
+larger than a passive `curl` GET (no JS execution at all), and a different
+risk shape than `docker run` (a browser engine parsing arbitrary
+attacker-influenced HTML/CSS/JS is a well-known historical source of
+sandbox-escape vulnerabilities). It gets its own opt-in flag and its own
+confirmation gate rather than running whenever `--verify-deployment` or
+`--runtime` alone are set.
+
+### Confirmation gate
+
+Both escalation points reuse the same rationale as the Docker runtime gate
+and the Verify Deployment HTTP gate — explicit consent before launching
+anything, auto-confirmed by `--yes`:
+
+- **Verify Deployment escalation** gets its own prompt (there is no existing
+  gate at that point in Phase 5 to fold into):
+  ```
+  ⚠️  The HTTP-only check was inconclusive. Escalating to a headless browser
+      requires rendering this URL's live JavaScript.
+      URL: {url}
+      Proceed? [y/N]:
+  ```
+- **Runtime PoC escalation** folds one additional line into the *existing*
+  Part 3 Docker confirmation prompt (see `phase5-validate-and-poc.md` → Part
+  3) rather than prompting twice for one PoC:
+  ```
+  ⚠️  Runtime validation requires building and running untrusted code.
+      Dockerfile: {path}
+      This will execute code from the target repository on your host.
+      --browser is set: a headless Chromium browser will additionally be
+      driven against the running container for this finding.
+      Proceed? [y/N]:
+  ```
+
+### Sandboxing
+
+Every browser launch, at either escalation point:
+- **Headless**, ephemeral context — no persistent profile, no cookies or
+  storage carried over between checks or across findings.
+- **No downloads**, no extensions, no DevTools protocol exposed externally.
+- **Origin-scoped**: only navigate within the target's own origin (plus
+  whatever cross-origin navigation a specific PoC step requires, e.g. a
+  CSRF form's cross-origin submission target) — never follow arbitrary
+  links the page presents.
+- **Timeout-bounded** (a hung page must not hang the phase) and **disposed
+  immediately** after the check/PoC completes — the browser context does
+  not persist across findings or across a scan.
+
+### Prerequisites
+
+`playwright` (Python package) + its Chromium browser binary
+(`playwright install chromium`) — optional, `--browser` flag only. **Not
+auto-installed by `setup.sh`** (unlike the CLI scanners) — the browser
+binary download is large enough that it should be an explicit, visible step
+the user takes, not something that happens silently during setup. `setup.sh`
+only checks for it and prints an install hint if missing.
+
+### Output
+
+- Verify Deployment escalation: if it changes the classification (most
+  usefully `not_gated` → `gated`), update `deployment-verification.json`'s
+  `method` field to record both stages (e.g. `"curl (initial, not_gated) +
+  headless browser escalation (Chromium, JS executed, gated)"`) and add a
+  `screenshot` field pointing at
+  `{repo_path}/.security-review/deployment-verification-screenshot.png`
+  saved before the browser context is disposed. If the escalation does not
+  change the classification, or Playwright is unavailable, or the
+  confirmation is declined, record why in `signals` and leave the
+  `curl`-based classification as final — never regress a confident `gated`/
+  `waf_present` result because a browser recheck was inconclusive.
+- Runtime PoC escalation: the finding's `runtime_notes` records that
+  Playwright drove the PoC, and a screenshot is saved alongside the PoC
+  script at `{repo_path}/.security-review/pocs/{finding_id}-screenshot.png`
+  when the vulnerability type is XSS, CSRF, or clickjacking and the browser
+  step actually ran.
+
 ## Vendor Mode (`--vendor`)
 
 `--vendor` switches the skill from its default posture — reviewing an
@@ -915,8 +1024,8 @@ from having the validator's full reasoning in context while it's still fresh.
    - Its reference file from `references/`
    - The file paths of its inputs (not the content)
    - The repo path and working directory path
-   - Any flags relevant to it (`--poc`, `--runtime`, and `--verify-deployment`
-     (plus `--yes`, for its confirmation gate) for Phase 5,
+   - Any flags relevant to it (`--poc`, `--runtime`, `--verify-deployment`,
+     and `--browser` (plus `--yes`, for their confirmation gates) for Phase 5,
      `--vendor` for Phase 6 **and** Phase 7 — selects the vendor report format,
      `--cost` for every phase that runs — each appends its own duration +
      token section to the cost report,
@@ -973,6 +1082,7 @@ Each phase writes its findings to a working directory inside the repo:
 ├── tech-stack.json           ← written by Phase 2a, read by Phase 2, 3, 4, and 4b
 ├── threat-model.json         ← only if --context was provided
 ├── deployment-verification.json ← only if --verify-deployment was confirmed; written by Phase 5
+├── deployment-verification-screenshot.png ← only if --browser escalated the check above
 ├── phase1-secrets.json
 ├── phase2-architecture.json
 ├── phase3-cves.json
@@ -988,7 +1098,8 @@ Each phase writes its findings to a working directory inside the repo:
 ├── phase5-pocs.json           ← only if --poc was passed
 ├── pocs/                     ← only if --poc was passed; individual PoC scripts
 │   ├── poc_O-001.py
-│   └── poc_O-002.sh
+│   ├── poc_O-002.sh
+│   └── O-003-screenshot.png  ← only if --browser drove an XSS/CSRF/clickjacking PoC for that finding
 ├── synthesized/              ← only if Phase 5 synthesized a Dockerfile (--runtime
 │   │                           on a repo without its own Docker setup)
 │   ├── Dockerfile

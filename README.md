@@ -17,7 +17,7 @@ mkdir -p ~/.claude/skills
 git clone https://github.com/<your-org>/repo-security-review ~/.claude/skills/repo-security-review
 ```
 
-Install the external scanners the phases use (`gitleaks`, `osv-scanner`, `semgrep`, `jq`, and optionally `docker` for `--runtime`):
+Install the external scanners the phases use (`gitleaks`, `osv-scanner`, `semgrep`, `jq`, `curl` for `--verify-deployment`, and optionally `docker` for `--runtime` or `playwright`+Chromium for `--browser`):
 
 ```bash
 bash ~/.claude/skills/repo-security-review/scripts/setup.sh
@@ -53,6 +53,9 @@ In any Claude Code session (CLI or Desktop), point the skill at a local repo pat
 # Calibrate severity for a local-only tool, and verify the real deployment is auth-gated
 /repo-security-review /path/to/repo --context deployment_target=local --verify-deployment https://app.example.com
 
+# Runtime PoC validation with browser confirmation for XSS/CSRF/clickjacking
+/repo-security-review /path/to/repo --runtime --browser
+
 # Multi-repo — analyze several services, get a system-level report
 /repo-security-review --repos ~/svcs/auth,~/svcs/gateway,~/svcs/users --output ~/reports/my-system
 
@@ -76,6 +79,7 @@ In any Claude Code session (CLI or Desktop), point the skill at a local repo pat
 | `--pr <base>...<head>` | none | PR review mode. Reviews only a pull request's diff — no full-repo scan needed first. `--pr <base>` is shorthand for `<base>...HEAD`. Pins to Sonnet, writes `pr-report.md`. Mutually exclusive with `--repos` and `--vendor`. |
 | `--context <pairs>` | none | Inline threat model to calibrate severity: `deployment_target=local\|public`. Softens only — never sharpens. |
 | `--verify-deployment <url>` | none | Opt-in: send one live, passive HTTP check to a real deployment URL so Phase 5 derives `auth_required_to_reach` from an actual observation (login/SSO redirect, WAF challenge) instead of a declared claim. Gated behind an explicit confirmation prompt (`--yes` auto-confirms). |
+| `--browser` | off | Opt-in: unlocks a headless Chromium (Playwright) escalation for `--verify-deployment` (when the HTTP check is inconclusive) and for `--runtime` PoCs (XSS/CSRF/clickjacking). No effect without one of those two flags also set. Own confirmation prompt (`--yes` auto-confirms). |
 | `--yes` | off | Non-interactive / CI mode — auto-confirms prompts (safety path checks still apply). |
 | `--cost` | off | Write `.security-review/cost-report.md` — duration and estimated token consumption for every phase that ran (and named subphases, e.g. 3b, Phase 5's PoC/Runtime parts). Renamed from `--debug`; no longer includes file-read/coverage/checks detail. |
 | `--sonnet` | off | Apply Sonnet instead of Opus for phase2 to save some tokens in default scan mode. Often increases false negative and decreases false positive.|

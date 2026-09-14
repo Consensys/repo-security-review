@@ -233,6 +233,28 @@ else
   echo "   Install from: https://docs.docker.com/get-docker/"
 fi
 
+# Optional: Playwright + Chromium (for --browser mode)
+# Check-only — never auto-installed. The Chromium binary download is large
+# enough that it should be an explicit, visible step the user takes.
+echo ""
+echo "=== Optional: Playwright + Chromium (for --browser mode) ==="
+if python3 -c "import playwright" &>/dev/null; then
+  echo "✅ playwright (Python package) installed"
+  if python3 -c "
+from playwright.sync_api import sync_playwright
+with sync_playwright() as p:
+    b = p.chromium.launch(headless=True)
+    b.close()
+" &>/dev/null; then
+    echo "✅ Chromium browser binary installed"
+  else
+    echo "⚠️  Chromium browser binary not found — run: playwright install chromium"
+  fi
+else
+  echo "⚠️  playwright not installed — headless-browser verification/PoC (--browser flag) will be unavailable"
+  echo "   Install with: pip3 install playwright --break-system-packages && playwright install chromium"
+fi
+
 echo ""
 echo "=== Setup complete ==="
 

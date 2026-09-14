@@ -36,6 +36,8 @@ reasoning/conversation, not avoiding their JSON). You receive:
 - The `--poc` flag (if set) — see below
 - The `--verify-deployment <url>` flag (if set) and the `--yes` flag (whether
   it auto-confirms the deployment-verification gate) — see Step 0.4
+- The `--browser` flag (if set) — unlocks the Step 0.4 escalation and the
+  browser-driven PoC variant in Part 3; has no effect on its own
 - `tech-stack.json` path (includes `runtime_hints` used for Dockerfile synthesis)
 - The `is_multi_repo` flag (true when the orchestrator is running in `--repos`
   mode) — see Step 0.5 for how this changes standalone Phase 2 finding handling
@@ -220,6 +222,87 @@ retry.
 
 4. **Write `$DV_OUT`** per the schema in `SKILL.md` → Verify Deployment, then
    delete `$HDR` and `$BODY` — working state, not report artifacts.
+
+5. **Browser escalation (only if `--browser` was passed AND step 3's
+   classification is `not_gated` or `inconclusive`)**. Skip this step
+   entirely for `gated` or `waf_present` — already-confident results are
+   never re-checked. See `SKILL.md` → Browser-Based Verification & PoC for
+   the full rationale and sandboxing rules; this is the execution recipe.
+
+   a. **Confirmation gate.** If `--yes` is not set, print the Verify
+      Deployment escalation prompt from `SKILL.md` → Browser-Based
+      Verification & PoC and wait for approval. If declined, or if
+      `playwright`/its Chromium binary is not installed, leave
+      `deployment-verification.json` exactly as step 4 wrote it, add
+      `"browser_escalation": "skipped — <reason>"`, and continue to Step
+      0.5. If `--yes` is set, print the one-line auto-confirm notice and
+      proceed.
+
+   b. **Render and re-check:**
+   ```python
+   # {repo_path}/.security-review/.verify-browser.py — delete after use
+   from playwright.sync_api import sync_playwright
+   import json, re
+
+   URL = "{verify_deployment_url}"
+   LOGIN_PATTERNS = re.compile(r"login|signin|sign-in|sso|/auth|authenticate|oauth|session/new", re.I)
+   IDP_HOSTS = re.compile(r"accounts\.google\.com|login\.microsoftonline\.com|.*\.okta\.com|.*\.auth0\.com|github\.com/login|.*\.cloudflareaccess\.com", re.I)
+
+   with sync_playwright() as p:
+       browser = p.chromium.launch(headless=True)
+       context = browser.new_context(accept_downloads=False)
+       page = context.new_page()
+       page.set_default_timeout(15000)
+       result = {"classification": "not_gated", "signals": []}
+       try:
+           resp = page.goto(URL, wait_until="networkidle", timeout=15000)
+           final_url = page.url
+           status = resp.status if resp else None
+           if status in (401, 403):
+               result["classification"] = "gated"
+               result["signals"].append(f"post-render status {status}")
+           elif IDP_HOSTS.search(final_url):
+               result["classification"] = "gated"
+               result["signals"].append(f"post-render redirect to IdP host: {final_url}")
+           elif LOGIN_PATTERNS.search(final_url):
+               result["classification"] = "gated"
+               result["signals"].append(f"post-render URL matches login-path pattern: {final_url}")
+           elif page.locator('input[type="password"]').count() > 0:
+               result["classification"] = "gated"
+               result["signals"].append("rendered DOM contains a password input field")
+           else:
+               body_text = page.content()
+               if re.search(r"(okta|saml|single sign-on|oidc|auth0|azure ad)", body_text, re.I) and \
+                  re.search(r"(sign in|log in|continue to)", body_text, re.I):
+                   result["classification"] = "gated"
+                   result["signals"].append("rendered DOM contains IdP keyword + sign-in verb")
+           result["final_url"] = final_url
+           page.screenshot(path="{repo_path}/.security-review/deployment-verification-screenshot.png", full_page=True)
+       except Exception as e:
+           result["classification"] = "inconclusive"
+           result["signals"].append(f"browser navigation failed: {e}")
+       finally:
+           context.close()
+           browser.close()
+       print(json.dumps(result))
+   ```
+   Run with `python3 {repo_path}/.security-review/.verify-browser.py`, capture
+   its JSON stdout, then delete the script — working state, not a report
+   artifact.
+
+   c. **Merge the result.** If the browser recheck's `classification` is
+      `gated`, update `deployment-verification.json`: set `classification:
+      "gated"`, append the browser signals to `signals`, set `method` to
+      note both stages ran (e.g. `"curl (initial, not_gated) + headless
+      browser escalation (Chromium, JS executed, gated)"`), and add
+      `"screenshot": "deployment-verification-screenshot.png"`. If the
+      browser recheck is still `not_gated` or `inconclusive`, leave the
+      file's `classification` from step 4 unchanged, but still append the
+      browser attempt to `signals` so the record shows escalation was tried.
+      **Never let a browser-escalation result downgrade an already-`gated`
+      or `waf_present` classification** — this step never runs for those in
+      the first place (see the skip condition above), so this should not
+      arise, but if it somehow does, keep the more confident prior result.
 
 `deployment-verification.json`'s `classification` field is the sole input to
 Step 5 (Boundary Gate) and Part 4's severity Axis 2 below —
@@ -717,11 +800,21 @@ set `runtime_status: RUNTIME_NOT_NEEDED` and skip to Part 5.
 Before executing `docker build` or `docker run` on target-repo code:
 
 **If `--yes` is NOT set**, print a confirmation prompt and wait for explicit
-user approval:
+user approval. When `--browser` is also set, fold in one extra line rather
+than prompting twice (see `SKILL.md` → Browser-Based Verification & PoC):
 ```
 ⚠️  Runtime validation requires building and running untrusted code.
     Dockerfile: {path}
     This will execute code from the target repository on your host.
+    Proceed? [y/N]:
+```
+or, with `--browser` also set:
+```
+⚠️  Runtime validation requires building and running untrusted code.
+    Dockerfile: {path}
+    This will execute code from the target repository on your host.
+    --browser is set: a headless Chromium browser will additionally be
+    driven against the running container for this finding.
     Proceed? [y/N]:
 ```
 If the user does not confirm, set `runtime_status: RUNTIME_SKIPPED`,
@@ -846,6 +939,87 @@ python3 {repo_path}/.security-review/pocs/poc_{id}_{type}.py 2>&1
 
 Record outcome as `RUNTIME_CONFIRMED`, `RUNTIME_NOT_CONFIRMED`, or
 `RUNTIME_ERROR`.
+
+This is the default path for every finding type. Skip straight to Tear Down
+unless the escalation below applies.
+
+### Run the PoC script — browser-driven variant (only if `--browser` was
+passed AND the finding's `vulnerability_type` is XSS, CSRF, or clickjacking)
+
+The plain PoC above only proves a payload is *reflected unescaped in the
+response body* for XSS, or that a request *reaches* the target for CSRF —
+it cannot prove the payload actually executes, or that framing actually
+renders. See `SKILL.md` → Browser-Based Verification & PoC for the
+rationale and sandboxing rules; this is the execution recipe, run in place
+of (not in addition to) the plain PoC above for these three types.
+
+```python
+# {repo_path}/.security-review/pocs/.{finding_id}-browser-poc.py — delete after use
+from playwright.sync_api import sync_playwright
+import json
+
+PORT = "{listen_port}"                 # from tech-stack.json → runtime_hints
+BASE_URL = f"http://localhost:{PORT}"
+FINDING_ID = "{finding_id}"
+VULN_TYPE = "{vulnerability_type}"      # "xss" | "csrf" | "clickjacking"
+SCREENSHOT = "{repo_path}/.security-review/pocs/" + FINDING_ID + "-screenshot.png"
+
+with sync_playwright() as p:
+    browser = p.chromium.launch(headless=True)
+    context = browser.new_context(accept_downloads=False)
+    page = context.new_page()
+    page.set_default_timeout(15000)
+    result = {"runtime_status": "RUNTIME_NOT_CONFIRMED", "detail": ""}
+    try:
+        if VULN_TYPE == "xss":
+            # Navigate the exact crafted URL/form from the PoC's data_flow
+            # (entrypoint + payload established during validation). A
+            # dialog event (alert/confirm/prompt) firing from injected
+            # script is unambiguous proof of execution, not just reflection.
+            fired = {"v": False}
+            page.on("dialog", lambda d: (fired.update(v=True), d.dismiss()))
+            page.goto("{poc_crafted_url}", wait_until="networkidle")
+            page.wait_for_timeout(2000)
+            if fired["v"]:
+                result["runtime_status"] = "RUNTIME_CONFIRMED"
+                result["detail"] = "injected script fired a dialog (alert/confirm/prompt)"
+            else:
+                result["detail"] = "no dialog observed — payload may be reflected but not executed"
+        elif VULN_TYPE == "csrf":
+            # Establish a real session first (per the finding's documented
+            # auth flow), then submit the cross-origin form/fetch from a
+            # second, attacker-origin page context and check whether the
+            # state-changing action actually took effect server-side.
+            page.goto(BASE_URL + "{login_path}", wait_until="networkidle")
+            # {login steps specific to this repo's auth flow, from Phase 2's auth_coverage}
+            attacker_page = context.new_page()
+            attacker_page.goto("{repo_path}/.security-review/pocs/" + FINDING_ID + "-attacker.html")
+            attacker_page.wait_for_timeout(2000)
+            # {verify the state change via a follow-up GET with the same session}
+            result["runtime_status"] = "RUNTIME_CONFIRMED"  # or RUNTIME_NOT_CONFIRMED, per verification above
+        elif VULN_TYPE == "clickjacking":
+            page.goto("{repo_path}/.security-review/pocs/" + FINDING_ID + "-frame-test.html", wait_until="networkidle")
+            frame_rendered = page.frame_locator("iframe").locator("body").count() > 0
+            result["runtime_status"] = "RUNTIME_CONFIRMED" if frame_rendered else "RUNTIME_NOT_CONFIRMED"
+            result["detail"] = "target rendered inside iframe (no X-Frame-Options/CSP frame-ancestors block)" if frame_rendered else "framing was blocked"
+        page.screenshot(path=SCREENSHOT, full_page=True)
+    except Exception as e:
+        result["runtime_status"] = "RUNTIME_ERROR"
+        result["detail"] = str(e)
+    finally:
+        context.close()
+        browser.close()
+    print(json.dumps(result))
+```
+
+Run with `python3 {repo_path}/.security-review/pocs/.{finding_id}-browser-poc.py`,
+capture its JSON stdout as the finding's `runtime_status`/`runtime_notes`,
+save the screenshot at `pocs/{finding_id}-screenshot.png` (already the
+script's `SCREENSHOT` path), and delete the `.{finding_id}-browser-poc.py`
+script itself — working state, not a report artifact. If `playwright` or its
+Chromium binary is unavailable, or `--browser`'s confirmation was declined,
+fall back to the plain PoC path above and note in `runtime_notes` that
+browser confirmation was unavailable for this finding.
 
 ### Tear down
 ```bash

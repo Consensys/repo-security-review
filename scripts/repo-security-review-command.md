@@ -93,6 +93,14 @@ Options:
                         No effect in --pr mode or when validation is skipped.
                         Example:
                         --verify-deployment https://app.example.com
+  --browser             Opt-in: unlocks a headless Chromium (Playwright)
+                        escalation on top of --verify-deployment (when the
+                        HTTP-only check is inconclusive) and --runtime PoCs
+                        (XSS/CSRF/clickjacking findings). No effect without
+                        at least one of those two flags also set. Its own
+                        confirmation prompt(s) before any browser launches
+                        (--yes auto-confirms). Requires playwright + Chromium
+                        (not auto-installed by setup.sh).
   --sonnet              Experimental: overrides Phase 2 (Deep tier) from Opus
                         to Sonnet family for this run, to A/B scan quality
                         and token consumption. Standard tier is unaffected
@@ -259,6 +267,18 @@ Parse `$ARGUMENTS` for:
   Phase 5's Boundary Gate and severity Axis 2 is `true` only when this file
   exists and `classification == "gated"`. No effect in `--pr` mode or when
   `validation` is skipped.
+- `--browser` → opt-in: unlocks a headless Chromium (Playwright) escalation
+  at two points, only when the flag it augments is also set: (1) Step 0.4's
+  Verify Deployment check, when the `curl`-based classification comes back
+  `not_gated`/`inconclusive` — a client-side-rendered SPA login wall (no
+  server redirect) is invisible to `curl` by construction; (2) Part 3's
+  runtime PoC for XSS/CSRF/clickjacking findings, where a `curl`-based PoC
+  can prove reflection but not actual execution/rendering. No effect without
+  `--verify-deployment` and/or `--runtime` also set. Its own confirmation
+  gate(s) (auto-confirmed by `--yes`) — folded into the existing Docker
+  prompt for the runtime case, a separate prompt for the verify-deployment
+  case. Ephemeral, headless, origin-scoped browser context every time; never
+  persists across findings or across a run.
 - `--sonnet` → experimental: for this run, Phase 2 (Deep tier) resolves
   against the Sonnet family instead of Opus (falls back to Haiku only if
   Sonnet is entirely unavailable), so quality/token consumption can be
@@ -341,6 +361,9 @@ which semgrep     && semgrep --version || echo "⚠️  semgrep not found (Phase
   { which docker && docker --version   || echo "⚠️  docker not found (runtime validation disabled)"; }
 [ -n "$VERIFY_DEPLOYMENT_URL" ] && \
   { which curl && curl --version | head -1 || echo "⚠️  curl not found (--verify-deployment disabled)"; }
+[ "$BROWSER" = true ] && \
+  { python3 -c "import playwright" 2>/dev/null && echo "✅ playwright installed" \
+    || echo "⚠️  playwright not found (--browser disabled; pip3 install playwright && playwright install chromium)"; }
 ```
 
 ## Step 6: Create working directories
@@ -395,9 +418,12 @@ After Phase 2a: read tech-stack.json.
       else →
         Print "ℹ️  Skill files detected but --skill-security was not passed — Phase 4b skipped by default."
         Do not run Phase 4b.
-    Run Phase 5 (unless skipped) — passes --verify-deployment's URL and the
-      --yes flag if set; Phase 5's own Step 0.4 handles the confirmation
-      gate and the live check before its per-finding loop begins.
+    Run Phase 5 (unless skipped) — passes --verify-deployment's URL, --browser,
+      and the --yes flag if set; Phase 5's own Step 0.4 handles the
+      confirmation gate and the live check (with browser escalation if
+      applicable) before its per-finding loop begins, and Part 3 handles the
+      browser-driven PoC variant for XSS/CSRF/clickjacking findings when
+      --runtime and --browser are both set.
     Run Phase 6.
 ```
 
