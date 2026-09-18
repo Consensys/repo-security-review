@@ -74,7 +74,7 @@ Parse these from `$ARGUMENTS` using the format:
 | `--vendor` | false | Vendor / open-source audit mode. Audits a third-party repo the company is considering adopting; audience is the internal security team, deliverable is an adoption risk judgment (not a fix-list for the vendor). Forces skip of `secrets`, `dependencies`, and `poc`; pins every phase to the resolved Standard tier model (never Opus); and switches Phase 6 to the vendor report format. See [Vendor Mode](#vendor-mode---vendor) below. |
 | `--pr` | none | PR Review mode. `--pr <base>...<head>` (or `--pr <base>` shorthand for `<base>...HEAD`) reviews only a pull request's diff instead of the whole repository — replaces the 6/7-phase pipeline with `references/pr-review.md`, pins to the resolved Standard tier model, and writes `pr-report.md` instead of `final-report.md`. Mutually exclusive with `--repos` and `--vendor`. See [PR Review Mode](#pr-review-mode---pr) below. |
 | `--local` | false | Opt-in: assert this is a local-only tool, not a publicly reachable service — softens severity by −2 tiers (Axis 1), but only for findings with a genuine network entry point (`data_flow.entrypoint` set) — a hardcoded secret or similar code-level finding gets no discount from this flag. Omit for the pessimistic default (`deployment_target: "public"`). See [`--local`](#--local-deployment-target-calibration) below. |
-| `--verify-deployment` | none | Opt-in: `--verify-deployment <url>` sends one live, passive HTTP check to a real deployment URL so Phase 5 can derive `auth_required_to_reach` from an actual observation instead of a declared claim. If that check is inconclusive, the skill automatically escalates to a headless-browser recheck (no separate flag) — gated behind its own confirmation prompt (auto-confirmed by `--yes`). No effect in PR mode or when `validation` is skipped. See [Verify Deployment](#verify-deployment---verify-deployment) below. |
+| `--verify-deployment` | none | Opt-in: `--verify-deployment <url>` sends one live, passive HTTP check to a real deployment URL so Phase 5 can derive `auth_required_to_reach` from an actual observation instead of a declared claim, plus a few cheap TLS/security-header posture checks that corroborate matching cookie-flag/weak-crypto findings. If the gating check is inconclusive, the skill automatically escalates to a headless-browser recheck (no separate flag) — gated behind its own confirmation prompt (auto-confirmed by `--yes`). No effect in PR mode or when `validation` is skipped. See [Verify Deployment](#verify-deployment---verify-deployment) below. |
 | `--sonnet` | false | Experimental / comparison flag: overrides Deep tier's primary family from Opus to Sonnet for this run (falls back to Haiku family only if Sonnet is entirely unavailable — Standard tier is unaffected, it already uses Sonnet). Exists to A/B scan quality and token consumption between Opus and Sonnet on Phase 2, not for routine use. Has no effect in Vendor mode (already pinned to Standard/Sonnet, no Deep tier at all) or PR mode (no Phase 2 / Deep tier in that mode). |
 | `--skill-security` | false | Opt-in: run Phase 4b (LLM/AI skill security) on a **mixed repo** (`is_skill_repo: false`) even though Phase 2a detected skill/agent-instruction files (`has_skill_files: true`). Without this flag, a mixed repo never runs Phase 4b by default in the **default report mode** — `has_skill_files: true` alone is a structural signal, not an auto-run trigger, for mixed repos. Redundant (already going to run) on a **pure skill repo** (`is_skill_repo: true`, e.g. this skill's own repo — use `--skip skill-security` to suppress it there instead) and in **Vendor mode** (`--vendor` already auto-runs Phase 4b on `has_skill_files: true` regardless of `is_skill_repo`, since assessing a vendor's AI-tooling risk is the point of that mode — see Vendor Mode below). No effect in PR mode (Phase 4b never runs there). |
 | `--yes` | false | Non-interactive mode. Auto-confirms all user-facing prompts: the `--output` copy confirmation, the Docker runtime gate (`--runtime`, plus its automatic headless-browser line when applicable), the deployment-verification gate (`--verify-deployment`, plus its automatic browser-escalation prompt when applicable), and the pure-skill-repo auto-skip cascade. Path-validation safety checks (rejecting sensitive `--output` destinations) are never bypassed. Use in CI or scripted runs. |
@@ -500,6 +500,49 @@ host **and path**), response headers, and response body:
 Delete `.verify-headers.txt` / `.verify-body.html` after classification —
 they are working state, not report artifacts.
 
+### Additional checks: TLS & security-header posture (independent of the gating classification)
+
+Alongside the gating check above, Step 0.4 also runs a handful of cheap
+`curl`-based probes that have nothing to do with auth-gating — they read the
+transport/header posture of the deployment. Two piggyback on the response the
+gating check already fetched (no extra request); three are one extra
+handshake each:
+
+- **Security response headers** (free — parsed from the same response
+  headers the gating check already captured): `Strict-Transport-Security`,
+  `Content-Security-Policy` / `X-Frame-Options` (clickjacking-relevant),
+  `X-Content-Type-Options`, and `Set-Cookie` flags (`Secure`, `HttpOnly`,
+  `SameSite`) on any cookie the response sets.
+- **HTTPS enforcement** (1 extra request): hit the bare `http://` origin
+  (only when the verified URL is `https://`) and confirm it redirects to
+  `https://` rather than serving plaintext, or that the plaintext port isn't
+  reachable at all.
+- **Negotiated TLS version + cipher, and certificate validity** (upgrades the
+  existing gating request to `-v`, no extra request): parsed from curl's
+  verbose handshake trace (`SSL connection using TLSv1.x / CIPHER`,
+  `expire date:`) and `%{ssl_verify_result}`.
+- **Explicit weak-protocol acceptance** (1 extra request, TLS targets only):
+  `curl --tlsv1.0 --tls-max 1.0` against the host — if the handshake
+  succeeds, the server still accepts TLS 1.0 even though it prefers
+  something stronger.
+
+These checks always run when `--verify-deployment` runs — there is no
+separate flag for them, same rationale as the browser escalation: the skill
+decides which cheap, passive observations are worth collecting once it's
+already talking to the target. They write into the same
+`deployment-verification.json` under `security_posture` and never affect
+`classification`/`auth_required_to_reach` — that axis is gating-only.
+
+**Purpose: corroboration, not new findings.** This is deliberately not a
+Qualys-SSL-Labs-style grading pass — no scoring, no vulnerability-signature
+database, no dozens of protocol probes. Its only job is to give Phase 5 live
+ground truth for a small set of finding types Phase 4 can already produce
+from code alone (missing/misconfigured cookie flags, weak crypto/cipher
+choices) — see `phase5-validate-and-poc.md` → Step 3 for how it's used. It
+never manufactures a standalone finding on its own; a weak observation with
+no matching code-level finding is recorded in `security_posture` for the
+record but not surfaced as a new finding.
+
 ### Output: `deployment-verification.json`
 
 ```json
@@ -512,9 +555,26 @@ they are working state, not report artifacts.
   "waf_present": false,
   "signals": ["redirected to accounts.google.com (Google OAuth)"],
   "method": "passive HTTP GET (curl -L), no JavaScript execution",
-  "confirmed_by_user": true
+  "confirmed_by_user": true,
+  "security_posture": {
+    "https_enforced": true,
+    "hsts": "max-age=63072000; includeSubDomains",
+    "csp_or_frame_options": {"header": "content-security-policy", "value": "frame-ancestors 'self'"},
+    "x_content_type_options": true,
+    "cookies": [{"name": "session", "secure": true, "httponly": true, "samesite": null}],
+    "tls": {
+      "negotiated_version": "TLSv1.3",
+      "negotiated_cipher": "TLS_AES_256_GCM_SHA384",
+      "cert_verify_result": 0,
+      "cert_expires": "Jan 1 00:00:00 2027 GMT",
+      "weak_protocol_accepted": null
+    }
+  }
 }
 ```
+`security_posture` is omitted entirely if the URL is `http://` (no TLS to
+probe) or if a given sub-check's request failed — a missing field means "not
+observed," never "confirmed absent."
 
 ### How Phase 5 uses it
 
@@ -547,6 +607,12 @@ default, same as when no context was ever provided.
   gated, and does not substitute for Phase 2/4's own analysis of any
   alternate exposure paths the repo itself documents (e.g. a bypass route
   committed to config).
+- **TLS trace depends on curl's SSL backend**: the verbose handshake line
+  curl prints (and therefore `security_posture.tls`) varies by which TLS
+  library curl was linked against (OpenSSL/LibreSSL/Secure Transport/Schannel);
+  on a backend that doesn't emit the expected trace lines, those fields are
+  omitted rather than guessed. This is a parsing gap, not a claim the TLS
+  config is fine.
 
 ### Scope notes
 

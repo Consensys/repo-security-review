@@ -235,6 +235,60 @@ If curl fails outright (DNS, TLS, timeout, connection refused), classify
 `inconclusive` immediately and record the stderr text in `signals` — do not
 retry.
 
+2.5. **Lightweight TLS & security-header posture checks — independent of the
+gating classification above, runs unconditionally.** Two of these reuse
+`$HDR` from step 2 (no extra request); three cost one extra handshake each
+(TLS targets only). See `SKILL.md` → Verify Deployment → "Additional checks:
+TLS & security-header posture" for the rationale.
+
+```bash
+# a. Security headers — already in $HDR, no extra request.
+HSTS=$(grep -i '^strict-transport-security:' "$HDR" | head -1 | cut -d: -f2- | xargs)
+CSP=$(grep -i '^content-security-policy:' "$HDR" | head -1 | cut -d: -f2- | xargs)
+XFO=$(grep -i '^x-frame-options:' "$HDR" | head -1 | cut -d: -f2- | xargs)
+XCTO=$(grep -i '^x-content-type-options:' "$HDR" | head -1 | cut -d: -f2- | xargs)
+COOKIES=$(grep -i '^set-cookie:' "$HDR")
+
+HTTPS_ENFORCED=""
+TLS_VERSION=""; TLS_CIPHER=""; CERT_EXPIRES=""; CERT_VERIFY_RESULT=""; WEAK_TLS=""
+
+if [[ "{verify_deployment_url}" == https://* ]]; then
+  # b. HTTPS enforcement — hit the bare http:// origin, one extra request.
+  HTTP_VARIANT="http://${verify_deployment_url#https://}"
+  REDIR=$(curl -sI --max-redirs 0 --max-time 10 -o /dev/null \
+    -w '%{http_code} %{redirect_url}' "$HTTP_VARIANT" 2>/dev/null)
+  REDIR_CODE=$(echo "$REDIR" | awk '{print $1}')
+  REDIR_URL=$(echo "$REDIR" | awk '{print $2}')
+  if [[ "$REDIR_CODE" =~ ^30[128]$ && "$REDIR_URL" == https://* ]]; then
+    HTTPS_ENFORCED="true"
+  elif [[ "$REDIR_CODE" == "200" ]]; then
+    HTTPS_ENFORCED="false"
+  elif [[ -n "$REDIR_CODE" ]]; then
+    HTTPS_ENFORCED="true"   # plaintext port answered something other than a redirect or 200 — treat conservatively as not serving content
+  fi   # empty REDIR_CODE = port 80 unreachable — leave unset, nothing plaintext to serve
+
+  # c. Negotiated TLS version/cipher + cert validity — verbose trace of the
+  #    same gating request, no extra request beyond re-running it with -v.
+  TLSLOG="{repo_path}/.security-review/.verify-tls.log"
+  CERT_VERIFY_RESULT=$(curl -sL --max-redirs 5 --max-time 15 -o /dev/null \
+    -w '%{ssl_verify_result}' -v "{verify_deployment_url}" 2>"$TLSLOG")
+  TLS_LINE=$(grep -o 'SSL connection using [^\r]*' "$TLSLOG" | head -1)
+  TLS_VERSION=$(echo "$TLS_LINE" | sed -n 's/.*using \(TLSv[0-9.]*\).*/\1/p')
+  TLS_CIPHER=$(echo "$TLS_LINE" | sed -n 's/.* \/ \(.*\)/\1/p')
+  CERT_EXPIRES=$(grep -i 'expire date:' "$TLSLOG" | head -1 | sed 's/.*expire date: *//')
+  rm -f "$TLSLOG"
+
+  # d. Explicit weak-protocol acceptance — one extra handshake.
+  if curl -sI --tlsv1.0 --tls-max 1.0 --max-time 10 -o /dev/null "{verify_deployment_url}" >/dev/null 2>&1; then
+    WEAK_TLS="TLSv1.0"
+  fi
+fi
+```
+Any field left empty (request failed, backend didn't emit the expected trace
+line, or the URL is `http://`) is omitted from `security_posture` entirely —
+never written as a false negative like `false`/`null` standing in for "not
+observed."
+
 3. **Classify** using the rules in `SKILL.md` → Verify Deployment → "What the
    check does": check `$HTTP_STATUS` for 401/403, `$FINAL_URL`'s **host**
    against the known IdP/SSO domain list, `$FINAL_URL`'s **path** (even when
@@ -250,8 +304,10 @@ retry.
    negative, not a safe default. `waf_present` is recorded independently of
    `gated` — never let a WAF signature alone satisfy `gated`.
 
-4. **Write `$DV_OUT`** per the schema in `SKILL.md` → Verify Deployment, then
-   delete `$HDR` and `$BODY` — working state, not report artifacts.
+4. **Write `$DV_OUT`** per the schema in `SKILL.md` → Verify Deployment,
+   including a `security_posture` object built from step 2.5's variables
+   (omit any field whose variable came back empty — see step 2.5's note),
+   then delete `$HDR` and `$BODY` — working state, not report artifacts.
 
 5. **Browser escalation (automatic — only if step 3's classification is
    `not_gated` or `inconclusive`)**. There is no separate flag to check; the
@@ -509,6 +565,26 @@ paths. Note which paths are unprotected.
 - **Command injection**: confirm user input reaches `exec`/`spawn`/`system`
   without sanitization
 - **SSRF**: confirm the URL is user-controlled and there is no allowlist
+- **Insecure cookie flags / weak TLS-cipher choice (only if
+  `deployment-verification.json`'s `security_posture` exists — Step 0.4)**:
+  cross-check the live observation against the static claim. Example: Phase 4
+  flags a session cookie missing `SameSite`; if `security_posture.cookies`
+  shows that same cookie live without `SameSite` set, record "confirmed
+  live" in evidence (corroboration only — the code is still why it's a
+  finding, this doesn't itself upgrade confidence). If instead the live
+  cookie **does** carry `SameSite` (a proxy, framework default, or deploy-time
+  override the code doesn't show), that is a direct contradiction of the
+  static claim — set `validation_status: FALSE_POSITIVE` with
+  `verdict_reason: "live deployment sets SameSite on this cookie despite the
+  code path; likely a proxy/framework-level override not visible in the
+  repo"`. The same applies to a weak-cipher/protocol finding contradicted by
+  `security_posture.tls.negotiated_cipher`/`weak_protocol_accepted`. This can
+  go straight to `FALSE_POSITIVE` on a clean contradiction — unlike the
+  Runtime Value Assessment's Docker path (see Part 3), there is no seed-data
+  or environment ambiguity here: header/cookie presence on the live
+  deployment is a direct, unambiguous observation, not a fragile exploit
+  chain that can fail for unrelated reasons. No `--runtime`/Docker needed —
+  the data was already collected by Step 0.4.
 
 ### Step 4: Assess exploitability
 

@@ -450,6 +450,8 @@ separate `**Also identified as**` label — fold it into the description prose.
 > ✅ **Runtime Validated** — confirmed against a live Docker instance{, via a headless browser check if the finding is XSS/CSRF/clickjacking}.
 {If runtime_verdict_change is not null:}
 > ℹ️ Dynamic verification changed this finding's status: {runtime_verdict_change.from} → {runtime_verdict_change.to} ({runtime_verdict_change.reason}).
+{If evidence notes a security_posture cross-check ("confirmed live" — Phase 5 Step 3):}
+> ✅ **Confirmed live** — the deployment's actual cookie/TLS configuration matches this finding (`--verify-deployment`), independent of Docker/`--runtime`.
 
 ---
 

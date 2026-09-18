@@ -107,6 +107,12 @@ Options:
                         first. Requires playwright + Chromium for that
                         escalation (not auto-installed by setup.sh; falls
                         back to the HTTP-only result if unavailable).
+                        Also runs a few cheap TLS/security-header posture
+                        checks (HSTS/CSP/cookie flags, negotiated TLS
+                        version+cipher, weak-protocol acceptance) written to
+                        the same file under security_posture — corroborates
+                        matching Phase 4 cookie-flag/weak-crypto findings,
+                        not a Qualys-style grading pass.
                         Writes <repo>/.security-review/deployment-verification.json.
                         No effect in --pr mode or when validation is skipped.
                         Example:
@@ -296,6 +302,16 @@ Parse `$ARGUMENTS` for:
   and falls back to the `curl` result if Playwright is unavailable or the
   prompt is declined. No effect in `--pr` mode or when `validation` is
   skipped.
+
+  Alongside the gating check, also runs a few cheap TLS/security-header
+  posture probes (HSTS/CSP/cookie flags off the same response headers;
+  HTTPS enforcement, negotiated TLS version+cipher, weak-protocol
+  acceptance as a few extra handshakes) written into
+  `deployment-verification.json` under `security_posture`. This never
+  affects `classification`/`auth_required_to_reach` — it's a separate,
+  independent enrichment Phase 5 uses only to corroborate matching Phase 4
+  cookie-flag/weak-crypto findings (Step 3), not a Qualys-style grading pass
+  and not a source of new standalone findings.
 
   The same automatic browser choice applies to `--runtime`'s dynamic
   verification for XSS/CSRF/clickjacking findings (Part 3) — a `curl`-based
