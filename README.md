@@ -49,8 +49,8 @@ In any Claude Code session (CLI or Desktop), point the skill at a local repo pat
 # type. Exploit is discarded after use — add --poc to also keep it in pocs/
 /repo-security-review /path/to/repo --runtime
 
-# CI / headless — validation only (default: no PoC files), no prompts
-/repo-security-review . --output ./security-report --yes
+# CI / headless — PR-diff review, no prompts, no full-repo scan needed first
+/repo-security-review . --pr origin/main --output ./pr-security-report --yes
 
 # Calibrate severity for a local-only tool, and verify the real deployment is auth-gated
 /repo-security-review /path/to/repo --local --verify-deployment https://app.example.com
@@ -79,7 +79,7 @@ In any Claude Code session (CLI or Desktop), point the skill at a local repo pat
 | `--poc` | off | Opt-in: persist the constructed exploit for each finding Phase 5 confirms as a durable script under `pocs/`. Independent of `--runtime` — doesn't execute anything by itself. |
 | `--runtime` | off | Opt-in: dynamically verify eligible findings against the app stood up in Docker (curl or headless browser, chosen automatically per finding type). A clean result can strengthen or soften the verdict. No longer implies `--poc` — the exploit is discarded after use unless `--poc` is also set. |
 | `--vendor` | off | Third-party adoption audit. Skips secrets/dependencies, forces PoC generation off, pins all phases to Sonnet, and produces an adoption-risk report (verdict + conditions + "what it does" + adopter-side controls). |
-| `--pr <base>...<head>` | none | PR review mode. Reviews only a pull request's diff — no full-repo scan needed first. `--pr <base>` is shorthand for `<base>...HEAD`. Pins to Sonnet, writes `pr-report.md`. Mutually exclusive with `--repos` and `--vendor`. |
+| `--pr <base>...<head>` | none | PR review mode. Reviews only a pull request's diff — no full-repo scan needed first. `--pr <base>` is shorthand for `<base>...HEAD`. Pins to Sonnet, writes `pr-report.md`. Mutually exclusive with `--repos` and `--vendor`. Needs the base branch's history available locally to compute the diff — a shallow/single-branch checkout (GitHub Actions' default) isn't enough; fetch full history (`fetch-depth: 0`) plus the base ref explicitly (`git fetch origin <base>`) before running in CI. |
 | `--local` | off | Assert this is a local-only tool, not a publicly reachable service — softens severity by −2 tiers. Omit for the pessimistic default (`public`). |
 | `--verify-deployment <url>` | none | Opt-in: send one live, passive HTTP check to a real deployment URL so Phase 5 derives `auth_required_to_reach` from an actual observation (login/SSO redirect, WAF challenge) instead of a declared claim. Also collects a few cheap TLS/security-header posture checks (HSTS/CSP/cookie flags, negotiated TLS version+cipher, weak-protocol acceptance) that corroborate matching Phase 4 findings — not a Qualys-style grading pass, just ground truth for existing findings. If the gating check is inconclusive, automatically escalates to a headless-browser recheck (no separate flag). Gated behind confirmation prompt(s) (`--yes` auto-confirms). |
 | `--yes` | off | Non-interactive / CI mode — auto-confirms prompts (safety path checks still apply). |
@@ -93,6 +93,60 @@ In any Claude Code session (CLI or Desktop), point the skill at a local repo pat
 ### Output
 
 Working artifacts go to `<repo>/.security-review/` (per-phase JSON, `pocs/`, and `final-report.md`); `--output` copies the report + PoCs out. In multi-repo mode, start from `system-report.md` in the output directory. In `--pr` mode, artifacts use `pr-`-prefixed filenames (`pr-findings.json`, `pr-validated.json`, `pr-report.md`) so they never collide with a prior or later full scan's output in the same repo.
+
+---
+
+## CI usage (GitHub Actions)
+
+`--pr` mode is the fit for CI — it reviews only the pull request's diff, so
+it doesn't need a prior full-repo scan. Combine with `--yes` to auto-confirm
+every gate. Authentication is a Claude Code CLI concern, not a skill flag:
+set `ANTHROPIC_API_KEY` as a repo/org secret and export it in the job
+environment.
+
+```yaml
+name: Security Review (PR)
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  repo-security-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # --pr diffs against the base branch; needs its history
+
+      - name: Fetch base branch
+        run: git fetch origin ${{ github.event.pull_request.base.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Install skill + external scanners
+        run: |
+          mkdir -p ~/.claude/skills
+          git clone https://github.com/<your-org>/repo-security-review ~/.claude/skills/repo-security-review
+          bash ~/.claude/skills/repo-security-review/scripts/setup.sh
+
+      - name: Run PR security review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          claude -p "/repo-security-review . --pr origin/${{ github.event.pull_request.base.ref }} --yes --output ./pr-security-report"
+
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-security-report
+          path: ./pr-security-report
+```
 
 ---
 
