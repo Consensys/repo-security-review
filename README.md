@@ -49,7 +49,7 @@ In any Claude Code session (CLI or Desktop), point the skill at a local repo pat
 # type. Exploit is discarded after use — add --poc to also keep it in pocs/
 /repo-security-review /path/to/repo --runtime
 
-# CI / headless — PR-diff review, no prompts, no full-repo scan needed first
+# CI / headless — PR-diff review, no full-repo scan needed first
 /repo-security-review . --pr origin/main --output ./pr-security-report --yes
 
 # Calibrate severity for a local-only tool, and verify the real deployment is auth-gated
@@ -201,9 +201,3 @@ flowchart TD
     class R report
     class TS store
 ```
-
-PR review mode (`--pr`) is a separate, single-agent mode — not a variant of
-the pipeline above. It never runs Phases 1–4 or 7; it runs
-`references/pr-review.md` directly (Steps 0–5 gather diff-scoped context and
-scan, Step 6 validates in isolation, Step 7 writes `pr-report.md`), bounding
-file reads to the diff plus whatever a repo-wide grep specifically points to.
