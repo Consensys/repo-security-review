@@ -2,6 +2,8 @@
 
 A Claude Code **skill** that runs a full, multi-phase security review of a code repository — secret scanning, architecture and threat analysis, dependency CVEs, OWASP code review, and independent validation — then writes a single markdown report. Each phase runs as an isolated subagent, and findings pass through a finder → judgment trust boundary before they reach the report.
 
+Built primarily for **pre-release reviews and periodic security audits** — the kind of deep, full-repo pass you run before a major release or on a recurring schedule. It also has a lightweight `--pr` mode, which makes it practical to wire into a **CI pipeline** for per-PR checks without paying the cost of a full scan on every push.
+
 Works on a single repo or across multiple microservices, has a dedicated mode for auditing third-party/open-source tools before adopting them, and a fast diff-scoped mode for reviewing a single pull request without scanning the whole repo first.
 
 > Full specification: [SKILL.md](SKILL.md).
