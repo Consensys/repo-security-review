@@ -296,19 +296,27 @@ Key differences from the other modes:
   when `threat-model.json` exists, plain `severity` otherwise — same rule
   as the default report, read from Phase 5's per-finding output, never
   recomputed here.
-- **Has a trimmed Needs Review section** — unlike the default/vendor
-  reports' three-part version, PR mode can only ever produce
-  `NEEDS_RUNTIME` or `SURFACE_NOT_PRODUCTION` (Step 0.5, which produces the
-  other three statuses that section can show, never runs here — see
-  PR Review Report Structure below). No False Positives section either way
-  (rejected findings render nowhere in this mode).
+- **Has a trimmed Needs Review section** — the default/vendor reports have
+  four parts; PR mode keeps `CONFIRMED_LOW_CONFIDENCE` as its own
+  full-template subsection (same reasoning as those reports' Part A) but
+  collapses the other three into one flat table, since PR mode can only
+  ever produce `NEEDS_RUNTIME` or `SURFACE_NOT_PRODUCTION` there (Step 0.5,
+  which produces the other two statuses that section can show, never runs
+  here — see PR Review Report Structure below). No False Positives section
+  either way (rejected findings render nowhere in this mode).
 - **`--vendor` does not apply** — the orchestrator does not
   allow combining it with `--pr` (see SKILL.md).
 
 ### Priority assignment (default mode)
 
-Assign a `**Priority**` to every finding before rendering.
-Secrets always P0; skip this table for them. (Vendor mode assigns no priorities.)
+Assign a `**Priority**` to every `report_tier: CONFIRMED` finding before
+rendering — this is what `## Findings` sorts by, and the only pool `Fix
+immediately` draws from. Never assign a Priority to a `report_tier:
+NEEDS_REVIEW` finding (including `CONFIRMED_LOW_CONFIDENCE`, which renders
+in `## Needs Review` → Part A instead, with a Confidence line in place of
+Priority) or a `REJECTED` one — those don't belong in any P0–P3/Backlog
+bucket at all. Secrets always P0; skip this table for them. (Vendor mode
+assigns no priorities.)
 
 | Priority | Criteria |
 |----------|---------|
@@ -330,7 +338,7 @@ where that happens); the base wording stays the same everywhere it's used.
 **Fragment — Needs Review table** (Default/Vendor mode):
 {One unified `## Needs Review` section, rendered between Findings and False
 Positives (this ordering — Confirmed, then Needs Review, then Rejected —
-applies in every mode that has a Needs Review concept). It has up to three
+applies in every mode that has a Needs Review concept). It has up to four
 parts; omit any part entirely if it has no rows. Every finding rendered here
 has `report_tier: NEEDS_REVIEW` in `phase5-validated.json` (or, in the
 `--skip validation` fallback with no validated verdicts at all, this whole
@@ -341,7 +349,38 @@ section is empty and omitted — see Deduplication Step above).}
 > gate suppressed the default verdict for a documented reason. Each reason is
 > stated so a reader can decide whether to chase it down.
 
-*Part A — general Needs Review table* (`validation_status` ∈
+*Part A — Confirmed at Reduced Confidence* (`validation_status:
+CONFIRMED_LOW_CONFIDENCE`): unlike the other three parts, this is a real,
+Phase-5-confirmed finding with a full write-up and a PoC (see Validation
+Decision in `phase5-validate-and-poc.md`) — it's here, not in `## Findings`,
+purely because exploitability itself is uncertain enough that it shouldn't
+sit next to a fully-confirmed finding. Uses the **same per-finding template
+as `## Findings`** (Category/File/Code/Description/Impact/Remediation/PoC/
+Run-it/Runtime-Validated/Confirmed-live — everything except **Priority**,
+which this mode only assigns to `report_tier: CONFIRMED` findings), plus a
+`**Confidence**: Low — {verdict_reason}` line in place of Priority stating
+specifically what's uncertain:
+
+### 🟠 {ID} · {Title}
+- **Confidence**: Low — {verdict_reason}
+- **Category**: {category}
+- **File**: `{file}:{line}`
+{If code snippet is available:}
+**Vulnerable Code**:
+```{language}
+{snippet — keep to ≤10 lines}
+```
+- **Description**: {what the problem is and why it matters}
+- **Impact**: {what an attacker can do}
+- **Remediation**: {specific, actionable fix}
+{If PoC file exists for this finding:}
+- **PoC**: `pocs/{poc_file}`
+{If `manual_validation_instructions` is non-null:}
+- **Run it**: {manual_validation_instructions}
+{Runtime Validated / runtime_verdict_change / Confirmed live badges apply
+here exactly as in `## Findings` — same conditions, same wording.}
+
+*Part B — general Needs Review table* (`validation_status` ∈
 `NEEDS_EXTERNAL_VERIFICATION`, `PENDING_CROSS_REPO_VALIDATION`, `NEEDS_RUNTIME`
 — either because `--runtime` wasn't set, dynamic verification ran but stayed
 inconclusive, or a clean dynamic result disagreed with an earlier static
@@ -360,7 +399,7 @@ inconclusive):
 | A-009 | Missing redaction | src/logging/http.ts:L12 | NEEDS_EXTERNAL_VERIFICATION | Depends on an internal package's own redaction behavior — package source not in this repo |
 | A-011 | Trust boundary | src/services/internal-client.ts:L8 | PENDING_CROSS_REPO_VALIDATION | Requires cross-repo/topology context — see system-report.md |
 
-*Part B — Non-Production Surface Findings* (`validation_status: SURFACE_NOT_PRODUCTION`):
+*Part C — Non-Production Surface Findings* (`validation_status: SURFACE_NOT_PRODUCTION`):
 
 > Vulnerabilities confirmed in code but located in non-production surfaces (test fixtures, example applications, demo code). Not exploitable from a standard deployed instance, but real code defects. If this code is ever executed in a production context — a CI/CD pipeline with live credentials, a deployed demo environment — these become immediately exploitable.
 
@@ -370,7 +409,7 @@ inconclusive):
 
 (Vendor mode uses its own adopter-framed variant of this part — see Vendor Report Structure.)
 
-*Part C — Post-Auth Code Vulnerabilities* (`validation_status: BOUNDARY_NOT_CROSSED`,
+*Part D — Post-Auth Code Vulnerabilities* (`validation_status: BOUNDARY_NOT_CROSSED`,
 only occurs when `--verify-deployment` confirmed the deployment is gated —
 `deployment-verification.json → classification: gated`):
 
@@ -410,13 +449,11 @@ findings were excluded during validation" instead of an empty table.)
 ## Summary
 
 {2-3 sentences on overall posture. Name the highest-risk issues directly —
-**only from findings with `validation_status: CONFIRMED`** (full confidence).
-Never spotlight a `CONFIRMED_LOW_CONFIDENCE` finding here, no matter its
-severity or Priority — its exploitability is itself uncertain, so it does
-not belong in a sentence asserting "this is the top risk." It still renders
-normally in `## Findings` below with its own `**Confidence**: Low` line (see
-the Findings fragment) — this only affects what gets spotlighted in the
-Summary. No mention of calibration or context.}
+draw only from `report_tier: CONFIRMED` findings (`validation_status:
+CONFIRMED_LOW_CONFIDENCE` findings are `report_tier: NEEDS_REVIEW` — they
+render in `## Needs Review` → Part A, not here, and never get named as
+"the top risk" in this prose; their exploitability is itself uncertain). No
+mention of calibration or context.}
 
 | Severity | Count |
 |----------|-------|
@@ -428,15 +465,14 @@ Summary. No mention of calibration or context.}
 {All four rows above always render, even when N is 0 — never omit a
 zero-count row. This is an instruction to you; no footnote or note about it
 appears in the actual report. Counts include every `report_tier: CONFIRMED`
-finding regardless of confidence — this table is a tally of what appears in
-`## Findings` below, not a curated spotlight, so `CONFIRMED_LOW_CONFIDENCE`
-findings are still counted here.}
+finding — this table is a tally of what appears in `## Findings` below, not
+a curated spotlight.}
 
-**Fix immediately**: {bullet list — P0 and P1 findings only, one line each.
-Exclude any finding with `validation_status: CONFIRMED_LOW_CONFIDENCE` even
-if it's P0/P1 — this list is a call to urgent action, and exploitability
-that's still uncertain doesn't belong in it. It still appears in `## Findings`
-below at its computed Priority, just not spotlighted here.}
+**Fix immediately**: {bullet list — `report_tier: CONFIRMED` findings only,
+restricted further to Priority P0/P1, one line each. `CONFIRMED_LOW_CONFIDENCE`
+findings can never appear here at all — they're never `report_tier: CONFIRMED`
+in the first place, so this is a structural exclusion, not a special case to
+remember.}
 
 ---
 
@@ -486,9 +522,6 @@ separate `**Also identified as**` label — fold it into the description prose.
 
 ### 🟠 {ID} · {Title}
 - **Priority**: P{N}
-{If validation_status == CONFIRMED_LOW_CONFIDENCE:}
-- **Confidence**: Low
-{Omit the Confidence line entirely for plain CONFIRMED — absence means full confidence; never print "Confidence: High".}
 - **Category**: {e.g. Session Management / Missing Control / Dependency CVE / CI/CD / OWASP A07}
 - **File**: `{primary_file}:{line}`
 {If code snippet is available:}
@@ -632,9 +665,6 @@ Positives below instead.}
 
 ### 🟠 {ID} · {Title}
 - **Severity**: {severity}
-{If validation_status == CONFIRMED_LOW_CONFIDENCE:}
-- **Confidence**: Low
-{Omit the Confidence line entirely for plain CONFIRMED — absence means full confidence; never print "Confidence: High".}
 - **Category**: {OWASP A0x / API / arch category / AI/LLM Security · {owasp_llm}}
 - **Location**: `{file}:{line}`
 {If a code snippet is available (≤10 lines):}
@@ -664,10 +694,14 @@ validation status and no PoC — state `Validation: not applicable (architectura
 
 ## Needs Review
 
-{Fragment: Needs Review table — Part A general table plus Parts B/C, applying
-the Vendor mode adopter-framed wording for Part B noted in the fragment.
-Omit the entire `## Needs Review` heading and section if no finding has
-`report_tier: NEEDS_REVIEW`.}
+{Fragment: Needs Review table — all four parts (A: Confirmed at Reduced
+Confidence, B: general table, C: Non-Production Surface, D: Post-Auth),
+applying the Vendor mode adopter-framed wording for Part C noted in the
+fragment. Part A's finding template uses the Vendor Findings template's
+fields (Risk if adopted / Mitigation available to us), not the default
+report's (Impact / Remediation) — same substitution as the main Vendor
+Findings section. Omit the entire `## Needs Review` heading and section if
+no finding has `report_tier: NEEDS_REVIEW`.}
 
 ---
 
@@ -755,8 +789,10 @@ this includes both `regression: true` and `regression: false` findings):}
 
 {Never let a `CONFIRMED_LOW_CONFIDENCE` finding alone trigger the hard "do not merge"
 block — exploitability that's still uncertain isn't grounds for blocking a merge outright,
-same principle as the default report's Fix-immediately exclusion. It still renders normally
-in `## Removed Security Controls` / `## Findings` below with its confidence visible.}
+same principle as the default report's Fix-immediately exclusion. It renders in
+`## Needs Review` below, not `## Removed Security Controls` / `## Findings`
+(`report_tier: NEEDS_REVIEW`, not `CONFIRMED` — see `phase5-validate-and-poc.md`'s
+Report Tier table), with its confidence and reason visible there.}
 
 ---
 
@@ -768,10 +804,13 @@ separately from other findings; this class of issue is often more urgent
 than a net-new vulnerability because it's a regression in previously-working
 protection, not a gap that was always there. A regression finding can also
 resolve to `FALSE_POSITIVE` (the control moved rather than vanished — see
-`pr-review.md`'s "Additional validation duty" note) or `NEEDS_REVIEW` (e.g.
-`NEEDS_RUNTIME`); the former renders nowhere in this mode (no False
-Positives section here, same as any other finding), the latter goes in
-`## Needs Review` below, not here.}
+`pr-review.md`'s "Additional validation duty" note) or `NEEDS_REVIEW`
+(`CONFIRMED_LOW_CONFIDENCE`, `NEEDS_RUNTIME`, or `SURFACE_NOT_PRODUCTION`);
+the former renders nowhere in this mode (no False Positives section here,
+same as any other finding), the latter goes in `## Needs Review` below (a
+`CONFIRMED_LOW_CONFIDENCE` regression still gets the full write-up there,
+same template as here, just with `**Confidence**: Low — {verdict_reason}` in
+place of `**Validation**: CONFIRMED`), not here.}
 
 ### 🔴 {ID} · {Title}
 - **Severity**: {severity}
@@ -782,7 +821,7 @@ Positives section here, same as any other finding), the latter goes in
 ```
 - **What changed**: {description — what the control did and why its removal matters}
 - **Impact**: {attack_vector}
-- **Validation**: {CONFIRMED — no equivalent control found elsewhere in the call chain | CONFIRMED_LOW_CONFIDENCE — reason}
+- **Validation**: CONFIRMED — no equivalent control found elsewhere in the call chain
 - **Fix**: {remediation — usually "restore the removed check" unless it was deliberately consolidated elsewhere}
 
 ---
@@ -798,9 +837,6 @@ Positives section); `report_tier: NEEDS_REVIEW` findings go in
 
 ### 🟠 {ID} · {Title}
 - **Severity**: {severity}
-{If validation_status == CONFIRMED_LOW_CONFIDENCE:}
-- **Confidence**: Low
-{Omit the Confidence line entirely for plain CONFIRMED — absence means full confidence; never print "Confidence: High".}
 - **Category**: {OWASP A0x / API / secret / dependency CVE}
 - **File**: `{file}:{line}`
 {If code snippet available (≤10 lines):}
@@ -820,18 +856,46 @@ _No new vulnerabilities introduced by this diff._
 
 ## Needs Review          ← omit entirely if no finding has report_tier: NEEDS_REVIEW
 
-{Findings (regression or not) with `report_tier: NEEDS_REVIEW`. In this mode
-`validation_status` can only be `NEEDS_RUNTIME` or `SURFACE_NOT_PRODUCTION` —
-`NEEDS_EXTERNAL_VERIFICATION` and `PENDING_CROSS_REPO_VALIDATION` cannot occur
-(Step 0.5 never runs in PR mode) and `BOUNDARY_NOT_CROSSED` cannot occur
-either (`deployment-verification.json` is never produced in PR mode — see
-`phase5-validate-and-poc.md`'s PR Mode substitution note). One flat table,
-no Part A/B/C split (that split exists in the default report to separate
-three different *reasons* findings land here; PR mode only ever has two,
-so a single table stays readable). **Reason column sourcing**: for
-`NEEDS_RUNTIME`, prefer `runtime_verdict_change.reason` when non-null,
-else `verdict_reason` — same rule as the default report. For
-`SURFACE_NOT_PRODUCTION`, use `surface_gate.reason`.}
+{`report_tier: NEEDS_REVIEW` findings, regression or not. In this mode
+`validation_status` can be `CONFIRMED_LOW_CONFIDENCE`, `NEEDS_RUNTIME`, or
+`SURFACE_NOT_PRODUCTION` — `NEEDS_EXTERNAL_VERIFICATION` and
+`PENDING_CROSS_REPO_VALIDATION` cannot occur (Step 0.5 never runs in PR mode)
+and `BOUNDARY_NOT_CROSSED` cannot occur either (`deployment-verification.json`
+is never produced in PR mode — see `phase5-validate-and-poc.md`'s PR Mode
+substitution note). Two subsections, not four — PR mode collapses the
+default report's Parts B/C/D into one flat table (only ever two possible
+statuses there, stays readable as one table) but keeps
+`CONFIRMED_LOW_CONFIDENCE` as its own richer subsection, same reasoning as
+the default report: it's a real, fully-written-up finding with a PoC, not a
+one-line table row.}
+
+**Confirmed at Reduced Confidence** (`validation_status: CONFIRMED_LOW_CONFIDENCE`,
+regression or not): use whichever template above the finding would otherwise
+have used — `regression: true` gets `## Removed Security Controls`'s fields
+(Removed/What changed/Impact/Fix), `regression: false` gets `## Findings`'s
+fields (Category/Code/Description/Impact/Remediation) — but swap
+`**Validation**: CONFIRMED` (or the Severity/Priority-adjacent line) for
+`**Confidence**: Low — {verdict_reason}` stating what's uncertain. Example
+for a `regression: false` finding:
+
+### 🟠 {ID} · {Title}
+- **Confidence**: Low — {verdict_reason}
+- **Category**: {OWASP A0x / API / secret / dependency CVE}
+- **File**: `{file}:{line}`
+{If code snippet available (≤10 lines):}
+**Code**:
+```{language}
+{snippet}
+```
+- **Description**: {what the problem is and why it matters}
+- **Impact**: {what an attacker can do}
+- **Remediation**: {specific, actionable fix}
+
+**Everything else** (`NEEDS_RUNTIME`/`SURFACE_NOT_PRODUCTION`) — one flat
+table. **Reason column sourcing**: for `NEEDS_RUNTIME`, prefer
+`runtime_verdict_change.reason` when non-null, else `verdict_reason` — same
+rule as the default report. For `SURFACE_NOT_PRODUCTION`, use
+`surface_gate.reason`:
 
 | ID | Type | File | Verdict | Reason |
 |----|------|------|---------|--------|
@@ -853,8 +917,11 @@ _PR-scoped security review · repo-security-review skill (`--pr` mode). Reviews 
   Positives section — see PR Review Report Structure.
 - Needs Review section is conditional in every mode — omit the whole
   heading when no finding has `report_tier: NEEDS_REVIEW`, don't render it
-  empty. PR Review mode has its own trimmed version (one flat table, no
-  Part A/B/C split) restricted to `NEEDS_RUNTIME`/`SURFACE_NOT_PRODUCTION` —
+  empty. PR Review mode has its own trimmed version (a full-template
+  subsection for `CONFIRMED_LOW_CONFIDENCE`, same reasoning as the default
+  report's Part A, plus one flat table collapsing what would otherwise be
+  three parts, since PR mode only ever has two possible statuses there:
+  `NEEDS_RUNTIME`/`SURFACE_NOT_PRODUCTION`) —
   `NEEDS_EXTERNAL_VERIFICATION`/`PENDING_CROSS_REPO_VALIDATION` (Step 0.5
   doesn't run in PR mode) and `BOUNDARY_NOT_CROSSED`
   (`deployment-verification.json` never exists in PR mode) cannot occur

@@ -696,7 +696,7 @@ After the above steps (including the boundary gate if it ran), assign one of:
 | Status | Meaning | Next step |
 |--------|---------|-----------|
 | `CONFIRMED` | True positive, high confidence | Write PoC now |
-| `CONFIRMED_LOW_CONFIDENCE` | Real but exploitability uncertain | Write PoC, flag confidence |
+| `CONFIRMED_LOW_CONFIDENCE` | Real but exploitability uncertain | Write PoC; renders in Phase 6's Needs Review section (`report_tier: NEEDS_REVIEW`), not `## Findings` — see Report Tier below |
 | `FALSE_POSITIVE` | Not exploitable or mitigated | Record reason, no PoC |
 | `NEEDS_RUNTIME` | Cannot confirm statically | If `--runtime` is set: attempt dynamic verification (Runtime Value Assessment) — a clean result can resolve this to `CONFIRMED`/`CONFIRMED_LOW_CONFIDENCE`, or leave it as `NEEDS_RUNTIME` if still inconclusive. If `--runtime` is not set: stays `NEEDS_RUNTIME`, no exploit constructed |
 | `BOUNDARY_NOT_CROSSED` | Vulnerability exists in code but entry point is behind a high-confidence auth gate with no bypass | No PoC; record in output with boundary evidence |
@@ -710,7 +710,8 @@ rather than re-deriving it):
 
 | `validation_status` | `report_tier` |
 |---|---|
-| `CONFIRMED`, `CONFIRMED_LOW_CONFIDENCE` | `CONFIRMED` |
+| `CONFIRMED` | `CONFIRMED` |
+| `CONFIRMED_LOW_CONFIDENCE` | `NEEDS_REVIEW` — real finding, PoC still constructed, but uncertain exploitability means it does not belong in the same section as a fully-confirmed one. Renders in Phase 6's Needs Review section (its own part, not the general one), never in `## Findings`. |
 | `FALSE_POSITIVE` | `REJECTED` |
 | `NEEDS_RUNTIME`, `BOUNDARY_NOT_CROSSED`, `SURFACE_NOT_PRODUCTION`, `NEEDS_EXTERNAL_VERIFICATION`, `PENDING_CROSS_REPO_VALIDATION` | `NEEDS_REVIEW` |
 | `MERGED` (Step 0.5 passthrough) | `null` — not independently rendered; folded into its `duplicate_of` finding |
@@ -723,16 +724,22 @@ two fields: `FALSE_POSITIVE` already has `false_positive_reason`,
 `BOUNDARY_NOT_CROSSED` already has `boundary_gate.reason`,
 `SURFACE_NOT_PRODUCTION` already has `surface_gate.reason` — use those, and
 leave the top-level `verdict_reason` field `null` for those three statuses.
-Populate the top-level `verdict_reason` field itself for the three statuses
+Populate the top-level `verdict_reason` field itself for the four statuses
 that have no existing dedicated reason field: `NEEDS_EXTERNAL_VERIFICATION`,
-`PENDING_CROSS_REPO_VALIDATION`, and `NEEDS_RUNTIME`. For `NEEDS_RUNTIME`
-specifically, `runtime_verdict_change` (see Runtime Value Assessment below)
-takes precedence when non-null — a `NEEDS_RUNTIME` reached via a clean
-dynamic disprove of an earlier confirm has its real story in
+`PENDING_CROSS_REPO_VALIDATION`, `NEEDS_RUNTIME`, and `CONFIRMED_LOW_CONFIDENCE`.
+For `NEEDS_RUNTIME` specifically, `runtime_verdict_change` (see Runtime Value
+Assessment below) takes precedence when non-null — a `NEEDS_RUNTIME` reached
+via a clean dynamic disprove of an earlier confirm has its real story in
 `runtime_verdict_change.reason`, not `verdict_reason`; only use
-`verdict_reason` for the "never attempted / stayed inconclusive" case.
-`CONFIRMED`/`CONFIRMED_LOW_CONFIDENCE` findings leave everything null — the
-description and evidence already carry the "why." Phase 6 must know to pull
+`verdict_reason` for the "never attempted / stayed inconclusive" case. For
+`CONFIRMED_LOW_CONFIDENCE`, `verdict_reason` states specifically what's
+uncertain about exploitability (e.g. "entry point appears protected per
+Phase 2 at medium confidence" from a Boundary Gate cap, or "dynamic
+verification left residual doubt" from a Runtime Value Assessment cap) — the
+same text that used to just be an internal annotation now has to double as
+the reader-facing reason, since this status no longer renders in
+`## Findings` where the description alone used to carry the "why." Only
+plain `CONFIRMED` findings leave everything null. Phase 6 must know to pull
 the reason from whichever field is populated for a given `validation_status`
 when rendering the Needs Review table (see phase6-report.md → Needs Review
 section).
