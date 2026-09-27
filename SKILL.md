@@ -103,7 +103,13 @@ Exception: if `--yes` is set and no repo path is provided, abort with a clear er
 **Cascade rules**:
 - `--skip owasp` → also skips `validation` (Phase 5 has nothing to work from). `--poc` has no effect if validation is skipped.
 - `--skip validation` → `--poc` has no effect (PoC requires a validation verdict; there is none)
-- `--runtime` without `--poc` → `--poc` is implied; PoC generation runs so runtime validation has something to validate
+- `--runtime` without `--poc` → exploit construction still runs (Part 2 of
+  `phase5-validate-and-poc.md`) so runtime validation has something to
+  execute, but `--poc` is **not** implied: the constructed exploit is written
+  to a scratch path and discarded after use, never persisted to `pocs/`. This
+  line used to say the opposite (`--poc` implied) before the two flags were
+  decoupled — see `phase5-validate-and-poc.md` → "Exploit Construction vs.
+  Dynamic Verification" for the current, authoritative behavior.
 - `--skip skill-security` together with `--skill-security` (either repo type) →
   the skip wins; Phase 4b does not run. An explicit skip always overrides an
   opt-in request for the same phase.

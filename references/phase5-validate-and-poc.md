@@ -1186,12 +1186,17 @@ PORT = "{listen_port}"                 # from tech-stack.json → runtime_hints
 BASE_URL = f"http://localhost:{PORT}"
 FINDING_ID = "{finding_id}"
 VULN_TYPE = "{vulnerability_type}"      # "xss" | "csrf" | "clickjacking"
-# Screenshot always saved as real evidence, regardless of --poc — under
-# pocs/ when that directory exists (--poc set), else directly under
-# .security-review/ (no pocs/ directory is created when --poc is not set).
-SCREENSHOT = "{repo_path}/.security-review/pocs/" + FINDING_ID + "-screenshot.png" \
-    if {poc_flag_set} else \
-    "{repo_path}/.security-review/" + FINDING_ID + "-runtime-screenshot.png"
+# Screenshot, and the CSRF/clickjacking HTML fixtures below, are always
+# written as real evidence regardless of --poc — under pocs/ when that
+# directory exists (--poc set), else directly under .security-review/ as
+# scratch files deleted after this step (see Tear down note below). Never
+# create the pocs/ directory when --poc is not set — same persist/scratch
+# split as the curl/code path (Part 2).
+POC_DIR = "{repo_path}/.security-review/pocs/" if {poc_flag_set} else "{repo_path}/.security-review/"
+SUFFIX = "" if {poc_flag_set} else "-runtime"
+SCREENSHOT = POC_DIR + FINDING_ID + SUFFIX + "-screenshot.png"
+ATTACKER_HTML = POC_DIR + FINDING_ID + SUFFIX + "-attacker.html"
+FRAME_TEST_HTML = POC_DIR + FINDING_ID + SUFFIX + "-frame-test.html"
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
@@ -1221,13 +1226,17 @@ with sync_playwright() as p:
             # state-changing action actually took effect server-side.
             page.goto(BASE_URL + "{login_path}", wait_until="networkidle")
             # {login steps specific to this repo's auth flow, from Phase 2's auth_coverage}
+            with open(ATTACKER_HTML, "w") as f:
+                f.write("{auto-submitting cross-origin form targeting data_flow.entrypoint, built from the finding's method/params}")
             attacker_page = context.new_page()
-            attacker_page.goto("{repo_path}/.security-review/pocs/" + FINDING_ID + "-attacker.html")
+            attacker_page.goto("file://" + ATTACKER_HTML)
             attacker_page.wait_for_timeout(2000)
             # {verify the state change via a follow-up GET with the same session}
             result["runtime_status"] = "RUNTIME_CONFIRMED"  # or RUNTIME_NOT_CONFIRMED, per verification above
         elif VULN_TYPE == "clickjacking":
-            page.goto("{repo_path}/.security-review/pocs/" + FINDING_ID + "-frame-test.html", wait_until="networkidle")
+            with open(FRAME_TEST_HTML, "w") as f:
+                f.write(f'<iframe src="{BASE_URL}{{target_path}}"></iframe>')
+            page.goto("file://" + FRAME_TEST_HTML, wait_until="networkidle")
             frame_rendered = page.frame_locator("iframe").locator("body").count() > 0
             result["runtime_status"] = "RUNTIME_CONFIRMED" if frame_rendered else "RUNTIME_NOT_CONFIRMED"
             result["detail"] = "target rendered inside iframe (no X-Frame-Options/CSP frame-ancestors block)" if frame_rendered else "framing was blocked"
@@ -1244,9 +1253,11 @@ with sync_playwright() as p:
 Run the script, capture its JSON stdout as the finding's
 `runtime_status`/`runtime_notes`, and apply the verdict-mutation table from
 Runtime Value Assessment. The screenshot at `SCREENSHOT` is real evidence and
-is always kept (referenced from `runtime_notes` either way); the driver
-script itself is deleted after this step unless `--poc` is set (in which
-case it stays alongside the finding's other persisted exploit files). If
+is always kept (referenced from `runtime_notes` either way, whichever path it
+was written to). The driver script itself, and `ATTACKER_HTML`/
+`FRAME_TEST_HTML` when the finding type created them, are deleted after this
+step unless `--poc` is set — in which case they stay alongside the finding's
+other persisted exploit files under `pocs/`. If
 `playwright` or its Chromium binary is unavailable, or the Docker
 confirmation gate above was declined, fall back to the curl/code path
 instead and note in `runtime_notes` that browser confirmation was
