@@ -364,8 +364,14 @@ findings were excluded during validation" instead of an empty table.)
 
 ## Summary
 
-{2-3 sentences on overall posture. Name the highest-risk issues directly.
-No mention of calibration or context.}
+{2-3 sentences on overall posture. Name the highest-risk issues directly —
+**only from findings with `validation_status: CONFIRMED`** (full confidence).
+Never spotlight a `CONFIRMED_LOW_CONFIDENCE` finding here, no matter its
+severity or Priority — its exploitability is itself uncertain, so it does
+not belong in a sentence asserting "this is the top risk." It still renders
+normally in `## Findings` below with its own `**Confidence**: Low` line (see
+the Findings fragment) — this only affects what gets spotlighted in the
+Summary. No mention of calibration or context.}
 
 | Severity | Count |
 |----------|-------|
@@ -376,9 +382,16 @@ No mention of calibration or context.}
 
 {All four rows above always render, even when N is 0 — never omit a
 zero-count row. This is an instruction to you; no footnote or note about it
-appears in the actual report.}
+appears in the actual report. Counts include every `report_tier: CONFIRMED`
+finding regardless of confidence — this table is a tally of what appears in
+`## Findings` below, not a curated spotlight, so `CONFIRMED_LOW_CONFIDENCE`
+findings are still counted here.}
 
-**Fix immediately**: {bullet list — P0 and P1 findings only, one line each}
+**Fix immediately**: {bullet list — P0 and P1 findings only, one line each.
+Exclude any finding with `validation_status: CONFIRMED_LOW_CONFIDENCE` even
+if it's P0/P1 — this list is a call to urgent action, and exploitability
+that's still uncertain doesn't belong in it. It still appears in `## Findings`
+below at its computed Priority, just not spotlighted here.}
 
 ---
 
@@ -428,6 +441,9 @@ separate `**Also identified as**` label — fold it into the description prose.
 
 ### 🟠 {ID} · {Title}
 - **Priority**: P{N}
+{If validation_status == CONFIRMED_LOW_CONFIDENCE:}
+- **Confidence**: Low
+{Omit the Confidence line entirely for plain CONFIRMED — absence means full confidence; never print "Confidence: High".}
 - **Category**: {e.g. Session Management / Missing Control / Dependency CVE / CI/CD / OWASP A07}
 - **File**: `{primary_file}:{line}`
 {If code snippet is available:}
@@ -659,10 +675,18 @@ risk if any CRITICAL/HIGH findings exist.}
 zero-count row. This is an instruction to you; no footnote or note about it
 appears in the actual report.}
 
-{If any CRITICAL/HIGH findings exist:}
+{If any CRITICAL/HIGH finding exists with `validation_status: CONFIRMED` (full confidence —
+this includes both `regression: true` and `regression: false` findings):}
 **Recommendation**: 🚫 Do not merge until addressed — {one-line reason naming the finding(s)}.
+{Otherwise, if any CRITICAL/HIGH finding exists but only at `validation_status: CONFIRMED_LOW_CONFIDENCE`:}
+**Recommendation**: ⚠️ Review recommended before merging — a CRITICAL/HIGH finding exists but at reduced confidence — {one-line reason naming the finding(s)}.
 {Otherwise:}
 **Recommendation**: ✅ No blocking findings in this diff.
+
+{Never let a `CONFIRMED_LOW_CONFIDENCE` finding alone trigger the hard "do not merge"
+block — exploitability that's still uncertain isn't grounds for blocking a merge outright,
+same principle as the default report's Fix-immediately exclusion. It still renders normally
+in `## Removed Security Controls` / `## Findings` below with its confidence visible.}
 
 ---
 
@@ -695,6 +719,9 @@ pr-validated.json — never renumber to F-NN.}
 
 ### 🟠 {ID} · {Title}
 - **Severity**: {severity}
+{If validation_status == CONFIRMED_LOW_CONFIDENCE:}
+- **Confidence**: Low
+{Omit the Confidence line entirely for plain CONFIRMED — absence means full confidence; never print "Confidence: High".}
 - **Category**: {OWASP A0x / API / secret / dependency CVE}
 - **File**: `{file}:{line}`
 {If code snippet available (≤10 lines):}
