@@ -287,7 +287,21 @@ Key differences from the other modes:
   get a one-line "blocks merge" recommendation.
 - **Phase 1/2/3/4/4b/5 outputs are not read** unless a prior full scan
   happens to have left them in `.security-review/` — do not reference them;
-  this report is self-contained from `pr-findings.json`/`pr-validated.json`.
+  this report is self-contained from `pr-findings.json`/`pr-validated.json`
+  (plus `threat-model.json` when `--local` was used — see below).
+- **`--local` calibration still applies, Axis 1 only** — Axis 2
+  (`auth_required_to_reach`) is never eligible in this mode since
+  `deployment-verification.json` never exists here (`--verify-deployment`
+  has no effect in `--pr` mode). Severity shown is `contextual_severity`
+  when `threat-model.json` exists, plain `severity` otherwise — same rule
+  as the default report, read from Phase 5's per-finding output, never
+  recomputed here.
+- **Has a trimmed Needs Review section** — unlike the default/vendor
+  reports' three-part version, PR mode can only ever produce
+  `NEEDS_RUNTIME` or `SURFACE_NOT_PRODUCTION` (Step 0.5, which produces the
+  other three statuses that section can show, never runs here — see
+  PR Review Report Structure below). No False Positives section either way
+  (rejected findings render nowhere in this mode).
 - **`--vendor` does not apply** — the orchestrator does not
   allow combining it with `--pr` (see SKILL.md).
 
@@ -678,10 +692,20 @@ _Vendor risk assessment · repo-security-review skill (vendor mode). Static + ru
 
 Produced instead of the default/vendor structure when `--pr` is set.
 Read `pr-findings.json` and `pr-validated.json` (substituted filenames per
-`phase5-validate-and-poc.md`'s "PR Review Mode substitution" note). Do not read or reference
+`phase5-validate-and-poc.md`'s "PR Review Mode substitution" note), plus
+`threat-model.json` if it exists (present only if `--local` was used — same
+file, same shape as full-scan mode). Do not read or reference
 `phase1-secrets.json` / `phase2-architecture.json` / `phase3-cves.json` /
-`phase4-owasp.json` / `phase5-validated.json` — those belong to the full-scan
-pipeline and are not produced by this mode.
+`phase4-owasp.json` / `phase5-validated.json` / `deployment-verification.json`
+— the first five belong to the full-scan pipeline and are not produced by
+this mode; the last is never produced in PR mode at all, full-scan or not
+(`--verify-deployment` has no effect in `--pr` mode — see `SKILL.md`).
+
+**Severity display**: same rule as the default report — `contextual_severity`
+when `threat-model.json` exists (Axis 1/`deployment_target` only; Axis 2 is
+never eligible here since `deployment-verification.json` never exists in
+this mode), plain `severity` otherwise. Read whichever field
+`phase5-validate-and-poc.md`'s Part 4 wrote per finding — do not recompute.
 
 ```markdown
 # PR Security Review
@@ -723,12 +747,18 @@ in `## Removed Security Controls` / `## Findings` below with its confidence visi
 
 ---
 
-## Removed Security Controls          ← omit entirely if no finding has regression: true
+## Removed Security Controls          ← omit entirely if no finding has regression: true AND report_tier: CONFIRMED
 
-{Findings with `regression: true` — a control that existed before this diff
-and does not anymore. Render first and separately from other findings; this
-class of issue is often more urgent than a net-new vulnerability because it's
-a regression in previously-working protection, not a gap that was always there.}
+{Findings with `regression: true` **and** `report_tier: CONFIRMED` — a control
+that existed before this diff and does not anymore. Render first and
+separately from other findings; this class of issue is often more urgent
+than a net-new vulnerability because it's a regression in previously-working
+protection, not a gap that was always there. A regression finding can also
+resolve to `FALSE_POSITIVE` (the control moved rather than vanished — see
+`pr-review.md`'s "Additional validation duty" note) or `NEEDS_REVIEW` (e.g.
+`NEEDS_RUNTIME`); the former renders nowhere in this mode (no False
+Positives section here, same as any other finding), the latter goes in
+`## Needs Review` below, not here.}
 
 ### 🔴 {ID} · {Title}
 - **Severity**: {severity}
@@ -746,9 +776,12 @@ a regression in previously-working protection, not a gap that was always there.}
 
 ## Findings                          ← new vulnerable code introduced by this diff
 
-{Findings with `regression: false`, sorted by severity — highest first. Flat
-list, no priority labels. Use the `D-` prefix from pr-findings.json/
-pr-validated.json — never renumber to F-NN.}
+{Findings with `regression: false` **and** `report_tier: CONFIRMED`, sorted
+by severity — highest first. Flat list, no priority labels. Use the `D-`
+prefix from pr-findings.json/pr-validated.json — never renumber to F-NN.
+`report_tier: REJECTED` findings render nowhere in this mode (no False
+Positives section); `report_tier: NEEDS_REVIEW` findings go in
+`## Needs Review` below, not here.}
 
 ### 🟠 {ID} · {Title}
 - **Severity**: {severity}
@@ -767,8 +800,29 @@ pr-validated.json — never renumber to F-NN.}
 - **Auth context**: {if this finding's route appears in touched_auth_context: "Route is {auth_status} ({auth_confidence} confidence) — {basis}"; omit this line entirely for non-route findings}
 - **Remediation**: {specific, actionable fix}
 
-{If no non-regression findings exist:}
+{If no non-regression `report_tier: CONFIRMED` findings exist:}
 _No new vulnerabilities introduced by this diff._
+
+---
+
+## Needs Review          ← omit entirely if no finding has report_tier: NEEDS_REVIEW
+
+{Findings (regression or not) with `report_tier: NEEDS_REVIEW`. In this mode
+`validation_status` can only be `NEEDS_RUNTIME` or `SURFACE_NOT_PRODUCTION` —
+`NEEDS_EXTERNAL_VERIFICATION` and `PENDING_CROSS_REPO_VALIDATION` cannot occur
+(Step 0.5 never runs in PR mode) and `BOUNDARY_NOT_CROSSED` cannot occur
+either (`deployment-verification.json` is never produced in PR mode — see
+`phase5-validate-and-poc.md`'s PR Mode substitution note). One flat table,
+no Part A/B/C split (that split exists in the default report to separate
+three different *reasons* findings land here; PR mode only ever has two,
+so a single table stays readable). **Reason column sourcing**: for
+`NEEDS_RUNTIME`, prefer `runtime_verdict_change.reason` when non-null,
+else `verdict_reason` — same rule as the default report. For
+`SURFACE_NOT_PRODUCTION`, use `surface_gate.reason`.}
+
+| ID | Type | File | Verdict | Reason |
+|----|------|------|---------|--------|
+| D-004 | SQLi | test/fixtures/seed.ts:L22 | SURFACE_NOT_PRODUCTION | Test fixture, excluded from production build |
 
 ---
 
@@ -784,11 +838,14 @@ _PR-scoped security review · repo-security-review skill (`--pr` mode). Reviews 
 - False Positives section is mandatory in default/vendor modes — it
   builds trust with the dev team. PR Review mode (`--pr`) has no False
   Positives section — see PR Review Report Structure.
-- Needs Review section is conditional in default/vendor modes — omit the
-  whole heading when no finding has `report_tier: NEEDS_REVIEW`, don't render
-  it empty. PR Review mode has no Needs Review section either (Step 0.5,
-  which is what produces `NEEDS_EXTERNAL_VERIFICATION`/`PENDING_CROSS_REPO_VALIDATION`
-  findings, does not run in PR mode).
+- Needs Review section is conditional in every mode — omit the whole
+  heading when no finding has `report_tier: NEEDS_REVIEW`, don't render it
+  empty. PR Review mode has its own trimmed version (one flat table, no
+  Part A/B/C split) restricted to `NEEDS_RUNTIME`/`SURFACE_NOT_PRODUCTION` —
+  `NEEDS_EXTERNAL_VERIFICATION`/`PENDING_CROSS_REPO_VALIDATION` (Step 0.5
+  doesn't run in PR mode) and `BOUNDARY_NOT_CROSSED`
+  (`deployment-verification.json` never exists in PR mode) cannot occur
+  there — see PR Review Report Structure.
 - PoC scripts are referenced by filename only —
   `- **PoC**: \`pocs/{poc_filename}\`` — never inline code blocks
 - Redact ALL secret values — show only first 4 and last 3 chars

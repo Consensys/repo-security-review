@@ -64,7 +64,7 @@ reasoning/conversation, not avoiding their JSON). You receive:
 > (`--pr` flag), replace every mention of `phase4-owasp.json` in this file with
 > `pr-findings.json` and `phase5-validated.json` with `pr-validated.json`, and
 > "Phase 4"/"the finder" with "the PR diff-scan phase." Validation (Part 1,
-> including the Surface Gate, mitigation hunt, and Boundary Gate) applies
+> including the Surface Gate and mitigation hunt) applies
 > **unchanged** — including the `regression`/`removed_control` fields
 > `pr-review.md` adds to its findings, which Step 2 (mitigation hunt) must
 > validate per that file's "Additional validation duty" note. **Step 0.5
@@ -74,7 +74,19 @@ reasoning/conversation, not avoiding their JSON). You receive:
 > runtime validation (Part 3) never run in PR mode** — treat it as if `--poc`
 > was never passed: assign validation verdicts normally, set
 > `poc_generated: false` / `poc_file: null` on every finding, and do not
-> produce `phase5-pocs.json` / `pr-pocs.json` at all.
+> produce `phase5-pocs.json` / `pr-pocs.json` at all. **Step 0.4 (Verify
+> Deployment) and Step 5 (Boundary Gate) never run in PR mode** — per
+> `SKILL.md`, `--verify-deployment` has no effect there ("no Phase 5
+> boundary-gate/threat-model concept in that mode"); `deployment-verification.json`
+> is never produced, so `BOUNDARY_NOT_CROSSED` cannot occur as a PR-mode
+> verdict and Axis 2 (`auth_required_to_reach`) is never eligible either — a
+> PR review has no live deployment to check against. **Part 4 (Contextual
+> Severity Calibration) still runs**, scoped to Axis 1 only: when
+> `--local` was passed, `threat-model.json` exists exactly as in full-scan
+> mode, and Axis 1's `deployment_target` softener applies to any
+> `pr-validated.json` finding with `data_flow.entrypoint` set, same
+> eligibility rule as the full-scan pipeline. Write `contextual_severity`/
+> `severity_adjustment` per finding as usual.
 
 Re-read the relevant source code from scratch for each finding. Do not
 assume Phase 4 was correct. Your validation must be independent.
