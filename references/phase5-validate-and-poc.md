@@ -711,14 +711,19 @@ two fields: `FALSE_POSITIVE` already has `false_positive_reason`,
 `BOUNDARY_NOT_CROSSED` already has `boundary_gate.reason`,
 `SURFACE_NOT_PRODUCTION` already has `surface_gate.reason` — use those, and
 leave the top-level `verdict_reason` field `null` for those three statuses.
-Populate the top-level `verdict_reason` field itself only for the two
-statuses that have no existing dedicated reason field: `NEEDS_EXTERNAL_VERIFICATION`
-and `PENDING_CROSS_REPO_VALIDATION` (and `NEEDS_RUNTIME`, which has no
-per-finding reason field today). `CONFIRMED`/`CONFIRMED_LOW_CONFIDENCE`
-findings leave everything null — the description and evidence already carry
-the "why." Phase 6 must know to pull the reason from whichever field is
-populated for a given `validation_status` when rendering the Needs Review
-table (see phase6-report.md → Needs Review section).
+Populate the top-level `verdict_reason` field itself for the three statuses
+that have no existing dedicated reason field: `NEEDS_EXTERNAL_VERIFICATION`,
+`PENDING_CROSS_REPO_VALIDATION`, and `NEEDS_RUNTIME`. For `NEEDS_RUNTIME`
+specifically, `runtime_verdict_change` (see Runtime Value Assessment below)
+takes precedence when non-null — a `NEEDS_RUNTIME` reached via a clean
+dynamic disprove of an earlier confirm has its real story in
+`runtime_verdict_change.reason`, not `verdict_reason`; only use
+`verdict_reason` for the "never attempted / stayed inconclusive" case.
+`CONFIRMED`/`CONFIRMED_LOW_CONFIDENCE` findings leave everything null — the
+description and evidence already carry the "why." Phase 6 must know to pull
+the reason from whichever field is populated for a given `validation_status`
+when rendering the Needs Review table (see phase6-report.md → Needs Review
+section).
 
 ### Runtime Value Assessment (only if `--runtime` is set)
 
@@ -1651,7 +1656,6 @@ their final shape, not a new write step.
       "source_phase": 2,
       "validation_status": "NEEDS_EXTERNAL_VERIFICATION",
       "report_tier": "NEEDS_REVIEW",
-      "confidence": "MEDIUM",
       "verdict_reason": "The claimed data flow depends on an internal package's own request-serialization behavior; that package's source is not present in this repo, so redaction cannot be confirmed or ruled out from here.",
       "data_flow": null,
       "mitigations_checked": [],
@@ -1677,7 +1681,6 @@ their final shape, not a new write step.
       "source_phase": 4,
       "validation_status": "CONFIRMED",
       "report_tier": "CONFIRMED",
-      "confidence": "HIGH",
       "data_flow": {
         "entrypoint": "GET /api/users/:id",
         "entrypoint_file": "src/routes/users.ts",
@@ -1710,7 +1713,6 @@ their final shape, not a new write step.
       "source_phase": 4,
       "validation_status": "FALSE_POSITIVE",
       "report_tier": "REJECTED",
-      "confidence": "HIGH",
       "data_flow": {
         "entrypoint": "GET /search",
         "entrypoint_file": "src/views/search.py",
@@ -1735,7 +1737,6 @@ their final shape, not a new write step.
       "source_phase": 4,
       "validation_status": "BOUNDARY_NOT_CROSSED",
       "report_tier": "NEEDS_REVIEW",
-      "confidence": "HIGH",
       "data_flow": {
         "entrypoint": "POST /api/admin/search",
         "entrypoint_file": "src/routes/admin.ts",
@@ -1774,7 +1775,6 @@ their final shape, not a new write step.
       "source_phase": 4,
       "validation_status": "SURFACE_NOT_PRODUCTION",
       "report_tier": "NEEDS_REVIEW",
-      "confidence": "HIGH",
       "data_flow": null,
       "mitigations_checked": [],
       "surface_gate": {

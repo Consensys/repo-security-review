@@ -11,6 +11,7 @@ Read all that exist (some may be absent if a phase was skipped):
 {repo_path}/.security-review/run-metadata.json
 {repo_path}/.security-review/tech-stack.json
 {repo_path}/.security-review/threat-model.json       ← present only if --local was used
+{repo_path}/.security-review/deployment-verification.json ← present only if --verify-deployment was used
 {repo_path}/.security-review/phase1-secrets.json
 {repo_path}/.security-review/phase2-architecture.json
 {repo_path}/.security-review/phase3-cves.json
@@ -83,26 +84,50 @@ or append to `cost-report.md`.
 
 ## Calibration Step (only when threat-model.json exists)
 
-When `threat-model.json` and/or `deployment-verification.json` are present,
-compute `contextual_severity` for every non-secret finding before building
-the report. Secrets are exempted — rotation is always required regardless of
-context. The two source files are independent (see `phase5-validate-and-poc.md`
-→ Part 4) — either one existing alone is enough to trigger calibration.
+**Do not recompute calibration here.** For every finding present in
+`phase5-validated.json` (i.e. every Phase 2/Phase 4 finding — the vast
+majority of what ends up in the report), Phase 5's own Part 4 already
+computed `contextual_severity` and `severity_adjustment` per finding, using
+`data_flow.entrypoint`/`boundary_gate.ran` eligibility that Phase 6 has no
+independent way to re-derive correctly (it would have to re-run the Boundary
+Gate and re-classify every entry point itself). **Read the two fields
+directly from each finding and display `contextual_severity` as-is** — no
+B/C columns, no explanation of why a finding is Medium vs High, no mention of
+calibration or context anywhere in the rendered report. Secrets never carry
+these fields — rotation is always required regardless of context, skip them
+here entirely. Drift findings (`category: threat_model_drift`) are silently
+excluded from the report.
 
-**Severity tier order**: CRITICAL → HIGH → MEDIUM → LOW.
-Floor: LOW (nothing drops below). Ceiling: base severity (context never sharpens).
-
-Apply softeners:
+The softener table below is reference documentation for *what Phase 5
+already applied* (so a reader of this spec can see the rule without opening
+`phase5-validate-and-poc.md` → Part 4) — it is not a second computation site,
+and must never be re-run against a finding that already has
+`contextual_severity` set.
 
 | Softener | Applies to | Source |
 |----------|-----------|--------|
 | `deployment_target: local` (−2 tiers) | findings with a genuine network entry point only (`data_flow.entrypoint` set) — never findings with `data_flow: null` (hardcoded secrets, crypto choices, CI/CD injection, etc. — not reached through the deployment at all) | `threat-model.json` (`--local`) |
 | `auth_required_to_reach: true` (−1 tier) | pre-auth findings with a genuine network entry point only (findings that survived the Phase 5 boundary gate) — never findings with `boundary_gate.ran: false` (hardcoded secrets, crypto choices, CI/CD injection, etc. — the auth wall doesn't gate their exposure) | `deployment-verification.json` (`--verify-deployment`, `classification: gated`) — never a declared claim |
 
-**How calibration surfaces in the report:** `contextual_severity` is the
-displayed severity with no annotation. The dev team sees effective risk — no
-B/C columns, no explanation of why a finding is Medium vs High. Drift findings
-(`category: threat_model_drift`) are silently excluded from the report.
+**This mechanism only exists for `phase5-validated.json`-covered findings.**
+Phase 3 CVE findings (`phase3-cves.json`/`phase3b`) never enter Phase 5's
+candidate list (Step 0.5 only ever merges Phase 2 into Phase 4) and
+structurally have no `data_flow`/`boundary_gate` fields to test eligibility
+against — they are **never** in scope for this softener pair. They already
+carry their own, separate severity/priority adjustment from Phase 3's own
+`reachable` + EPSS + KEV logic (see `phase3-dependencies.md`) computed
+independently of `--local`/`--verify-deployment`. Do not apply
+`deployment_target`/`auth_required_to_reach` on top of that — it would
+double-discount the same finding through two unrelated mechanisms. Render a
+CVE finding's severity exactly as Phase 3 computed it.
+
+**Fallback — `phase5-validated.json` is absent** (`--skip validation` was
+used, matching the Deduplication Step's fallback path above): there is
+nothing to read `contextual_severity` from. Compute it yourself using the
+softener table above for any Phase 2/Phase 4 finding that has a `data_flow`/
+`boundary_gate`-equivalent signal available in its own JSON; a finding with
+neither is not eligible for either softener, same rule as Phase 5 would have
+applied.
 
 ---
 
@@ -308,7 +333,13 @@ section is empty and omitted — see Deduplication Step above).}
 inconclusive, or a clean dynamic result disagreed with an earlier static
 `CONFIRMED`/`CONFIRMED_LOW_CONFIDENCE` and downgraded it here for a human to
 reconcile — see `phase5-validate-and-poc.md` → Runtime Value Assessment →
-Verdict mutation):
+Verdict mutation). **Reason column sourcing**: `verdict_reason` for
+`NEEDS_EXTERNAL_VERIFICATION`/`PENDING_CROSS_REPO_VALIDATION`, always. For
+`NEEDS_RUNTIME`, use `runtime_verdict_change.reason` when that field is
+non-null (this row exists because a clean dynamic result disagreed with an
+earlier confirm — the mutation reason is the actual story); otherwise fall
+back to `verdict_reason` (dynamic verification was never attempted or stayed
+inconclusive):
 
 | ID | Type | File | Verdict | Reason |
 |----|------|------|---------|--------|
@@ -457,8 +488,10 @@ separate `**Also identified as**` label — fold it into the description prose.
   {phase name} analysis."}
 - **Impact**: {what an attacker can do}
 - **Remediation**: {specific, actionable fix}
-{If PoC file exists for this finding:}
-- **PoC**: `pocs/{poc_filename}`
+{If PoC file exists for this finding (per-finding `poc_generated: true`, file name from `poc_file`):}
+- **PoC**: `pocs/{poc_file}`
+{If `manual_validation_instructions` is non-null on this finding:}
+- **Run it**: {manual_validation_instructions}
 {If phase5-validated.json → poc_skipped: true AND finding is CONFIRMED:}
 - **PoC**: not generated (pass `--poc` to generate PoC scripts for confirmed findings)
 
