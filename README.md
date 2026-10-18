@@ -129,7 +129,7 @@ flowchart TD
     P2 -. file path only .-> P5
 
     subgraph JUDGMENT["JUDGMENT LAYER (isolated context)"]
-        P5[Phase 5 · Validate + PoC<br/>merges + validates Phase 4 findings<br/>and standalone Phase 2 findings<br/>verdict: Confirmed / Needs Review / Rejected<br/>PoCs persisted only with --poc<br/>optional Docker runtime (--runtime)]
+        P5[Phase 5 · Validate + PoC<br/>merges + validates Phase 4 findings<br/>and standalone Phase 2 findings<br/>verdict: Confirmed / Needs Review / Rejected<br/>PoCs persisted only with --poc<br/>optional Docker runtime via --runtime]
     end
 
     P1 --> R[Phase 6 · Report Builder]
