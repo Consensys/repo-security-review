@@ -7,15 +7,20 @@ description: >
   for OWASP Top 10 and OWASP API Top 10 issues, scan for secrets or exposed credentials, audit dependencies
   for CVEs, or analyze architecture for security flaws. Trigger even for casual
   phrasings like "can you check this repo for security issues" or "run security
-  on this". This skill orchestrates 7 sequential phases: secret scanning,
-  architectural analysis, dependency CVE scanning with reachability validation,
-  code-level OWASP analysis, finding validation, and final report generation.
-  PoC generation (with optional runtime validation via Docker) is opt-in via
-  the `--poc` flag. Also handles
-  reviewing a single pull request's diff for security issues (`--pr` flag) —
-  trigger on phrasings like "review this PR for security issues" or "security
-  review this diff before merge" — a fast, diff-scoped mode that does not
-  require the repo to have been scanned before.
+  on this". This skill orchestrates a multi-phase pipeline of isolated
+  subagents: secret scanning, tech-stack detection, architectural analysis,
+  dependency CVE scanning with reachability validation, code-level OWASP
+  analysis, independent finding validation (confirm / needs review / reject),
+  and final report generation. Opt-in extras: persisted PoC scripts (`--poc`),
+  dynamic verification against the app in Docker (`--runtime`, independent of
+  `--poc`), a live deployment check (`--verify-deployment`), and severity
+  calibration for local-only tools (`--local`). Also supports multi-repo
+  system reviews (`--repos`), third-party/vendor adoption audits (`--vendor`
+  — trigger on "is this open-source tool safe to adopt"), and reviewing a
+  single pull request's diff for security issues (`--pr` flag) — trigger on
+  phrasings like "review this PR for security issues" or "security review
+  this diff before merge" — a fast, diff-scoped mode that does not require
+  the repo to have been scanned before.
 maturity: experimental
 ---
 
@@ -51,14 +56,14 @@ bash scripts/setup.sh
 The user provides:
 1. **Repo path** (required): path to the cloned repository
 2. **Skip flags** (optional): comma-separated phases to skip
-3. **Report output path** (optional): where to write the final report
+3. **Output directory** (optional): directory to copy the final report (and PoC scripts, if any) into
 4. **Dynamic verification** (optional): whether to spin up Docker to dynamically verify eligible findings (tool — curl or headless browser — chosen automatically per finding type)
 5. **Deployment verification** (optional): a live URL to check for an auth gate/WAF
 6. **PoC persistence** (optional): whether to keep the constructed exploit as a durable script under `pocs/`, independent of whether dynamic verification ran
 
 Parse these from `$ARGUMENTS` using the format:
 ```
-/repo-security-review /path/to/repo [--skip phase1,phase3] [--output /path/to/report.md] [--runtime]
+/repo-security-review /path/to/repo [--skip secrets,dependencies] [--output /path/to/report-dir] [--runtime]
 ```
 
 ### Argument Parsing Rules
@@ -67,15 +72,14 @@ Parse these from `$ARGUMENTS` using the format:
 |----------|---------|-------------|
 | (first positional) | required (single-repo mode) | Repo path. Omit when `--repos` is used. |
 | `--repos` | none | Comma-separated list of repo paths for multi-repo mode. Activates Phase 0 and Phase 7. When set, the first positional arg is not required. |
-| `--skip` | none | Comma-separated phase names to skip: `secrets`, `architecture`, `dependencies`, `owasp`, `validation` |
+| `--skip` | none | Comma-separated phase names to skip: `secrets`, `architecture`, `dependencies`, `owasp`, `validation`, `skill-security` |
 | `--output` | none — all artifacts stay at `{repo_path}/.security-review/` (single-repo) or `./system-security-review/` (multi-repo) | Directory to copy the final report and PoC scripts into after the run. Created if it doesn't exist. **Strongly recommended in multi-repo mode.** |
 | `--poc` | false | Opt-in: **persist** the concrete exploit Phase 5 constructs for a validated finding (CONFIRMED / CONFIRMED_LOW_CONFIDENCE) to `pocs/` as a durable script. Independent of `--runtime` — does not by itself execute anything. Without this flag, no files are written under `pocs/` even if `--runtime` constructs and runs an exploit internally. Has no effect in PR mode (which never generates PoCs) or Vendor mode (which forces PoC generation off — see [Vendor Mode](#vendor-mode---vendor)). |
-| `--runtime` | false | Opt-in: **dynamically verify** eligible findings (including ones static analysis alone couldn't resolve) by constructing the concrete exploit and executing it against the repo stood up in Docker. The skill chooses the tool per finding type on its own — curl-based requests for most types, a headless Chromium browser for XSS/CSRF/clickjacking — no separate flag needed for that choice. A clean result can strengthen or soften the finding's verdict (never straight to rejected). No longer implies `--poc` — the constructed exploit is discarded after use unless `--poc` is also set. See `phase5-validate-and-poc.md` → "Exploit Construction vs. Dynamic Verification." |
+| `--runtime` | false | Opt-in: **dynamically verify** eligible findings (including ones static analysis alone couldn't resolve) by constructing the concrete exploit and executing it against the repo stood up in Docker. The skill chooses the tool per finding type on its own — curl-based requests for most types, a headless Chromium browser for XSS/CSRF/clickjacking — no separate flag needed for that choice. A clean result can strengthen or soften the finding's verdict (never straight to rejected). No longer implies `--poc` — the constructed exploit is discarded after use unless `--poc` is also set. Ignored in Vendor mode (see [Vendor Mode](#vendor-mode---vendor)) and has no effect in PR mode. See `phase5-validate-and-poc.md` → "Exploit Construction vs. Dynamic Verification." |
 | `--vendor` | false | Vendor / open-source audit mode. Audits a third-party repo the company is considering adopting; audience is the internal security team, deliverable is an adoption risk judgment (not a fix-list for the vendor). Forces skip of `secrets`, `dependencies`, and `poc`; pins every phase to the resolved Standard tier model (never Opus); and switches Phase 6 to the vendor report format. See [Vendor Mode](#vendor-mode---vendor) below. |
 | `--pr` | none | PR Review mode. `--pr <base>...<head>` (or `--pr <base>` shorthand for `<base>...HEAD`) reviews only a pull request's diff instead of the whole repository — replaces the 6/7-phase pipeline with `references/pr-review.md`, pins to the resolved Standard tier model, and writes `pr-report.md` instead of `final-report.md`. Mutually exclusive with `--repos` and `--vendor`. See [PR Review Mode](#pr-review-mode---pr) below. |
 | `--local` | false | Opt-in: assert this is a local-only tool, not a publicly reachable service — softens severity by −2 tiers (Axis 1), but only for findings with a genuine network entry point (`data_flow.entrypoint` set) — a hardcoded secret or similar code-level finding gets no discount from this flag. Omit for the pessimistic default (`deployment_target: "public"`). Works in `--pr` mode too (Axis 1 only — Axis 2 is never eligible there since `--verify-deployment` has no effect in `--pr` mode). See [`--local`](#--local-deployment-target-calibration) below. |
 | `--verify-deployment` | none | Opt-in: `--verify-deployment <url>` sends one live, passive HTTP check to a real deployment URL so Phase 5 can derive `auth_required_to_reach` from an actual observation instead of a declared claim, plus a few cheap TLS/security-header posture checks that corroborate matching cookie-flag/weak-crypto findings. If the gating check is inconclusive, the skill automatically escalates to a headless-browser recheck (no separate flag) — gated behind its own confirmation prompt (auto-confirmed by `--yes`). No effect in PR mode or when `validation` is skipped. See [Verify Deployment](#verify-deployment---verify-deployment) below. |
-| `--sonnet` | false | Experimental / comparison flag: overrides Deep tier's primary family from Opus to Sonnet for this run (falls back to Haiku family only if Sonnet is entirely unavailable — Standard tier is unaffected, it already uses Sonnet). Exists to A/B scan quality and token consumption between Opus and Sonnet on Phase 2, not for routine use. Has no effect in Vendor mode (already pinned to Standard/Sonnet, no Deep tier at all) or PR mode (no Phase 2 / Deep tier in that mode). |
 | `--skill-security` | false | Opt-in: run Phase 4b (LLM/AI skill security) on a **mixed repo** (`is_skill_repo: false`) even though Phase 2a detected skill/agent-instruction files (`has_skill_files: true`). Without this flag, a mixed repo never runs Phase 4b by default in the **default report mode** — `has_skill_files: true` alone is a structural signal, not an auto-run trigger, for mixed repos. Redundant (already going to run) on a **pure skill repo** (`is_skill_repo: true`, e.g. this skill's own repo — use `--skip skill-security` to suppress it there instead) and in **Vendor mode** (`--vendor` already auto-runs Phase 4b on `has_skill_files: true` regardless of `is_skill_repo`, since assessing a vendor's AI-tooling risk is the point of that mode — see Vendor Mode below). No effect in PR mode (Phase 4b never runs there). |
 | `--yes` | false | Non-interactive mode. Auto-confirms all user-facing prompts: the `--output` copy confirmation, the Docker runtime gate (`--runtime`, plus its automatic headless-browser line when applicable), the deployment-verification gate (`--verify-deployment`, plus its automatic browser-escalation prompt when applicable), and the pure-skill-repo auto-skip cascade. Path-validation safety checks (rejecting sensitive `--output` destinations) are never bypassed. Use in CI or scripted runs. |
 | `--cost` | false | Write a paste-friendly cost report to `{repo_path}/.security-review/cost-report.md` recording each phase's (and named subphase's) duration and estimated token consumption. Scoped strictly to time/tokens — no file-read tables, coverage, greps, or checks-run detail. Independent of report mode. Renamed from `--debug`. See [Cost Report](#cost-report---cost) below. |
@@ -148,10 +152,7 @@ Two tiers are used across all phases:
 > booleans, skill-file detection, surface classification), not architectural
 > judgment; that judgment is what stays on Phase 2/Deep, consuming Phase 2a's
 > `tech-stack.json` rather than re-deriving it. Revisit if LLM-security or
-> cross-repo-synthesis quality regresses without it. `--sonnet` (see Fallback
-> Chains below) can override Phase 2's family to Sonnet for A/B comparison —
-> that's a per-run experiment flag, not a change to this default. It has no
-> effect on Phase 2a, which is already Standard tier.
+> cross-repo-synthesis quality regresses without it.
 
 #### Fallback Chains
 
@@ -169,14 +170,6 @@ Standard tier:
   1. Sonnet family     ← preferred
   2. Haiku family      ← fallback, only if Sonnet family is entirely unavailable
 ```
-
-> **`--sonnet` overrides the Deep tier chain** to `1. Sonnet family → 2. Haiku
-> family (fallback if Sonnet is entirely unavailable)` — i.e. Deep tier walks
-> the same chain Standard tier always does. This exists purely to A/B Phase
-> 2's scan quality and token consumption between Opus and Sonnet; it does not
-> change Standard tier (already Sonnet) and has no effect in Vendor or PR
-> mode (neither has a Deep tier to override). Record which family was
-> requested in `run-metadata.json → sonnet_flag`.
 
 `claude-fable-5` is never selectable at any position in either tier — its
 post-release guardrails can cause over-cautious refusal on the attack-path
@@ -241,21 +234,15 @@ whether the resolved snapshot turns out to be 4.x or 5-generation.
 
 ```
 1. Resolve each tier via probe-by-attempt, one family at a time:
-   - If `--sonnet` was passed (and this isn't Vendor/PR mode, which have no
-     Deep tier to override), the Deep tier's primary family for this run is
-     Sonnet, not Opus — walk `Sonnet family → Haiku family` instead of
-     `Opus family → Sonnet family`, identical to the Standard tier's own
-     chain. Otherwise, Deep tier's primary family is Opus as usual.
    - Attempt a minimal agent call requesting the Deep tier's primary family
-     for this run. If it succeeds, that is the resolved Deep model — accept
+     (Opus). If it succeeds, that is the resolved Deep model — accept
      whichever concrete snapshot comes back; never target or prefer a
      specific dated version.
      If it fails with a model-not-found / model-unavailable error, try the
      Deep tier's one fallback family. If that also fails, abort with a clear
      error — do not substitute a model outside these two families.
    - Repeat the same walk for the Standard tier (primary: Sonnet family;
-     fallback: Haiku family) — `--sonnet` does not change this, Standard
-     tier already targets Sonnet.
+     fallback: Haiku family).
    - Inside an interactive Claude Code session, this "attempt" is simply
      requesting the tier's family alias (`opus` / `sonnet` / `haiku`) via
      the subagent-dispatch tool rather than a literal dated ID — see
@@ -268,8 +255,7 @@ whether the resolved snapshot turns out to be 4.x or 5-generation.
 
 2. Determine the thinking param / effort for the resolved family (table above).
 
-3. Write run-metadata.json with the resolved IDs, a `sonnet_flag` field
-   (true/false, whether `--sonnet` was passed), and a fallback_notes field.
+3. Write run-metadata.json with the resolved IDs and a fallback_notes field.
    Include fallback_notes whenever a tier's fallback family was used instead
    of its primary family, so the run's model resolution is auditable after
    the fact.
@@ -280,30 +266,31 @@ whether the resolved snapshot turns out to be 4.x or 5-generation.
 *Single-repo:* write to `{repo_path}/.security-review/run-metadata.json`.
 *Multi-repo:* write one shared copy to `{output_dir}/run-metadata.json`.
 
-The concrete IDs below are illustrative only — they show the *shape* of what
-gets recorded, not a target the skill was aiming for. The actual values are
-whatever snapshot each family resolved to on the day of the run (could just
-as easily be a different Opus or Sonnet snapshot than shown here).
+The values below are illustrative only — they show the *shape* of what gets
+recorded: the family alias each phase was dispatched with (the form recorded
+inside an interactive session, per the "Dispatch reality" note above), or the
+concrete model ID when a raw API call resolved one. They are never a target
+the skill was aiming for; the actual snapshot is whatever the account's family
+resolved to on the day of the run.
 
 ```json
 {
   "vendor_mode": false,
   "pr_mode": false,
-  "sonnet_flag": false,
-  "deep_tier_model":   "claude-opus-4-8",
-  "standard_tier_model": "claude-sonnet-4-6",
+  "deep_tier_model":   "opus (family alias, resolved via subagent-dispatch)",
+  "standard_tier_model": "sonnet (family alias, resolved via subagent-dispatch)",
   "deep_tier_thinking": true,
-  "phase0_model":  "claude-sonnet-4-6 (only present in multi-repo mode)",
-  "phase1_model":  "claude-sonnet-4-6",
-  "phase2a_model": "claude-sonnet-4-6",
-  "phase2_model":  "claude-opus-4-8",
-  "phase3_model":  "claude-sonnet-4-6",
-  "phase4_model":  "claude-sonnet-4-6",
-  "phase4b_model": "claude-sonnet-4-6 (only present when Phase 4b actually ran — is_skill_repo: true, or a mixed repo with --skill-security passed)",
-  "phase5_model":  "claude-sonnet-4-6",
-  "phase6_model":  "claude-sonnet-4-6",
-  "phase7_model":  "claude-sonnet-4-6 (only present in multi-repo mode)",
-  "fallback_notes": "Deep tier: Opus family entirely unavailable — fell back to Sonnet family"
+  "phase0_model":  "sonnet (only present in multi-repo mode)",
+  "phase1_model":  "sonnet",
+  "phase2a_model": "sonnet",
+  "phase2_model":  "opus",
+  "phase3_model":  "sonnet",
+  "phase4_model":  "sonnet",
+  "phase4b_model": "sonnet (only present when Phase 4b actually ran — is_skill_repo: true, or a mixed repo with --skill-security passed)",
+  "phase5_model":  "sonnet",
+  "phase6_model":  "sonnet",
+  "phase7_model":  "sonnet (only present in multi-repo mode)",
+  "fallback_notes": "Dispatched via Agent tool using family aliases (opus/sonnet) with effort tiers (high for Deep, medium for Standard). Omitted when no fallback was needed and the dispatch mechanism is self-evident."
 }
 ```
 
@@ -313,13 +300,13 @@ When `--pr` is set, the file instead contains only:
   "vendor_mode": false,
   "pr_mode": true,
   "pr_diff_range": "main...feature/add-export",
-  "standard_tier_model": "claude-sonnet-4-6",
-  "pr_phase_model": "claude-sonnet-4-6",
+  "standard_tier_model": "sonnet (family alias, resolved via subagent-dispatch)",
+  "pr_phase_model": "sonnet",
   "fallback_notes": "omitted when no fallback was needed"
 }
 ```
-No `deep_tier_model`, `deep_tier_thinking`, `sonnet_flag`, or per-numbered-phase
-fields — PR mode has no Deep tier (so nothing for `--sonnet` to override) and
+No `deep_tier_model`, `deep_tier_thinking`, or per-numbered-phase
+fields — PR mode has no Deep tier and
 no numbered phases, only the one PR-review agent.
 
 `fallback_notes` is omitted when no fallback was needed.
@@ -784,9 +771,7 @@ concrete snapshot resolves is accepted as-is, per the family-only note above.
 Write every `*_model` field in `run-metadata.json` as that resolved model,
 and set `deep_tier_thinking: false`, `vendor_mode: true`. If both families
 are unavailable, abort with a clear error — do not fall back
-to Deep (the mode's contract is "Standard tier only, never Opus"). `--sonnet`
-has no effect in this mode — there's no Deep tier here to override; every
-phase is already on the Standard/Sonnet chain.
+to Deep (the mode's contract is "Standard tier only, never Opus").
 
 **3. Report format.** The orchestrator passes `--vendor` to Phase 6, which
 produces the vendor report (see `references/phase6-report.md` → Vendor Report).
@@ -795,8 +780,12 @@ It leads with the adoption **verdict** (`ADOPT` / `ADOPT WITH CONDITIONS` /
 then a plain-English "What This Tool Does" section, then confirmed findings
 framed as adoption risk with adopter-side compensating controls.
 
-**4. `--runtime` is ignored** — there is no PoC to validate at runtime. If both
-flags are passed, print a one-line notice and continue without Docker.
+**4. `--runtime` is ignored** — Vendor mode never stands the vendor's code up
+in Docker or executes constructed exploits against it, regardless of `--poc`.
+If `--runtime` is passed, print a one-line notice and continue without Docker;
+do not pass it to Phase 5. Static validation (Phase 5) and, if requested,
+`--verify-deployment` still run. Findings that static analysis alone cannot
+resolve stay `NEEDS_RUNTIME` and render under Needs Review.
 
 `--vendor` composes with multi-repo `--repos` (each vendor repo gets a vendor
 report; Phase 7 synthesis still runs, and its report is likewise vendor-framed).
@@ -825,8 +814,9 @@ repo-wide `auth_coverage` map a full Phase 2 run produces.
 full-repository review, which is exactly what `--pr` exists to avoid. If
 either is also passed, abort with a clear error naming the conflicting flags.
 `--pr` composes normally with `--skip` (reinterpreted against `pr-review.md`'s
-steps — see Argument Parsing Rules above), `--runtime`, `--local`, `--yes`,
-and `--cost`.
+steps — see Argument Parsing Rules above), `--local` (Axis 1 only), `--yes`,
+and `--cost`. `--poc`, `--runtime` and `--verify-deployment` are accepted but
+have no effect in this mode (see §5 below).
 
 **2. Execution.**
 
@@ -864,9 +854,6 @@ model** — identical constraint and chain-walk behavior to
 fall back to Deep if the Standard chain is entirely unavailable). This mode
 is meant to run frequently (every PR, potentially in CI), where the full
 pipeline's Deep-tier reasoning cost isn't justified for a diff-scoped review.
-`--sonnet` has no effect here either — same reason as Vendor mode, there's no
-Deep tier in this mode to override.
-
 Write `run-metadata.json` with `pr_mode: true`, `pr_diff_range: "{base}...{head}"`,
 and `pr_phase_model` set to the resolved Standard tier model.
 

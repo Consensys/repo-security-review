@@ -378,7 +378,8 @@ specifically what's uncertain:
 {If `manual_validation_instructions` is non-null:}
 - **Run it**: {manual_validation_instructions}
 {Runtime Validated / runtime_verdict_change / Confirmed live badges apply
-here exactly as in `## Findings` — same conditions, same wording.}
+here exactly as in `## Findings` — same conditions, same wording. In Vendor
+mode only Confirmed live applies (`--runtime` is ignored there).}
 
 *Part B — general Needs Review table* (`validation_status` ∈
 `NEEDS_EXTERNAL_VERIFICATION`, `PENDING_CROSS_REPO_VALIDATION`, `NEEDS_RUNTIME`
@@ -677,15 +678,13 @@ Positives below instead.}
 - **Validation**: Static ✅ {— confirmed by Phase 5}
 - **Mitigation available to us**: {compensating control the adopter can apply without vendor changes, OR `none — requires a vendor code change`}
 
-{If runtime_status == RUNTIME_CONFIRMED:}
-> ✅ **Runtime Validated** — confirmed against a live Docker instance{, via a headless browser check if the finding is XSS/CSRF/clickjacking}.
-{If runtime_verdict_change is not null:}
-> ℹ️ Dynamic verification changed this finding's status: {runtime_verdict_change.from} → {runtime_verdict_change.to} ({runtime_verdict_change.reason}).
 {If evidence notes a security_posture cross-check ("confirmed live" — Phase 5 Step 3):}
-> ✅ **Confirmed live** — the deployment's actual cookie/TLS configuration matches this finding (`--verify-deployment`), independent of Docker/`--runtime`.
-{Vendor mode forces PoC persistence off (`--poc` has no effect here), but neither
-`--runtime` nor `--verify-deployment` is disabled — dynamic/live corroboration can
-still fire and must still be shown, same as the default report.}
+> ✅ **Confirmed live** — the deployment's actual cookie/TLS configuration matches this finding (`--verify-deployment`).
+{Vendor mode forces PoC persistence off (`--poc` has no effect) and ignores
+`--runtime` entirely — no Docker run ever happens, so there is no Runtime
+Validated badge and no `runtime_verdict_change` note in this report.
+`--verify-deployment` is not disabled, so the Confirmed live badge can still
+fire and must still be shown, same as the default report.}
 
 {LLM findings (L-XXX): omit the code snippet if not applicable; they carry no
 validation status and no PoC — state `Validation: not applicable (architectural)`.}

@@ -25,7 +25,7 @@ Install the external scanners the phases use (`gitleaks`, `osv-scanner`, `semgre
 bash ~/.claude/skills/repo-security-review/scripts/setup.sh
 ```
 
-The script installs whatever it can via `brew`, `go`, or `pip3`. Any missing tool just degrades the matching phase — the pipeline never aborts. To update later: `cd ~/.claude/skills/repo-security-review && git pull`.
+The script installs the scanners it can via `brew`, `go`, `pip3` or a release download (also the optional `pip-audit`, `grype` and `poetry` for Python/Java repos). `docker` and `playwright`+Chromium are check-only — it reports whether they're present but never installs them. A missing tool just degrades the matching phase; a failing phase never aborts the pipeline. To update later: `cd ~/.claude/skills/repo-security-review && git pull`.
 
 ---
 
@@ -78,77 +78,22 @@ In any Claude Code session (CLI or Desktop), point the skill at a local repo pat
 | `--repos <paths>` | none | Comma-separated repo paths → multi-repo mode (adds cross-service topology + synthesis). |
 | `--skip <phases>` | none | Comma-separated: `secrets`, `architecture`, `dependencies`, `owasp`, `skill-security`, `validation`. |
 | `--output <dir>` | none | Copy the report and PoC scripts into this directory after the run (created if needed). |
-| `--poc` | off | Opt-in: persist the constructed exploit for each finding Phase 5 confirms as a durable script under `pocs/`. Independent of `--runtime` — doesn't execute anything by itself. |
-| `--runtime` | off | Opt-in: dynamically verify eligible findings against the app stood up in Docker (curl or headless browser, chosen automatically per finding type). A clean result can strengthen or soften the verdict. No longer implies `--poc` — the exploit is discarded after use unless `--poc` is also set. |
-| `--vendor` | off | Third-party adoption audit. Skips secrets/dependencies, forces PoC generation off, pins all phases to Sonnet, and produces an adoption-risk report (verdict + conditions + "what it does" + adopter-side controls). |
-| `--pr <base>...<head>` | none | PR review mode. Reviews only a pull request's diff — no full-repo scan needed first. `--pr <base>` is shorthand for `<base>...HEAD`. Pins to Sonnet, writes `pr-report.md`. Mutually exclusive with `--repos` and `--vendor`. Needs the base branch's history available locally to compute the diff — a shallow/single-branch checkout (GitHub Actions' default) isn't enough; fetch full history (`fetch-depth: 0`) plus the base ref explicitly (`git fetch origin <base>`) before running in CI. |
-| `--local` | off | Assert this is a local-only tool, not a publicly reachable service — softens severity by −2 tiers. Omit for the pessimistic default (`public`). |
-| `--verify-deployment <url>` | none | Opt-in: send one live, passive HTTP check to a real deployment URL so Phase 5 derives `auth_required_to_reach` from an actual observation (login/SSO redirect, WAF challenge) instead of a declared claim. Also collects a few cheap TLS/security-header posture checks (HSTS/CSP/cookie flags, negotiated TLS version+cipher, weak-protocol acceptance) that corroborate matching Phase 4 findings — not a Qualys-style grading pass, just ground truth for existing findings. If the gating check is inconclusive, automatically escalates to a headless-browser recheck (no separate flag). Gated behind confirmation prompt(s) (`--yes` auto-confirms). |
-| `--yes` | off | Non-interactive / CI mode — auto-confirms prompts (safety path checks still apply). |
+| `--poc` | off | Opt-in: persist the constructed exploit for each finding Phase 5 confirms (including reduced-confidence ones) as a durable script under `pocs/`. Independent of `--runtime` — doesn't execute anything by itself. Without it, no files are written under `pocs/`. No effect in `--pr` mode; forced off in `--vendor` mode. |
+| `--runtime` | off | Opt-in: dynamically verify eligible findings against the app stood up in Docker (curl or headless browser, chosen automatically per finding type). A clean result can strengthen or soften the verdict. No longer implies `--poc` — the exploit is discarded after use unless `--poc` is also set. No effect in `--pr` mode; ignored in `--vendor` mode. |
+| `--vendor` | off | Third-party adoption audit. Skips secrets/dependencies, forces PoC generation off, ignores `--runtime`, pins every phase to the Standard tier (Sonnet family, never Opus), auto-runs Phase 4b (LLM/AI skill security) when skill/agent files are present, and produces an adoption-risk report (verdict + conditions + "what it does" + adopter-side controls). Validation still runs. |
+| `--pr <base>...<head>` | none | PR review mode. Reviews only a pull request's diff — no full-repo scan needed first. `--pr <base>` is shorthand for `<base>...HEAD`. Pins to the Standard tier (Sonnet family), writes `pr-report.md`. `--poc`, `--runtime` and `--verify-deployment` have no effect here. Mutually exclusive with `--repos` and `--vendor`. Needs the base branch's history available locally to compute the diff — a shallow/single-branch checkout (GitHub Actions' default) isn't enough; fetch full history (`fetch-depth: 0`) plus the base ref explicitly (`git fetch origin <base>`) before running in CI. |
+| `--local` | off | Assert this is a local-only tool, not a publicly reachable service — softens severity by −2 tiers, but only for findings with a genuine network entry point — a hardcoded secret or similar code-level finding gets no discount. Writes `threat-model.json`. Omit for the pessimistic default (`public`). Works in `--pr` mode too. |
+| `--verify-deployment <url>` | none | Opt-in: send one live, passive HTTP check to a real deployment URL so Phase 5 derives `auth_required_to_reach` from an actual observation (login/SSO redirect, WAF challenge) instead of a declared claim. Also collects a few cheap TLS/security-header posture checks (HSTS/CSP/cookie flags, negotiated TLS version+cipher, weak-protocol acceptance) that corroborate matching Phase 4 findings — not a Qualys-style grading pass, just ground truth for existing findings. If the gating check is inconclusive, automatically escalates to a headless-browser recheck (no separate flag). Gated behind confirmation prompt(s) (`--yes` auto-confirms). Writes `deployment-verification.json`. No effect in `--pr` mode or when `validation` is skipped. |
+| `--yes` | off | Non-interactive / CI mode — auto-confirms every gate: the `--output` copy, the `--runtime` Docker gate, the `--verify-deployment` gate (including its browser-escalation prompt), and the pure-skill-repo auto-skip. Path-safety checks on `--output` still apply. Aborts if no repo path or `--repos` is given. |
 | `--cost` | off | Write `.security-review/cost-report.md` — duration and estimated token consumption for every phase that ran (and named subphases, e.g. 3b, Phase 5's Exploit Construction/Dynamic Verification parts).|
-| `--sonnet` | off | Apply Sonnet instead of Opus for phase2 to save some tokens in default scan mode. Often increases false negative and decreases false positive.|
 | `--skill-security` | off | Opt-in: run Phase 4b (LLM/AI skill security) on a mixed repo that also contains a `SKILL.md`/`.claude/commands/`. Without it, a mixed repo never runs Phase 4b by default — just having those files present isn't reason enough, since ordinary `CLAUDE.md`/`AGENTS.md` docs are common in AI-assisted projects. Redundant on a repo that's *entirely* skill/agent content (Phase 4b auto-runs there regardless) and in `--vendor` mode (already auto-runs it). |
 | `--help` | — | Show usage. |
 
-**Skip cascades** (applied silently): `--skip owasp` also skips `validation` (nothing left to validate); `--skip validation` means `--poc` and `--runtime` both have no effect (no findings to construct an exploit for); `--skip architecture` also skips `skill-security`. `--vendor` forces skip of `secrets` and `dependencies`, and forces PoC generation off regardless of `--poc`. In `--pr` mode the same skip names apply but target its own steps instead of numbered phases, and `architecture` cannot be skipped (its diff-scoped context is load-bearing for every other step); `--poc`/`--runtime` have no effect in `--pr` mode.
+**Skip cascades** (applied silently): `--skip owasp` also skips `validation` (nothing left to validate); `--skip validation` means `--poc` and `--runtime` both have no effect (no findings to construct an exploit for); `--skip architecture` also skips `skill-security`. On a repo that is entirely skill/agent content, Phases 3, 4 and 5 are auto-skipped and Phase 4b runs instead (after a confirmation, or automatically with `--yes`). `--vendor` forces skip of `secrets` and `dependencies`, and forces PoC generation off regardless of `--poc`. In `--pr` mode the same skip names apply but target its own steps instead of numbered phases, and `architecture` cannot be skipped (its diff-scoped context is load-bearing for every other step); `--poc`/`--runtime` have no effect in `--pr` mode.
 
 ### Output
 
-Working artifacts go to `<repo>/.security-review/` (per-phase JSON, `pocs/`, and `final-report.md`); `--output` copies the report + PoCs out. In multi-repo mode, start from `system-report.md` in the output directory. In `--pr` mode, artifacts use `pr-`-prefixed filenames (`pr-findings.json`, `pr-validated.json`, `pr-report.md`) so they never collide with a prior or later full scan's output in the same repo.
-
----
-
-## CI usage (GitHub Actions)
-
-`--pr` mode is the fit for CI — it reviews only the pull request's diff, so
-it doesn't need a prior full-repo scan. Combine with `--yes` to auto-confirm
-every gate. Authentication is a Claude Code CLI concern, not a skill flag:
-set `ANTHROPIC_API_KEY` as a repo/org secret and export it in the job
-environment.
-
-```yaml
-name: Security Review (PR)
-
-on:
-  pull_request:
-    branches: [main]
-
-jobs:
-  repo-security-review:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0   # --pr diffs against the base branch; needs its history
-
-      - name: Fetch base branch
-        run: git fetch origin ${{ github.event.pull_request.base.ref }}
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install Claude Code CLI
-        run: npm install -g @anthropic-ai/claude-code
-
-      - name: Install skill + external scanners
-        run: |
-          mkdir -p ~/.claude/skills
-          git clone https://github.com/<your-org>/repo-security-review ~/.claude/skills/repo-security-review
-          bash ~/.claude/skills/repo-security-review/scripts/setup.sh
-
-      - name: Run PR security review
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          claude -p "/repo-security-review . --pr origin/${{ github.event.pull_request.base.ref }} --yes --output ./pr-security-report"
-
-      - name: Upload report
-        uses: actions/upload-artifact@v4
-        with:
-          name: pr-security-report
-          path: ./pr-security-report
-```
+Working artifacts go to `<repo>/.security-review/` (per-phase JSON, `final-report.md`, plus `pocs/` only when `--poc` is set, `cost-report.md` with `--cost`, `deployment-verification.json` with `--verify-deployment`); `--output` copies the report + PoCs out. In multi-repo mode, start from `system-report.md` in the output directory. In `--pr` mode, artifacts use `pr-`-prefixed filenames (`pr-findings.json`, `pr-validated.json`, `pr-report.md`) so they never collide with a prior or later full scan's output in the same repo.
 
 ---
 
@@ -184,7 +129,7 @@ flowchart TD
     P2 -. file path only .-> P5
 
     subgraph JUDGMENT["JUDGMENT LAYER (isolated context)"]
-        P5[Phase 5 · Validate + PoC<br/>merges + validates Phase 4 findings<br/>and standalone Phase 2 findings<br/>verdict: Confirmed / Needs Review / Rejected<br/>PoCs only for Confirmed<br/>optional Docker runtime]
+        P5[Phase 5 · Validate + PoC<br/>merges + validates Phase 4 findings<br/>and standalone Phase 2 findings<br/>verdict: Confirmed / Needs Review / Rejected<br/>PoCs persisted only with --poc<br/>optional Docker runtime (--runtime)]
     end
 
     P1 --> R[Phase 6 · Report Builder]
@@ -203,3 +148,5 @@ flowchart TD
     class R report
     class TS store
 ```
+
+> The diagram shows the single-repo pipeline. `--repos` adds Phase 0 (topology) before it and Phase 7 (cross-repo synthesis) after it; `--pr` replaces Phases 1–6 with a single diff-scoped review step.

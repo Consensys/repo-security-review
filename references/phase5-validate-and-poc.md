@@ -326,7 +326,7 @@ observed."
    skill decides on its own whether escalating helps, based purely on
    whether step 3 was confident. Skip this step entirely for `gated` or
    `waf_present` — already-confident results are never re-checked. See
-   `SKILL.md` → Browser-Based Verification & PoC for the full rationale and
+   `SKILL.md` → Dynamic Verification Tooling: Docker + Headless Browser for the full rationale and
    sandboxing rules; this is the execution recipe.
 
    a. **Confirmation gate.** If `--yes` is not set, print the Verify
@@ -1171,7 +1171,7 @@ flag needed, see Runtime Value Assessment's Tool column)
 The curl/code path above only proves a payload is *reflected unescaped in the
 response body* for XSS, or that a request *reaches* the target for CSRF —
 it cannot prove the payload actually executes, or that framing actually
-renders. See `SKILL.md` → Browser-Based Verification & PoC for the
+renders. See `SKILL.md` → Dynamic Verification Tooling: Docker + Headless Browser for the
 rationale and sandboxing rules; this is the execution recipe, run in place
 of (not in addition to) the curl/code path above for these three types.
 

@@ -43,6 +43,21 @@ Options:
   --output <dir>        Directory to save the report and PoC scripts into.
                         Default: (single-repo: none — everything stays in
                         <repo>/.security-review/) (multi-repo: ./system-security-review/)
+  --vendor              Third-party adoption audit. Skips secrets and
+                        dependencies, forces --poc off, ignores --runtime,
+                        pins every phase to the Standard tier (Sonnet family,
+                        never Opus), and auto-runs Phase 4b when skill/agent
+                        files exist. Produces an adoption-risk report (verdict
+                        + conditions + what the tool does + adopter-side
+                        controls). Validation still runs.
+  --pr <base>[...<head>]
+                        PR review mode: review only a pull request's diff
+                        (<base> alone means <base>...HEAD). Pins to the
+                        Standard tier, writes pr-report.md and pr-*.json.
+                        Mutually exclusive with --repos and --vendor. No
+                        effect from --poc, --runtime or --verify-deployment;
+                        --local applies (Axis 1 only). Needs the base
+                        branch's history locally.
   --poc                 Opt-in: persist the constructed exploit for each
                         finding Phase 5 confirms as a durable script under
                         pocs/. Independent of --runtime — does not execute
@@ -117,11 +132,6 @@ Options:
                         No effect in --pr mode or when validation is skipped.
                         Example:
                         --verify-deployment https://app.example.com
-  --sonnet              Experimental: overrides Phase 2 (Deep tier) from Opus
-                        to Sonnet family for this run, to A/B scan quality
-                        and token consumption. Standard tier is unaffected
-                        (already Sonnet). No effect in --vendor or --pr mode
-                        (neither has a Deep tier).
   --skill-security      Opt-in: run Phase 4b (LLM/AI skill security) on a
                         mixed repo that also contains a SKILL.md or
                         .claude/commands/. Without this flag, a mixed repo
@@ -191,12 +201,16 @@ Cascade rules:
   --skip architecture → skips both Phase 2a and Phase 2, and also skips
                         skill-security (skill detection requires
                         tech-stack.json from Phase 2a)
+  pure skill repo     → Phases 3, 4, 5 are auto-skipped and Phase 4b runs
+                        instead (confirmed automatically with --yes)
   --skip skill-security + --skill-security together → the skip wins
 
 Phase that always runs:
   Report Builder    Aggregates all completed phases into a structured
-                    markdown report with severity matrix, remediation
-                    priority table, false positives log, and PoC scripts.
+                    markdown report: summary with severity counts and
+                    immediate actions, prioritized Findings (P0-P3), a
+                    Needs Review section, a False Positives log, and PoC
+                    scripts when --poc was set.
 
 Examples:
   # Full review (single repo)
@@ -318,12 +332,6 @@ Parse `$ARGUMENTS` for:
   check can prove reflection but not actual execution/rendering. Both
   escalation points use an ephemeral, headless, origin-scoped browser
   context every time; it never persists across findings or across a run.
-- `--sonnet` → experimental: for this run, Phase 2 (Deep tier) resolves
-  against the Sonnet family instead of Opus (falls back to Haiku only if
-  Sonnet is entirely unavailable), so quality/token consumption can be
-  A/B'd against a normal Opus run. Standard tier is unaffected. No effect in
-  `--vendor` or `--pr` mode — neither has a Deep tier to override. Record
-  `sonnet_flag` in `run-metadata.json`.
 - `--skill-security` → opt-in: on a mixed repo (`is_skill_repo: false`) that
   also has `has_skill_files: true`, run Phase 4b anyway. Without it, Phase 4b
   does not run on a mixed repo — `has_skill_files: true` alone is a
@@ -371,7 +379,7 @@ Phases skipped:   {list or "none"}
 Output:           {output_path if set, else "<repo>/.security-review/final-report.md"}
 PoC generation:   {enabled (--poc) / disabled (default)}
 Runtime PoC:      {enabled / disabled}
-Deep tier model:  {Opus family (default) / Sonnet family (--sonnet)}
+Deep tier model:  {resolved Opus family model}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
@@ -385,7 +393,7 @@ Phases skipped:   {list or "none" — applies to each service's per-repo phases}
 Output:           {output_dir}
 PoC generation:   {enabled (--poc) / disabled (default)}
 Runtime PoC:      {enabled / disabled}
-Deep tier model:  {Opus family (default) / Sonnet family (--sonnet)}
+Deep tier model:  {resolved Opus family model}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
