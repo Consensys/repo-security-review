@@ -64,20 +64,34 @@ osv-scanner --format json -r {repo_path} > {repo_path}/.security-review/osv-raw.
 
 Use `package_ecosystems` from tech-stack.json to decide which to run:
 
-**npm / Node.js** — only if `"npm"` in `package_ecosystems`:
+**npm / Node.js** — only if `"npm"` in `package_ecosystems`. `npm audit` only
+understands `package-lock.json` / `npm-shrinkwrap.json`; on a `pnpm-lock.yaml`
+or `yarn.lock` it fails (no lockfile it can read) and the empty output would
+look like "no vulnerabilities". Run it for npm lockfiles only, and log the
+rest as covered by osv-scanner alone:
 ```bash
 i=0
 for lockfile in $(python3 -c \
   "import json; d=json.load(open('{repo_path}/.security-review/tech-stack.json')); [print(f) for f in d.get('package_files',{}).get('npm',[])]"); do
-  dir=$(dirname "{repo_path}/$lockfile")
-  cd "$dir" && npm audit --json \
-    > {repo_path}/.security-review/npm-audit-raw-${i}.json 2>/dev/null
-  i=$((i+1))
+  case "$(basename "$lockfile")" in
+    package-lock.json|npm-shrinkwrap.json)
+      dir=$(dirname "{repo_path}/$lockfile")
+      (cd "$dir" && npm audit --json) \
+        > {repo_path}/.security-review/npm-audit-raw-${i}.json 2>/dev/null
+      i=$((i+1))
+      ;;
+    *)
+      echo "ℹ️  Skipping npm audit for $lockfile — not an npm lockfile; osv-scanner (Step 1) covers it"
+      ;;
+  esac
 done
 ```
 
-Each lockfile produces its own `npm-audit-raw-{n}.json`. Step 3 reads all
-`npm-audit-raw-*.json` files individually — never concatenate them.
+Each npm lockfile produces its own `npm-audit-raw-{n}.json`. Step 3 reads all
+`npm-audit-raw-*.json` files individually — never concatenate them. An empty
+or unparseable `npm-audit-raw-*.json` is a tool failure, not a clean result —
+note it in the output's `ecosystems_skipped`/`notes`, never count it as zero
+findings.
 
 **Python / pip** — only if `"pypi"` in `package_ecosystems`:
 ```bash
@@ -133,7 +147,14 @@ Read whichever of these files exist (each only present if the corresponding tool
 
 Then:
 - Merge findings across all files
-- Deduplicate by CVE ID — keep highest CVSS score when the same CVE appears in multiple sources
+- Deduplicate by advisory alias set, not by CVE ID alone. Scanners emit GHSA-,
+  OSV- and `MAL-` (malicious-package) IDs, and many advisories have no CVE
+  alias at all. Two entries are the same finding when their ID/alias sets
+  intersect (same package + same installed version). Keep highest CVSS score
+  when the same advisory appears in multiple sources. A finding with no CVE
+  alias keeps `cve_id: null` and records its identifier in `advisory_id`;
+  never drop it for lacking a CVE ID. `MAL-*` entries are always HIGH
+  severity or above regardless of score.
 - Write `phase3-cves.json` now with enrichment fields set to `null` as placeholders —
   Step 4 reads CVE IDs from this file and updates it in place
 
@@ -154,30 +175,43 @@ CVE_LIST=$(jq -r '[.findings[].cve_id] | join(",")' \
   | tr '\n' ',' \
   | sed 's/,$//')
 
-if [ -z "$CVE_LIST" ]; then
-  echo '{"data":[]}' > {repo_path}/.security-review/epss-raw.json
-else
+# Query in chunks of at most 50 CVEs — one giant list overruns URL length
+# limits on large repos and fails the whole call. Merge the chunk results.
+echo '{"data":[]}' > {repo_path}/.security-review/epss-raw.json
+EPSS_OK=0; EPSS_FAIL=0
+for chunk in $(echo "$CVE_LIST" | tr ',' '\n' | xargs -n50 | tr ' ' ','); do
   # Pass as a query parameter via --data-urlencode to avoid shell injection
-  curl -sf -G "https://api.first.org/data/v1/epss" \
-    --data-urlencode "cve=${CVE_LIST}" \
-    -o {repo_path}/.security-review/epss-raw.json \
-    || echo '{"data":[]}' > {repo_path}/.security-review/epss-raw.json
-fi
+  if curl -sf --max-time 20 -G "https://api.first.org/data/v1/epss" \
+       --data-urlencode "cve=${chunk}" -o {repo_path}/.security-review/epss-chunk.json; then
+    jq -s '{data: (.[0].data + .[1].data)}' {repo_path}/.security-review/epss-raw.json \
+      {repo_path}/.security-review/epss-chunk.json > {repo_path}/.security-review/epss-merged.json \
+      && mv {repo_path}/.security-review/epss-merged.json {repo_path}/.security-review/epss-raw.json
+    EPSS_OK=$((EPSS_OK+1))
+  else
+    EPSS_FAIL=$((EPSS_FAIL+1))
+  fi
+done
+rm -f {repo_path}/.security-review/epss-chunk.json
 ```
 
 Response shape per CVE: `{ "cve": "CVE-...", "epss": "0.975", "percentile": "0.999" }`
 
-If the API is unreachable, leave `epss_score: null` and `epss_percentile: null` on all
-findings and set `enrichment.epss_fetched: false` — do not abort the phase.
+If there were CVEs to query and every chunk failed (`EPSS_OK=0`), leave `epss_score: null` and
+`epss_percentile: null` on all findings and set `enrichment.epss_fetched: false`.
+If only some chunks failed, enrich what returned, leave the rest `null`, and set
+`enrichment.epss_fetched: "partial"` with the failed count in `epss_fetch_error`.
+CVEs absent from the response (EPSS has no score yet) also stay `null`. Never
+abort the phase.
 
 **CISA KEV catalog** — download the full list (one HTTP call):
 ```bash
-curl -sf "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json" \
+curl -sf --max-time 30 "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json" \
   -o {repo_path}/.security-review/kev-catalog.json \
   || echo '{"vulnerabilities":[]}' > {repo_path}/.security-review/kev-catalog.json
 ```
 
-Cross-reference each CVE against the `vulnerabilities[].cveID` field. If the catalog is
+Cross-reference each CVE against the `vulnerabilities[].cveID` field. Findings with
+`cve_id: null` cannot be matched and stay `in_kev: null`. If the catalog is
 unreachable, leave `in_kev: null` on all findings and set `enrichment.kev_fetched: false`.
 
 After both fetches, update `phase3-cves.json` in place: write the enriched values into
@@ -201,6 +235,7 @@ each finding and set the `enrichment` block fields to reflect fetch success/fail
     "total_dependencies_scanned": 0,
     "total_cves_found": 0,
     "in_kev": 0,
+    "_note": "severity counts below are by CVSS only — Phase 3b's summary_effective is the post-adjustment view",
     "critical": 0,
     "high": 0,
     "medium": 0,
@@ -210,6 +245,7 @@ each finding and set the `enrichment` block fields to reflect fetch success/fail
     {
       "id": "C-001",
       "cve_id": "CVE-2023-XXXXX",
+      "advisory_id": "GHSA-xxxx-xxxx-xxxx  (set whenever cve_id is null; otherwise optional)",
       "package": "package-name",
       "installed_version": "1.2.3",
       "fixed_version": "1.2.4",
@@ -246,12 +282,23 @@ Unreachable CVEs are still reported but at lower effective severity.
 3. The call site can receive untrusted/external input
 
 **UNREACHABLE** — ANY true:
-- Package is only in `devDependencies` / test dependencies
+- Every dependency path to the package is dev-only (`devDependencies`, test
+  or build tooling that never runs against untrusted input) — see "Dependency
+  path" below
 - Package is imported but vulnerable API is never called
 - Vulnerable function called only with hardcoded/trusted data
 - Vulnerable version feature unused (e.g. CVE is in parser but app uses different parser)
 
 **INDETERMINATE**:
+- **Transitive dependency with a runtime path** — the app never imports the
+  vulnerable package itself, so "no import found" proves nothing: it is
+  exercised (or not) through whichever direct dependency pulls it in. Default
+  to INDETERMINATE unless the direct parent is itself unused or the vulnerable
+  feature is clearly never reached through it.
+- **Dev-only package that processes untrusted input** — e.g. a build tool, linter
+  or CI action that parses PR content or fetched assets. Dev-only normally means
+  UNREACHABLE for runtime exposure, but these are a supply-chain surface;
+  keep severity.
 - Call graph too complex to trace confidently
 - Package used dynamically (`eval`, `require(variable)`)
 - **Import/call-site search was incomplete** — output hit a display cap, a file
@@ -265,6 +312,29 @@ Unreachable CVEs are still reported but at lower effective severity.
 > When in doubt, use `INDETERMINATE` (keeps severity) rather than `UNREACHABLE`
 > (downgrades it). If any enumeration was capped, note it in the finding's
 > `notes` field.
+
+### Dependency path (do this before the import search)
+
+Classify each affected package so the import search below isn't misread:
+
+```bash
+# npm: npm ls <pkg> --all --json        pnpm: pnpm why <pkg> --json
+# pypi: pipdeptree -r -p <pkg> --json   (or parse poetry.lock / Pipfile.lock)
+# fall back to reading the lockfile's dependency edges if the tool is absent
+```
+
+Record `dependency_path`: `direct` (true/false), `scope` (`runtime` | `dev`;
+`runtime` if ANY path is a runtime dependency), and `via` (the direct
+dependency/dependencies pulling it in). Then:
+- **direct + runtime** → run the import/call-site search below as written.
+- **transitive + runtime** → search for imports of the *direct parent(s)* in
+  `via`, not the vulnerable package; result is `INDETERMINATE` unless the
+  parent is unused (then `UNREACHABLE`) or the call can be traced (then
+  `REACHABLE`).
+- **dev-only (all paths)** → `UNREACHABLE`, except the untrusted-input case
+  under INDETERMINATE above.
+If the path tool fails, say so in `notes` and treat the package as
+transitive + runtime (the conservative default) — never as dev-only.
 
 ### How to Assess Reachability
 
@@ -300,6 +370,12 @@ grep -rn '"{module_path}"' {repo_path} --include="*.go" --exclude-dir=".git"
       "cve_id": "CVE-2023-XXXXX",
       "reachable": true,
       "confidence": "HIGH | MEDIUM | LOW",
+      "entry_point_unauthenticated": true,
+      "dependency_path": {
+        "direct": false,
+        "scope": "runtime | dev",
+        "via": ["express"]
+      },
       "evidence": {
         "import_sites": ["src/parser.py:L5"],
         "call_sites": ["src/parser.py:L42"],
@@ -310,9 +386,20 @@ grep -rn '"{module_path}"' {repo_path} --include="*.go" --exclude-dir=".git"
       "priority_rationale": "In KEV + reachable",
       "notes": "Used in file upload handler with user-controlled input"
     }
-  ]
+  ],
+  "summary_effective": {
+    "by_severity": {"critical": 0, "high": 0, "medium": 0, "low": 0},
+    "by_priority": {"P0": 0, "P1": 0, "P2": 0, "P3": 0}
+  }
 }
 ```
+
+Every `findings[]` entry is keyed by `cve_id`, or by `advisory_id` when
+`cve_id` is null (use `"advisory_id"` in place of `"cve_id"` in that entry).
+`summary_effective` counts findings by `effective_severity` and `priority` after
+the rules below — Phase 6 uses it instead of `phase3-cves.json`'s CVSS-only
+`summary`. A `confidence: LOW` result of `reachable: false` is treated as
+`INDETERMINATE` (apply that row of the table), not as a downgrade.
 
 ### Severity Adjustment Rules
 
@@ -321,21 +408,33 @@ Apply in order — the first matching rule wins.
 | Condition | Effective Severity | Priority |
 |---|---|---|
 | `in_kev: true` AND reachable | Keep CVSS severity (floor: HIGH) | **P0** |
-| `in_kev: true` AND unreachable/indeterminate | Keep CVSS severity (floor: HIGH) | **P1** — KEV overrides reachability confidence |
-| `epss_score >= 0.7` AND reachable | Keep CVSS severity | **P1** |
-| `epss_score >= 0.7` AND unreachable | Keep CVSS severity (no downgrade) | **P1** — high exploitation likelihood overrides reachability |
-| reachable AND `epss_score < 0.7` | Keep CVSS severity | **P1/P2** (CRITICAL/HIGH → P1, MEDIUM/LOW → P2) |
+| `in_kev: true` AND unreachable | Keep CVSS severity (floor: HIGH) | **P1** — KEV overrides reachability |
+| `in_kev: true` AND indeterminate | Keep CVSS severity (floor: HIGH), with warning | **P2** — never P1 while reachability is unknown |
+| reachable AND `epss_score >= 0.7` | Keep CVSS severity | **P0** if CRITICAL/HIGH, else **P1** — likely to be exploited and the code is exposed |
+| reachable AND `epss_score < 0.7` (or null) | Keep CVSS severity | **P0** if CRITICAL AND `entry_point_unauthenticated: true`; else **P1** if CRITICAL/HIGH; else **P2** |
+| indeterminate (any EPSS) | Keep CVSS severity with warning | **P2** — indeterminate never produces P0 or P1 |
+| unreachable AND `epss_score >= 0.7` | Keep CVSS severity (no downgrade) | **P2** — EPSS is an internet-wide estimate; a confident "not used here" caps priority but severity is held |
 | unreachable AND `epss_score >= 0.1` | Downgrade one level | **P2** |
-| unreachable AND `epss_score < 0.1` | Downgrade two levels | **P3** |
-| indeterminate (any EPSS) | Keep CVSS severity with warning | **P2** |
-| `epss_score: null` or `in_kev: null` (fetch failed) | Apply reachability rules only, note missing enrichment | per reachability |
+| unreachable AND `epss_score < 0.1` (or null) | Downgrade two levels if unreachability is *structural* (every dependency path is dev-only) or `confidence: HIGH`; otherwise one level | **P3** |
+
+"First matching rule wins" — read top to bottom. When `epss_score: null` or
+`in_kev: null` (fetch failed), treat that signal as absent, apply the rest of
+the table, and note the missing enrichment in `notes`.
+
+`entry_point_unauthenticated` is `true` only when `evidence.entry_point` is a
+network-facing route/handler that `phase2-architecture.json` → `auth_coverage`
+lists as public/unauthenticated. If Phase 2 didn't run or the route isn't in
+`auth_coverage`, set it `null` and the CRITICAL-P0 condition does not apply.
+
+**Downgrade floor**: a downgrade never goes below `LOW`; a `LOW` CVE stays `LOW`
+(P3) however unreachable.
 
 **KEV floor rule**: a CVE in KEV is never reported below HIGH effective severity, regardless of CVSS base score or reachability. Active exploitation in the wild makes it a real threat independent of local code paths.
 
 **EPSS interpretation**:
-- `>= 0.7` (top ~3% of all CVEs) — actively targeted; treat as reachable even if static analysis says otherwise
+- `>= 0.7` — heavily targeted across the internet; raises priority when the code is reachable. It does **not** override a confident "unreachable" result — it only stops the severity from being downgraded and caps the priority at P2
 - `0.1–0.7` — moderate exploitation interest; reachability drives the call
-- `< 0.1` — rarely exploited; unreachable paths can be deprioritised aggressively
+- `< 0.1` — rarely exploited; unreachable paths can be deprioritised (two levels only when structurally unreachable or high-confidence — see the table)
 
 ## Cost Report (only if `--cost` was passed)
 

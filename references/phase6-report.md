@@ -30,6 +30,24 @@ Read all that exist (some may be absent if a phase was skipped):
   They have no `report_tier` field and are exempt from the "Findings is
   `report_tier: CONFIRMED` only" gate below — they always render in Findings.
 
+**Dependency CVE findings** (C-XXX, default mode only — Vendor mode skips
+Phase 3 and PR mode has its own dependency step):
+- Build each one by joining `phase3-cves.json` (package, versions, EPSS, KEV)
+  with `phase3b-reachability.json` (matched on `cve_id`, or `advisory_id` when
+  `cve_id` is null).
+- They never pass through Phase 5, so like LLM findings they have no
+  `report_tier` and are exempt from the "Findings is `report_tier: CONFIRMED`
+  only" gate — they always render in `## Findings`, with no validation status.
+- **Severity** is `effective_severity` from `phase3b-reachability.json`, never
+  the CVSS-based `severity` from `phase3-cves.json` (which is the pre-adjustment
+  value). **Priority** is `priority` from `phase3b-reachability.json` — do not
+  run the Priority table below on them; Phase 3b already applied its own
+  KEV/EPSS/reachability rules.
+- Severity counts in the Summary use `summary_effective` from
+  `phase3b-reachability.json` for the CVE share of the total.
+- If `phase3b-reachability.json` is missing or has no entry for a finding, fall
+  back to the CVSS `severity` and Priority P2, and say so in the finding's
+  description ("reachability not assessed").
 Check the `--vendor` and `--pr` flags (passed by the orchestrator). They
 control which report structure is produced — see Report Modes below. `--pr`
 (PR Review mode) takes precedence over everything else — when set, ignore
@@ -232,7 +250,9 @@ Rules:
   All findings (arch, CVE, code-level) appear in one unified list.
 - **No calibration context**: omit Assumed Threat Model, drift notes.
 - **Drift findings** (`category: threat_model_drift`): exclude entirely.
-- **Findings section is `report_tier: CONFIRMED` only.** A Phase 2 or Phase 4
+- **Findings section is `report_tier: CONFIRMED` only** — for Phase 2 and
+  Phase 4 findings. (Phase 3 CVE and Phase 4b LLM findings have no
+  `report_tier` and always render here.) A Phase 2 or Phase 4
   finding with `report_tier: NEEDS_REVIEW` or `REJECTED` in `phase5-validated.json`
   never appears here — it belongs in Needs Review or False Positives instead.
   Findings with no validated verdict at all (the `--skip validation` fallback
@@ -315,8 +335,9 @@ immediately` draws from. Never assign a Priority to a `report_tier:
 NEEDS_REVIEW` finding (including `CONFIRMED_LOW_CONFIDENCE`, which renders
 in `## Needs Review` → Part A instead, with a Confidence line in place of
 Priority) or a `REJECTED` one — those don't belong in any P0–P3/Backlog
-bucket at all. Secrets always P0; skip this table for them. (Vendor mode
-assigns no priorities.)
+bucket at all. Secrets always P0; skip this table for them. Dependency CVE
+findings take the `priority` Phase 3b computed; skip this table for them too.
+(Vendor mode assigns no priorities.)
 
 | Priority | Criteria |
 |----------|---------|
@@ -466,11 +487,13 @@ mention of calibration or context.}
 {All four rows above always render, even when N is 0 — never omit a
 zero-count row. This is an instruction to you; no footnote or note about it
 appears in the actual report. Counts include every `report_tier: CONFIRMED`
-finding — this table is a tally of what appears in `## Findings` below, not
+finding plus every Phase 3 CVE and Phase 4b LLM finding (by effective
+severity) — this table is a tally of what appears in `## Findings` below, not
 a curated spotlight.}
 
-**Fix immediately**: {bullet list — `report_tier: CONFIRMED` findings only,
-restricted further to Priority P0/P1, one line each. `CONFIRMED_LOW_CONFIDENCE`
+**Fix immediately**: {bullet list — `report_tier: CONFIRMED` findings plus
+Phase 3 CVE findings (which carry no `report_tier`), restricted further to
+Priority P0 only, one line each — P1 and below never appear here. `CONFIRMED_LOW_CONFIDENCE`
 findings can never appear here at all — they're never `report_tier: CONFIRMED`
 in the first place, so this is a structural exclusion, not a special case to
 remember.}
@@ -493,7 +516,8 @@ remember.}
 ## Findings
 
 {Findings from all phases with `report_tier: CONFIRMED` (deduped per the
-Deduplication Step), sorted by Priority then severity. Use a flat numbered
+Deduplication Step) plus Phase 3 CVE and Phase 4b LLM findings (no
+`report_tier`), sorted by Priority then severity. Use a flat numbered
 list — no sub-sections by phase. Findings with `report_tier: NEEDS_REVIEW` or
 `REJECTED` do not appear here — see Needs Review / False Positives below.}
 
@@ -549,6 +573,21 @@ separate `**Also identified as**` label — fold it into the description prose.
 > ℹ️ Dynamic verification changed this finding's status: {runtime_verdict_change.from} → {runtime_verdict_change.to} ({runtime_verdict_change.reason}).
 {If evidence notes a security_posture cross-check ("confirmed live" — Phase 5 Step 3):}
 > ✅ **Confirmed live** — the deployment's actual cookie/TLS configuration matches this finding (`--verify-deployment`), independent of Docker/`--runtime`.
+
+**Dependency CVE variant (C-XXX).** Same template with these changes — there is
+no validation status, no PoC and no Runtime Validated badge for a CVE finding:
+- Title: `{package} — {cve_id, or advisory_id when cve_id is null}`
+- **Category**: `Dependency CVE`
+- **File**: the lockfile / manifest path (no line number)
+- **Description**: what the CVE is, then one line each for: `{package}
+  {installed_version}` → fixed in `{fixed_version}` (or "no fixed version
+  available"); EPSS `{epss_score}` and `In CISA KEV` when `in_kev` is true;
+  reachability — `reachable: true | false | indeterminate` with the 3b
+  `evidence.entry_point` when reachable, or the `dependency_path.via` parent
+  when transitive; and, when `effective_severity` differs from the CVSS
+  `severity`, the reason (e.g. "downgraded: not reachable, EPSS < 0.1").
+- **Impact**: what exploitation of this CVE allows, scoped to how the package is used here
+- **Remediation**: the upgrade — `{package}` to `{fixed_version}` — or the mitigation when none exists
 
 ---
 
