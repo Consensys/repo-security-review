@@ -54,8 +54,12 @@ In any Claude Code session (CLI or Desktop), point the skill at a local repo pat
 # CI / headless — PR-diff review, no full-repo scan needed first
 /repo-security-review . --pr origin/main --output ./pr-security-report --yes
 
-# Calibrate severity for a local-only tool, and verify the real deployment is auth-gated
-/repo-security-review /path/to/repo --local --verify-deployment https://app.example.com
+# Threat-model interview (writes threat-model.md with a diagram, calibrates severity),
+# and verify the real deployment is auth-gated
+/repo-security-review /path/to/repo --threat-model --verify-deployment https://app.example.com
+
+# Reuse a saved threat model without prompts (CI / --pr)
+/repo-security-review . --threat-model docs/threat-model.md --yes
 
 # Dynamically verify AND keep the PoC scripts (including any XSS/CSRF/
 # clickjacking findings, browser-driven automatically)
@@ -82,7 +86,7 @@ In any Claude Code session (CLI or Desktop), point the skill at a local repo pat
 | `--runtime` | off | Opt-in: dynamically verify eligible findings against the app stood up in Docker (curl or headless browser, chosen automatically per finding type). A clean result can strengthen or soften the verdict. No longer implies `--poc` — the exploit is discarded after use unless `--poc` is also set. No effect in `--pr` mode; ignored in `--vendor` mode. |
 | `--vendor` | off | Third-party adoption audit. Skips secrets/dependencies, forces PoC generation off, ignores `--runtime`, pins every phase to the Standard tier (Sonnet family, never Opus), auto-runs Phase 4b (LLM/AI skill security) when skill/agent files are present, and produces an adoption-risk report (verdict + conditions + "what it does" + adopter-side controls). Validation still runs. |
 | `--pr <base>...<head>` | none | PR review mode. Reviews only a pull request's diff — no full-repo scan needed first. `--pr <base>` is shorthand for `<base>...HEAD`. Pins to the Standard tier (Sonnet family), writes `pr-report.md`. `--poc`, `--runtime` and `--verify-deployment` have no effect here. Mutually exclusive with `--repos` and `--vendor`. Needs the base branch's history available locally to compute the diff — a shallow/single-branch checkout (GitHub Actions' default) isn't enough; fetch full history (`fetch-depth: 0`) plus the base ref explicitly (`git fetch origin <base>`) before running in CI. |
-| `--local` | off | Assert this is a local-only tool, not a publicly reachable service — softens severity by −2 tiers, but only for findings with a genuine network entry point — a hardcoded secret or similar code-level finding gets no discount. Writes `threat-model.json`. Omit for the pessimistic default (`public`). Works in `--pr` mode too. |
+| `--threat-model [path]` | none | Opt-in threat-modeling interview. Asks four questions (who can reach the system, which adversaries matter, what it trusts, what to protect), then writes `.security-review/threat-model.md` — system overview, a Mermaid diagram of components, entry points and trust boundaries, adversaries, assets, and threat paths linked to findings — plus `threat-model.json` with your answers. The Reach answer also calibrates severity: answering only "this machine" softens severity by −2 tiers for findings with a genuine network entry point (code-level findings like a hardcoded secret are not softened); any other answer keeps the pessimistic default, and the skill overrides a "local" claim if the code shows the service is published. Adversaries/Trust/Assets only steer the analysis — they never lower a severity. `--threat-model <path>` reloads a saved `threat-model.md`/`.json` without asking (required with `--yes`; in `--pr` mode only this form applies). Replaces the old `--local` flag. |
 | `--verify-deployment <url>` | none | Opt-in: send one live, passive HTTP check to a real deployment URL so Phase 5 derives `auth_required_to_reach` from an actual observation (login/SSO redirect, WAF challenge) instead of a declared claim. Also collects a few cheap TLS/security-header posture checks (HSTS/CSP/cookie flags, negotiated TLS version+cipher, weak-protocol acceptance) that corroborate matching Phase 4 findings — not a Qualys-style grading pass, just ground truth for existing findings. If the gating check is inconclusive, automatically escalates to a headless-browser recheck (no separate flag). Gated behind confirmation prompt(s) (`--yes` auto-confirms). Writes `deployment-verification.json`. No effect in `--pr` mode or when `validation` is skipped. |
 | `--yes` | off | Non-interactive / CI mode — auto-confirms every gate: the `--output` copy, the `--runtime` Docker gate, the `--verify-deployment` gate (including its browser-escalation prompt), and the pure-skill-repo auto-skip. Path-safety checks on `--output` still apply. Aborts if no repo path or `--repos` is given. |
 | `--cost` | off | Write `.security-review/cost-report.md` — duration and estimated token consumption for every phase that ran (and named subphases, e.g. 3b, Phase 5's Exploit Construction/Dynamic Verification parts).|
@@ -93,7 +97,7 @@ In any Claude Code session (CLI or Desktop), point the skill at a local repo pat
 
 ### Output
 
-Working artifacts go to `<repo>/.security-review/` (per-phase JSON, `final-report.md`, plus `pocs/` only when `--poc` is set, `cost-report.md` with `--cost`, `deployment-verification.json` with `--verify-deployment`); `--output` copies the report + PoCs out. In multi-repo mode, start from `system-report.md` in the output directory. In `--pr` mode, artifacts use `pr-`-prefixed filenames (`pr-findings.json`, `pr-validated.json`, `pr-report.md`) so they never collide with a prior or later full scan's output in the same repo.
+Working artifacts go to `<repo>/.security-review/` (per-phase JSON, `final-report.md`, plus `threat-model.md`/`threat-model.json` with `--threat-model`, `pocs/` only when `--poc` is set, `cost-report.md` with `--cost`, `deployment-verification.json` with `--verify-deployment`); `--output` copies the report + PoCs out. In multi-repo mode, start from `system-report.md` in the output directory. In `--pr` mode, artifacts use `pr-`-prefixed filenames (`pr-findings.json`, `pr-validated.json`, `pr-report.md`) so they never collide with a prior or later full scan's output in the same repo.
 
 ---
 

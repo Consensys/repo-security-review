@@ -10,7 +10,7 @@ Read all that exist (some may be absent if a phase was skipped):
 ```
 {repo_path}/.security-review/run-metadata.json
 {repo_path}/.security-review/tech-stack.json
-{repo_path}/.security-review/threat-model.json       ← present only if --local was used
+{repo_path}/.security-review/threat-model.json       ← present only if --threat-model was used
 {repo_path}/.security-review/deployment-verification.json ← present only if --verify-deployment was used
 {repo_path}/.security-review/phase1-secrets.json
 {repo_path}/.security-review/phase2-architecture.json
@@ -110,8 +110,12 @@ computed `contextual_severity` and `severity_adjustment` per finding, using
 independent way to re-derive correctly (it would have to re-run the Boundary
 Gate and re-classify every entry point itself). **Read the two fields
 directly from each finding and display `contextual_severity` as-is** — no
-B/C columns, no explanation of why a finding is Medium vs High, no mention of
-calibration or context anywhere in the rendered report. Secrets never carry
+B/C columns, no per-finding explanation of why a finding is Medium vs High.
+The one permitted disclosure: when `threat-model.json` exists, end the
+`## Summary` section (Vendor: the Adoption Risk Assessment; PR: its Summary)
+with exactly one italic line — `_Severities reflect the deployment context
+recorded in threat-model.md._` (PR mode: `…in the loaded threat model.`) —
+so a reader knows severities assume the owner's stated context. Secrets never carry
 these fields — rotation is always required regardless of context, skip them
 here entirely. Drift findings (`category: threat_model_drift`) are silently
 excluded from the report.
@@ -124,7 +128,7 @@ and must never be re-run against a finding that already has
 
 | Softener | Applies to | Source |
 |----------|-----------|--------|
-| `deployment_target: local` (−2 tiers) | findings with a genuine network entry point only (`data_flow.entrypoint` set) — never findings with `data_flow: null` (hardcoded secrets, crypto choices, CI/CD injection, etc. — not reached through the deployment at all) | `threat-model.json` (`--local`) |
+| `deployment_target: local` (−2 tiers) | findings with a genuine network entry point only (`data_flow.entrypoint` set) — never findings with `data_flow: null` (hardcoded secrets, crypto choices, CI/CD injection, etc. — not reached through the deployment at all) | `threat-model.json` (`--threat-model`) |
 | `auth_required_to_reach: true` (−1 tier) | pre-auth findings with a genuine network entry point only (findings that survived the Phase 5 boundary gate) — never findings with `boundary_gate.ran: false` (hardcoded secrets, crypto choices, CI/CD injection, etc. — the auth wall doesn't gate their exposure) | `deployment-verification.json` (`--verify-deployment`, `classification: gated`) — never a declared claim |
 
 **This mechanism only exists for `phase5-validated.json`-covered findings.**
@@ -134,7 +138,7 @@ structurally have no `data_flow`/`boundary_gate` fields to test eligibility
 against — they are **never** in scope for this softener pair. They already
 carry their own, separate severity/priority adjustment from Phase 3's own
 `reachable` + EPSS + KEV logic (see `phase3-dependencies.md`) computed
-independently of `--local`/`--verify-deployment`. Do not apply
+independently of `--threat-model`/`--verify-deployment`. Do not apply
 `deployment_target`/`auth_required_to_reach` on top of that — it would
 double-discount the same finding through two unrelated mechanisms. Render a
 CVE finding's severity exactly as Phase 3 computed it.
@@ -210,6 +214,135 @@ was used (nothing to match against) or Phase 1's tooling simply didn't cover
 that file/pattern.
 
 ---
+
+## Threat Model File (only when `threat-model.json` exists — full-scan and Vendor modes)
+
+Skip this section entirely when `threat-model.json` does not exist, and in PR
+mode (no Phase 2 → no model to render). Otherwise write
+`{repo_path}/.security-review/threat-model.md` **in addition to** the report.
+Inputs: `threat-model.json` (the owner's answers, plus any `drift_overrides`),
+`phase2-architecture.json` → `threat_model`, `phase5-validated.json` (to link
+findings), and `deployment-verification.json` if present.
+
+Source of every statement: the owner's answers are labelled **"Owner says"**;
+every code-derived row cites its `file:line`. Never add a component, route,
+control or threat the inputs do not contain. If `phase2-architecture.json` has
+no `threat_model` block (Phase 2 was skipped), write only `## Deployment
+context` and `## Owner answers` and say the code-derived sections were not
+produced.
+
+**Linking findings.** A finding attaches to a component or entry point when its
+file is in `components[].files`, or its `data_flow.entrypoint` matches an entry
+point's route. Only `report_tier: CONFIRMED` findings (and Phase 3b CVEs, which
+attach to no component and are listed under "Not placed on the diagram") count
+as threats; `NEEDS_REVIEW` ones are marked "needs review"; `REJECTED` ones never
+appear. A finding that fits no component goes in the unplaced list — never
+guess a placement.
+
+```markdown
+# Threat Model — {repo name}
+
+_Generated {date} by repo-security-review. "Owner says" statements are the
+owner's, taken at face value; every other statement is derived from the code
+at the cited location. Review before relying on it._
+
+## System overview
+{`project_overview.purpose`, one short paragraph, then the components table:}
+
+| ID | Component | Kind | Files |
+|----|-----------|------|-------|
+| C1 | {name} | {kind} | {up to 3 files} |
+
+## Diagram
+{The Mermaid block — rules below — then a one-line legend:}
+_Legend: thick arrow = unauthenticated entry point · solid arrow = authenticated or internal flow · dashed = reaches an asset · dotted box edge = trust boundary · IDs on a component are confirmed findings._
+
+## Adversaries
+| Adversary | Source | Entry points they can reach |
+|-----------|--------|-----------------------------|
+| {label} | Owner says / derived from code | {EP ids and routes} |
+
+## Entry points and trust boundaries
+| ID | Route | Component | Auth | Reachable by | Boundary enforced by | Findings |
+|----|-------|-----------|------|--------------|----------------------|----------|
+
+## Assets
+| Asset | Where | Source | Findings |
+|-------|-------|--------|----------|
+| {name} | {component} `{file:line}` | Owner says / derived | {IDs or —} |
+
+## Threat paths
+| ID | Adversary → entry point → asset | Status |
+|----|----------------------------------|--------|
+| T-01 | {adversary} → {EP route} → {asset} | `Finding O-001 (High)` / `Needs review O-004` / `Control observed: {control}` / `Not assessed` |
+
+## Deployment context
+- **Reach — Owner says**: {labels, plus any free-text answer}. Treated as `{deployment_target}`.
+  {If `local`: "Severity of findings with a network entry point is softened by two tiers; code-level findings are not."
+   If `public`: "No severity softening applies." If the answer was internal network or VPN: say it is still treated as public because anything inside the network can reach it.}
+{If `drift_overrides.deployment_target` exists:}
+- **Conflict**: the owner said local-only, but {evidence}. Treated as `public`.
+{For each `declared_vs_observed` row with `conflict: "possible"`:}
+- **Possible conflict**: {observation} — `{evidence}`. Not overridden; please confirm.
+{If `deployment-verification.json` exists:}
+- **Live check**: {classification, e.g. not gated / gated} — {one line from its signals}; TLS/header posture: {one line, if `security_posture` exists}.
+
+## Not placed on the diagram
+{Findings that matched no component, one line each: `{ID} · {title} · {severity}`. Omit the heading if none.}
+
+## Owner answers
+{The block below is machine-readable — `--threat-model <path>` can load this file.
+It is `threat-model.json` without `drift_overrides`:}
+```json
+{ "source": "…", "answered_at": "…", "deployment_target": "…", "data_sensitivity": "pii", "owner_answers": { … } }
+```
+```
+
+**The diagram.** One Mermaid `flowchart LR`, built only from the `threat_model`
+block. It must render on GitHub, so follow these rules exactly — an unquoted
+parenthesis in a label breaks the whole diagram:
+- Node ids are plain alphanumerics/underscores (`C1`, `EP1`, `ADV1`, `TB_app`).
+- **Every label is in double quotes**, and contains no `(`, `)`, `[`, `]`, `{`, `}`,
+  `"`, `<`, `>` or `&` — use words instead. The only markup allowed is `<br/>`
+  inside a quoted label. A datastore uses the cylinder form `C2[("Database")]`.
+- Edge labels are quoted too: `-->|"POST api revalidate"|`. Unauthenticated entry
+  points use the thick arrow `==>`, everything else `-->`, and a flow into an
+  asset uses `-.->`.
+- Trust boundaries are `subgraph TB_x["Title"]` blocks — one level only, never
+  nested. Put the adversaries in an "Untrusted" boundary, the components inside
+  their boundary, and third parties in their own.
+- Nodes: adversaries (from the interview, or `anonymous_attacker` if none were
+  chosen), the components, the datastores, the externals, and the assets that
+  have a threat path. At most 25 nodes — fold the rest into one node such as
+  `"7 more entry points"` and say so in the Entry points table.
+- Add finding ids to a component's label: `"Next.js frontend<br/>O-001 O-004"`.
+- Colour with `classDef` (adversary red-tinted, component blue-tinted, datastore
+  grey, external orange-tinted, asset green-tinted), applied with `:::name`.
+
+```mermaid
+flowchart LR
+    classDef adv fill:#fde2e2,stroke:#c0392b,color:#1a1a1a
+    classDef comp fill:#eef6ff,stroke:#5b8def,color:#1a1a1a
+    classDef store fill:#f5f5f5,stroke:#888,color:#1a1a1a
+    classDef ext fill:#fff4e6,stroke:#e0883a,color:#1a1a1a
+    classDef asset fill:#e8f5e9,stroke:#5a9a5a,color:#1a1a1a
+    subgraph TB_untrusted["Untrusted"]
+        ADV1["Anonymous outsider"]:::adv
+    end
+    subgraph TB_app["Application boundary"]
+        C1["Web app<br/>O-001 O-004"]:::comp
+        C2[("Database")]:::store
+    end
+    subgraph TB_ext["Third parties"]
+        X1["CMS API"]:::ext
+    end
+    ADV1 ==>|"POST api revalidate - no auth"| C1
+    C1 -->|"CMS content"| X1
+    C1 --> C2
+    C2 -.-> A1["Asset: user records"]:::asset
+```
+
+(The sample above is illustrative — draw the real model, not this one.)
 
 ## Report Modes
 
@@ -308,8 +441,8 @@ Key differences from the other modes:
 - **Phase 1/2/3/4/4b/5 outputs are not read** unless a prior full scan
   happens to have left them in `.security-review/` — do not reference them;
   this report is self-contained from `pr-findings.json`/`pr-validated.json`
-  (plus `threat-model.json` when `--local` was used — see below).
-- **`--local` calibration still applies, Axis 1 only** — Axis 2
+  (plus `threat-model.json` when `--threat-model <path>` loaded a model — see below).
+- **Threat-model calibration still applies, Axis 1 only** — Axis 2
   (`auth_required_to_reach`) is never eligible in this mode since
   `deployment-verification.json` never exists here (`--verify-deployment`
   has no effect in `--pr` mode). Severity shown is `contextual_severity`
@@ -778,8 +911,8 @@ _Vendor risk assessment · repo-security-review skill (vendor mode). Static + ru
 Produced instead of the default/vendor structure when `--pr` is set.
 Read `pr-findings.json` and `pr-validated.json` (substituted filenames per
 `phase5-validate-and-poc.md`'s "PR Review Mode substitution" note), plus
-`threat-model.json` if it exists (present only if `--local` was used — same
-file, same shape as full-scan mode). Do not read or reference
+`threat-model.json` if it exists (present only if `--threat-model <path>` loaded a
+model — same file, same shape as full-scan mode). Do not read or reference
 `phase1-secrets.json` / `phase2-architecture.json` / `phase3-cves.json` /
 `phase4-owasp.json` / `phase5-validated.json` / `deployment-verification.json`
 — the first five belong to the full-scan pipeline and are not produced by

@@ -82,8 +82,8 @@ reasoning/conversation, not avoiding their JSON). You receive:
 > verdict and Axis 2 (`auth_required_to_reach`) is never eligible either — a
 > PR review has no live deployment to check against. **Part 4 (Contextual
 > Severity Calibration) still runs**, scoped to Axis 1 only: when
-> `--local` was passed, `threat-model.json` exists exactly as in full-scan
-> mode, and Axis 1's `deployment_target` softener applies to any
+> `--threat-model <path>` loaded a model, `threat-model.json` exists exactly as in
+> full-scan mode, and Axis 1's `deployment_target` softener applies to any
 > `pr-validated.json` finding with `data_flow.entrypoint` set, same
 > eligibility rule as the full-scan pipeline. Write `contextual_severity`/
 > `severity_adjustment` per finding as usual.
@@ -1473,9 +1473,10 @@ blocks the other's axis from applying.
 TM={repo_path}/.security-review/threat-model.json
 DV={repo_path}/.security-review/deployment-verification.json
 
-# Axis 1 source: threat-model.json. Apply drift_overrides if Phase 2 wrote
-# any (currently only a theoretical future mechanism — see phase2-architecture.md
-# → Threat-Model Drift Detection; deployment_target has no active drift check today).
+# Axis 1 source: threat-model.json (the owner's Reach answer). Phase 2 writes
+# drift_overrides.deployment_target ("public") when it finds concrete evidence
+# contradicting a declared "local" — see phase2-architecture.md → Threat Model
+# Block and Drift Check. The override wins: the less-safe reading applies.
 DEPLOY="public"
 [ -f "$TM" ] && DEPLOY=$(jq -r '.drift_overrides.deployment_target // .deployment_target' "$TM")
 

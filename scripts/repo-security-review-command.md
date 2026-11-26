@@ -56,7 +56,7 @@ Options:
                         Standard tier, writes pr-report.md and pr-*.json.
                         Mutually exclusive with --repos and --vendor. No
                         effect from --poc, --runtime or --verify-deployment;
-                        --local applies (Axis 1 only). Needs the base
+                        --threat-model <path> applies (Axis 1 only). Needs the base
                         branch's history locally.
   --poc                 Opt-in: persist the constructed exploit for each
                         finding Phase 5 confirms as a durable script under
@@ -93,21 +93,25 @@ Options:
                         greps, or checks-run detail (renamed from --debug,
                         which used to include that). Paste it back for cost
                         analysis.
-  --local               Opt-in: assert this is a local-only tool, not a
-                        publicly reachable service. Softens severity by -2
-                        tiers. Omit for the pessimistic default
-                        (deployment_target: public). Writes
-                        <repo>/.security-review/threat-model.json with
-                        deployment_target and the hardcoded data_sensitivity
-                        (always "pii", not user-facing). Replaced the old
-                        --context key=value mechanism (which had shrunk to
-                        this one enum-valued key, one of whose two values
-                        was already the no-op default) and
-                        auth_required_to_reach, which is not settable here
-                        or anywhere via a declared claim — it's derived from
-                        an actual live check, see --verify-deployment.
-                        README is always read by Phase 2a for context,
-                        regardless of --local.
+  --threat-model [path] Opt-in threat-modeling interview. Asks four questions
+                        (who can reach the system, which adversaries matter,
+                        what it trusts, what to protect), writes
+                        <repo>/.security-review/threat-model.json with your
+                        answers, and has Phase 6 write threat-model.md: system
+                        overview, a Mermaid diagram of components, entry
+                        points and trust boundaries, adversaries, assets and
+                        threat paths linked to findings. The Reach answer also
+                        calibrates severity: "only this machine" softens by -2
+                        tiers for findings with a network entry point; any
+                        other answer keeps the pessimistic default (public),
+                        and a "local" claim is overridden if the code shows the
+                        service is published. Adversaries/Trust/Assets only
+                        steer the analysis, never lower severity.
+                        --threat-model <path> reloads a saved threat-model.md
+                        or .json without asking (required with --yes; the only
+                        form that applies in --pr mode). Replaces --local.
+                        data_sensitivity stays hardcoded to "pii". README is
+                        always read by Phase 2a, regardless of this flag.
   --verify-deployment <url>
                         Opt-in: send one live, passive HTTP GET to a real
                         deployment URL so Phase 5 derives auth_required_to_reach
@@ -238,8 +242,11 @@ Examples:
   # Skip arch (you already reviewed it) — deps + OWASP only
   /repo-security-review ~/repos/my-service --skip architecture,secrets
 
-  # Full review with severity calibrated to a local CLI tool
-  /repo-security-review ~/repos/my-service --local
+  # Threat-model interview: writes threat-model.md (with diagram), calibrates severity
+  /repo-security-review ~/repos/my-service --threat-model
+
+  # Reuse a saved threat model without prompts
+  /repo-security-review ~/repos/my-service --threat-model docs/threat-model.md --yes
 
   # Full review, verifying the live deployment is actually auth-gated
   /repo-security-review ~/repos/my-service --verify-deployment https://my-service.example.com
@@ -288,20 +295,17 @@ Parse `$ARGUMENTS` for:
   have named subphases). No file-read tables, coverage, greps, or
   checks-run detail — renamed from `--debug`, which used to include that.
   See SKILL.md → Cost Report for the format.
-- `--local` → opt-in boolean: asserts this is a local-only tool, not a
-  publicly reachable service. Softens severity by -2 tiers
-  (`deployment_target: "local"` in `threat-model.json`). Omit for the
-  pessimistic default (`"public"`). `data_sensitivity` is always hardcoded to
-  `"pii"`, not user-facing. Replaced `--context`'s `key=value` mechanism —
-  with only one real axis left (and one of its two values already the no-op
-  default), the comma/key=value parser and its per-key rejection branches
-  were pure overhead. `auth_required_to_reach` was never a candidate to move
-  here either way — it's not a declared claim at all, it's derived from an
-  actual live check; see `--verify-deployment`.
-  README.md is always read by Phase 2a for context, regardless of `--local`.
-  When set, the orchestrator writes `threat-model.json` to the working
-  directory. When unset, the skill behaves exactly as before — no
-  calibration logic runs anywhere.
+- `--threat-model [path]` → opt-in: without a path, the orchestrator interviews
+  the owner once (AskUserQuestion: Reach, Adversaries, Trust, Assets), writes
+  `threat-model.json` to the working directory, and Phase 6 writes
+  `threat-model.md` with a Mermaid diagram. Only Reach calibrates severity
+  (`deployment_target: "local"` iff the sole answer is "only this machine";
+  anything else is `"public"`); Phase 2 overrides a `local` claim to `public`
+  when it finds concrete evidence the service is published. With a path, loads
+  a saved model instead of asking. `--yes` requires the path form; `--pr`
+  accepts only the path form. Replaces `--local`. `data_sensitivity` is
+  hardcoded to `"pii"`. README.md is always read by Phase 2a, regardless of
+  this flag. When unset, the skill behaves exactly as before.
 - `--verify-deployment <url>` → opt-in: Phase 5 (Step 0.4) sends one live,
   passive HTTP GET to `<url>`, gated behind an explicit confirmation prompt
   (auto-confirmed by `--yes`, same as the Docker runtime gate). Classifies
